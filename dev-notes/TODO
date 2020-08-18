@@ -1,0 +1,138 @@
+Langjam To-do List
+------------------
+
+Day 1. Lexer and Sources
+  ✓ Comments: ignore characters up to and including newline.
+  ✓ Delimiter Tokens (parens, brackets, etc)
+  ✓ Whitespace: throw away whitespace chars other than newline, which
+    is a token.
+  ✓ Integers: any number of decimal digits, terminated by a non-digit
+    character.
+  ✓ Symbols: any number of symbols, letters, or numbers.
+    - Must start with a symbol or letter.
+    - Cannot start with an underscore.
+  ✓ Prefix operators: +, -.
+    - Must be preceded by a space.
+    - Must be succeeded by a term with no space.
+  ✓ Dot: .
+    - Multiple consecutive dots (with no space) form a symbol.
+    - Otherwise, lexed as a unique dot token.
+  ✓ Colon: :
+    - When used as a prefix operator (preceded by space, succeeded
+      by no space) produces a quote token.
+    - Otherwise, lexed as a symbol. A symbol of only one colon is
+      a unique colon token (used for either blocks or infix typing).
+
+Examples:
+
+# a comment
+( ) { } [ ] ; |     # delimiters
+1 24 0591           # integers
+abc Abc123 ++ =!=   # symbols
++12 -(1 + 2)        # prefix operators
+a . b  ...          # dot (first is dot token, second is symbol)
+:quoted :: n : int  # various colon usage
+
+Day 2. Parser and Error Handling
+  ✓ Line numbers: extend tokens with line and column information.
+  ✓ Error reporting: report errors with varargs at line and column.
+  ✓ Terminals
+    - Symbols
+    - Integers
+  ✓ Simple, parentheses-enclosed lists.
+  ✓ Lines: lines of terms at the top level are lists.
+  - Semicolons: group terms within lists into sublists.
+  ✓ Indentation: continuations and blocks.
+    - Indenting after a newline: continuation of the previous list.
+    - Indenting after a colon and newline: treat each indented line
+      as a list, add them to previous list.
+  ✓ Unary ops: plus, minus, quote.
+    - +x should generate (+ 0 x)
+    - -x should generate (- 0 x)
+    - :x should generate (quote x)
+  ✓ Container expressions: lists and sets.
+    - [1 2 3] should generate (make-list 1 2 3)
+    - {1 2 3} should generate (make-set 1 2 3)
+  ✓ Infix ops: dot and colon.
+    - x . y should generate (x y)
+    - x : y should generate (set-type x y)
+  ✓ Splicing: pipe.
+    - |+ 1 2| should generate (splice (+ 1 2))
+
+Day 3? Environments
+  ✓ Create environment type: must be able to store information on
+    definitions in a scope.
+    - Start just storing the name of each definition, and some basic
+      parameters such as kind (is it a variable? procedure? macro?)
+      and additional information (number of arguments?).
+    - We can expand this later with types, type variables, and values.
+  ✓ Implement definition lookup, lexically-scoped.
+  - Create a root environment: stores built-in functions and variables.
+  - Create a top-level environment: stores global definitions for 
+    a file.
+  - Visit each macro and procedure body and create local environments.
+    - Recursively visit definitions within each local environment.
+
+Day 4? Types
+  ✓ Scalar Types: integer and symbol.
+  - Type type: a type for types.
+  ✓ Void type: singleton type representing the absence of a value.
+  - Any type: wildcard type that all types can convert to.
+  ✓ Symbol values: assign integer values to each symbol.
+    - This lets symbols be represented by simple words at runtime.
+  ✓ List Types: type for list parameterized by element.
+  ✓ Sum Types: type for a value of one of several member types.
+    - Implicitly convertible to from any of its member types.
+  - Product Types: type for a value with multiple members.
+    - Used for multiple arguments?
+  - Function Types: type for procedure.
+    - Argument type and return type.
+  ✓ Type kinds: overall categories of type.
+    - For example, how do we identify if a given type is a function
+      type? A product type?
+  ✓ Type deduplication: avoid instantiating types multiple times.
+    - Implement hashing and equality for types.
+    - Implement a way of generating types of different kinds.
+
+Day 5? Values
+  ✓ Value type: represents any Basil value within the compiler.
+    - Has a Basil type.
+    - Stores a value based on the kind of said type.
+    - Integers and symbols can be represented plainly within the union.
+    - All compound types are GC'd with reference counting.
+  - Arithmetic operations: common math ops with dynamic type checking.
+    - Add, subtract, etc.
+  - Comparison operations.
+    - Equality is defined for integers and symbols trivially. Lists
+      and functions are equal if their addresses are equal. Sums are
+      equal if their current types are equal and their values are
+      equal. Product types are equal if all members are equal.
+    - Relational operators are only defined for integers.
+  ✓ List operations: get head and tail, create cons cells.
+  - Function call: take function value and arguments, produce value.
+  ✓ Print to stream: format any value and print it.
+
+Day 6? Evaluation I - Special Forms.
+  - Quote: return data representation of quoted code.
+  - Splice: turn value into code, add it to enclosing list.
+    - Will we need some kind of parent pointer for this?
+  - Variable definitions: bind values to names in the local
+    environment.
+  - Procedure definitions: create and bind function values to names in
+    the local environment.
+    - def <name>(args...) <body>...
+    - Will evaluate body terms from first to last when given 
+      arguments.
+  - Macro definitions: same as ordinary variables and procedures, but
+    should be visited and handled first.
+  - Implement macro expansion.
+
+Day 7? Evaluation II - Builtins.
+  - Arithmetic ops.
+  - Comparison ops.
+  - List ops.
+  - Function calls. 
+  - Anonymous functions (lambda).
+  - Display function: prints one or more values.
+
+By now, we might have a pretty workable dynamically-typed language.

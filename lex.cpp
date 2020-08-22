@@ -101,10 +101,11 @@ namespace basil {
     }
     else if (isdigit(ch)) {
       while (isdigit(view.peek())) view.read();
-      if (isalpha(view.peek())) 
-        return Token(T_COEFF, { u32(view.pos() - start), start }, line, start_col); 
+      if (issymbolstart(view.peek()) || view.peek() == '(' || view.peek() == '['
+          || view.peek() == '{') 
+        return Token(T_COEFF, { u32(view.pos() - start), start }, line, start_col);
       else if (isdelimiter(view.peek()) || isspace(view.peek()))
-        return Token(T_INT, { u32(view.pos() - start), start }, line, start_col);
+        return Token(T_INT, { u32(view.pos() - start), start }, line, start_col); 
       else
         err({ line, u16(view.col()) }, "Unexpected character in integer '", view.peek(), "'.");
     }
@@ -128,6 +129,10 @@ namespace basil {
     const Token& t = peek();
     i ++;
     return t;
+  }
+
+  void TokenView::rewind() {
+    if (i) i --;
   }
 
   TokenView::operator bool() const {

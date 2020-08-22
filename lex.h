@@ -35,6 +35,7 @@ namespace basil {
 
     const Token& peek();
     const Token& read();
+    void rewind();
     operator bool() const;
     bool repl() const;
     void expand();

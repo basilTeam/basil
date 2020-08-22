@@ -17,6 +17,8 @@ namespace basil {
   class SumValue;
   class ProductValue;
   class FunctionValue;
+  class AliasValue;
+  class MacroValue;
 
   class Value {
     const Type* _type;
@@ -24,6 +26,7 @@ namespace basil {
       i64 i;
       u64 u;
       const Type* t;
+      bool b;
       RC* rc;
     } _data;
     SourceLocation _loc;
@@ -37,6 +40,8 @@ namespace basil {
     Value(SumValue* s, const Type* type);
     Value(ProductValue* p);
     Value(FunctionValue* f);
+    Value(AliasValue* f);
+    Value(MacroValue* f);
     ~Value();
     Value(const Value& other);
     Value& operator=(const Value& other);
@@ -57,6 +62,10 @@ namespace basil {
     const Type* get_type() const;
     const Type*& get_type();
 
+    bool is_bool() const;
+    bool get_bool() const;
+    bool& get_bool();
+
     bool is_list() const;
     const ListValue& get_list() const;
     ListValue& get_list();
@@ -73,11 +82,20 @@ namespace basil {
     const FunctionValue& get_function() const;
     FunctionValue& get_function(); 
 
+    bool is_alias() const;
+    const AliasValue& get_alias() const;
+    AliasValue& get_alias(); 
+
+    bool is_macro() const;
+    const MacroValue& get_macro() const;
+    MacroValue& get_macro(); 
+
     const Type* type() const;
     void format(stream& io) const;
     u64 hash() const;
     bool operator==(const Value& other) const;
     bool operator!=(const Value& other) const;
+    Value clone() const;
 
     void set_location(SourceLocation loc);
     SourceLocation loc() const;
@@ -117,31 +135,76 @@ namespace basil {
     Value* end();
   };
 
-  using Builtin = Value (*)(ref<Env>, const Value& params);
+  using BuiltinFn = Value (*)(ref<Env>, const Value& params);
 
   class FunctionValue : public RC {
     Value _code;
-    Builtin _builtin;
+    BuiltinFn _builtin;
     ref<Env> _env;
+    u64 _builtin_arity;
     vector<u64> _args;
   public:
     FunctionValue(ref<Env> env, const vector<u64>& args, 
       const Value& code);
-    FunctionValue(ref<Env> env, Builtin builtin);
+    FunctionValue(ref<Env> env, BuiltinFn builtin, u64 arity);
 
     const vector<u64>& args() const;
     const Value& body() const;
     bool is_builtin() const;
-    Builtin get_builtin() const;
+    u64 arity() const;
+    BuiltinFn get_builtin() const;
     ref<Env> get_env();
     const ref<Env> get_env() const;
   };  
+
+  class AliasValue : public RC {
+    Value _value;
+  public:
+    AliasValue(const Value& value);
+  
+    Value& value();
+    const Value& value() const;
+  };
+
+  using BuiltinMacro = Value (*)(ref<Env>, const Value& params);
+
+  class MacroValue : public RC {
+    Value _code;
+    BuiltinMacro _builtin;
+    ref<Env> _env;
+    u64 _builtin_arity;
+    vector<u64> _args;
+  public:
+    MacroValue(ref<Env> env, const vector<u64>& args, 
+      const Value& code);
+    MacroValue(ref<Env> env, BuiltinFn builtin, u64 arity);
+
+    const vector<u64>& args() const;
+    const Value& body() const;
+    bool is_builtin() const;
+    u64 arity() const;
+    BuiltinFn get_builtin() const;
+    ref<Env> get_env();
+    const ref<Env> get_env() const;
+  };
 
   Value add(const Value& lhs, const Value& rhs);
   Value sub(const Value& lhs, const Value& rhs);
   Value mul(const Value& lhs, const Value& rhs);
   Value div(const Value& lhs, const Value& rhs);
   Value rem(const Value& lhs, const Value& rhs);
+
+  Value logical_and(const Value& lhs, const Value& rhs);
+  Value logical_or(const Value& lhs, const Value& rhs);
+  Value logical_xor(const Value& lhs, const Value& rhs);
+  Value logical_not(const Value& v);
+
+  Value equal(const Value& lhs, const Value& rhs);
+  Value inequal(const Value& lhs, const Value& rhs);
+  Value less(const Value& lhs, const Value& rhs);
+  Value greater(const Value& lhs, const Value& rhs);
+  Value less_equal(const Value& lhs, const Value& rhs);
+  Value greater_equal(const Value& lhs, const Value& rhs);
 
   Value head(const Value& v);
   Value tail(const Value& v);

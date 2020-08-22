@@ -18,20 +18,17 @@ template<typename T>
 class ref {
   struct BoxedValue {
     u64 count;
-    T* data;
+    T data;
   }* _value;
 
   ref(NullType): _value(nullptr) {}
 public:
   static constexpr ref null();
   template<typename... Args>
-  ref(Args... args): _value(new BoxedValue{0, new T(args...)}) {}
+  ref(Args... args): _value(new BoxedValue{1, T(args...)}) {}
   
   ~ref() {
-    if (_value && !--_value->count) {
-      delete _value->data;
-      delete _value;
-    }
+    if (_value && !--_value->count) delete _value;
   }
   
   ref(const ref& other): _value(other._value) {
@@ -40,27 +37,24 @@ public:
 
   ref& operator=(const ref& other) {
     if (other._value) other._value->count ++;
-    if (_value && !--_value->count) {
-      delete _value->data;
-      delete _value;
-    }
+    if (_value && !--_value->count) delete _value;
     _value = other._value;
   }
 
   const T& operator*() const {
-    return *_value->data;
+    return _value->data;
   }
 
   T& operator*() {
-    return *_value->data;
+    return _value->data;
   }
 
   const T* operator->() const {
-    return _value->data;
+    return &_value->data;
   }
 
   T* operator->() {
-    return _value->data;
+    return &_value->data;
   }
 
   operator bool() const {

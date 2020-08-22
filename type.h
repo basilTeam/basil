@@ -15,7 +15,9 @@ namespace basil {
     KIND_LIST = GC_KIND_FLAG | 0, 
     KIND_SUM = GC_KIND_FLAG | 1,
     KIND_PRODUCT = GC_KIND_FLAG | 2,
-    KIND_FUNCTION = GC_KIND_FLAG | 3
+    KIND_FUNCTION = GC_KIND_FLAG | 3,
+    KIND_ALIAS = GC_KIND_FLAG | 4,
+    KIND_MACRO = GC_KIND_FLAG | 5
   };
 
   class Type {
@@ -87,6 +89,27 @@ namespace basil {
     void format(stream& io) const override;
   };
 
+  class AliasType : public Type {
+  public:
+    AliasType();
+    
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
+    void format(stream& io) const override;
+  };
+
+  class MacroType : public Type {
+    u32 _arity;
+  public:
+    MacroType(u32 arity);
+  
+    u32 arity() const;
+
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
+    void format(stream& io) const override;
+  };
+
   const Type* find_existing_type(const Type* t);
   const Type* create_type(const Type* t);
 
@@ -99,7 +122,8 @@ namespace basil {
     return create_type(new T(t));
   }
 
-  extern const Type *INT, *SYMBOL, *VOID, *ERROR, *TYPE;
+  extern const Type *INT, *SYMBOL, *VOID, *ERROR, *TYPE, 
+                    *ALIAS, *BOOL;
 }
 
 template<>

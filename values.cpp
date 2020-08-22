@@ -29,7 +29,7 @@ namespace basil {
 
   Value::Value(i64 i, const Type* type):
     _type(type) {
-    _data.i = i;
+    is_bool() ? _data.b = i : _data.i = i;
   }
 
   Value::Value(const string& s, const Type* type):
@@ -62,6 +62,16 @@ namespace basil {
   Value::Value(FunctionValue* f):
     _type(find<FunctionType>(INT, INT)) {
     _data.rc = f;
+  }
+
+  Value::Value(AliasValue* a):
+    _type(ALIAS) {
+    _data.rc = a;
+  }
+
+  Value::Value(MacroValue* m):
+    _type(find<MacroType>(m->arity())) {
+    _data.rc = m;
   }
 
   Value::~Value() {
@@ -127,6 +137,18 @@ namespace basil {
     return _data.t;
   }
 
+  bool Value::is_bool() const {
+    return _type == BOOL;
+  }
+
+  bool Value::get_bool() const {
+    return _data.b;
+  }
+
+  bool& Value::get_bool() {
+    return _data.b;
+  }
+
   bool Value::is_list() const {
     return _type->kind() == KIND_LIST;
   }
@@ -175,6 +197,30 @@ namespace basil {
     return *(FunctionValue*)_data.rc;
   } 
 
+  bool Value::is_alias() const {
+    return _type->kind() == KIND_ALIAS;
+  }
+
+  const AliasValue& Value::get_alias() const {
+    return *(const AliasValue*)_data.rc;
+  }
+
+  AliasValue& Value::get_alias() {
+    return *(AliasValue*)_data.rc;
+  } 
+
+  bool Value::is_macro() const {
+    return _type->kind() == KIND_MACRO;
+  }
+
+  const MacroValue& Value::get_macro() const {
+    return *(const MacroValue*)_data.rc;
+  }
+
+  MacroValue& Value::get_macro() {
+    return *(MacroValue*)_data.rc;
+  } 
+
   const Type* Value::type() const {
     return _type;
   }
@@ -185,6 +231,7 @@ namespace basil {
     else if (is_int()) write(io, get_int());
     else if (is_symbol()) write(io, symbol_for(get_symbol()));
     else if (is_type()) write(io, get_type());
+    else if (is_bool()) write(io, get_bool());
     else if (is_list()) {
       bool first = true;
       write(io, "(");
@@ -200,17 +247,15 @@ namespace basil {
     else if (is_product()) {
       bool first = true;
       write(io, "(");
-      const Value* ptr = this;
-      while (ptr->is_list()) {
-        write(io, first ? "" : ", ", ptr->get_list().head());
-        ptr = &ptr->get_list().tail();
+      for (const Value& v : get_product()) {
+        write(io, first ? "" : ", ", v);
         first = false;
       }
       write(io, ")");
     }
-    else if (is_function()) {
-      write(io, "<procedure>");
-    }
+    else if (is_function()) write(io, "<procedure>");
+    else if (is_alias()) write(io, "<alias>");
+    else if (is_macro()) write(io, "<macro>");
   }
 
   u64 Value::hash() const {
@@ -219,12 +264,46 @@ namespace basil {
     else if (is_int()) return ::hash(get_int()) ^ 6909969109598810741ul;
     else if (is_symbol()) return ::hash(get_symbol()) ^ 1899430078708870091ul;
     else if (is_type()) return get_type()->hash();
+    else if (is_bool()) 
+      return get_bool() ? 9269586835432337327ul
+        : 18442604092978916717ul;
     else if (is_list()) {
       u64 h = 9572917161082946201ul;
       Value ptr = *this;
       while (ptr.is_list()) {
         h ^= ptr.get_list().head().hash();
         ptr = ptr.get_list().tail();
+      }
+      return h;
+    }
+    else if (is_sum()) {
+      return get_sum().value().hash() ^ 7458465441398727979ul;
+    }
+    else if (is_product()) {
+      u64 h = 16629385277682082909ul;
+      for (const Value& v : get_product()) h ^= v.hash();
+      return h;
+    }
+    else if (is_function()) {
+      u64 h = 10916307465547805281ul;
+      if (get_function().is_builtin())
+        h ^= ::hash(get_function().get_builtin());
+      else {
+        h ^= get_function().body().hash();
+        for (u64 arg : get_function().args())
+          h ^= ::hash(arg);
+      }
+      return h;
+    }
+    else if (is_alias()) return 6860110315984869641ul;
+    else if (is_macro()) {
+      u64 h = 16414641732770006573ul;
+      if (get_macro().is_builtin())
+        h ^= ::hash(get_macro().get_builtin());
+      else {
+        h ^= get_macro().body().hash();
+        for (u64 arg : get_macro().args())
+          h ^= ::hash(arg);
       }
       return h;
     }
@@ -236,6 +315,7 @@ namespace basil {
     else if (is_int()) return get_int() == other.get_int();
     else if (is_symbol()) return get_symbol() == other.get_symbol();
     else if (is_type()) return get_type() == other.get_type();
+    else if (is_bool()) return get_bool() == other.get_bool();
     else if (is_list()) {
       const ListValue* l = &get_list(), *o = &other.get_list();
       do {
@@ -244,7 +324,71 @@ namespace basil {
       } while (l->tail().is_list() && o->tail().is_list());
       return l->head() == o->head() && l->tail().is_void() && o->tail().is_void();
     }
+    else if (is_function()) {
+      if (get_function().is_builtin())
+        return get_function().get_builtin() == 
+          other.get_function().get_builtin();
+      else {
+        if (other.get_function().arity() != get_function().arity())
+          return false;
+        for (u32 i = 0; i < get_function().arity(); i ++) {
+          if (other.get_function().args()[i] !=
+              get_function().args()[i]) return false;
+        }
+        return get_function().body() == other.get_function().body();
+      }
+    }
+    else if (is_macro()) {
+      if (get_macro().is_builtin())
+        return get_macro().get_builtin() == 
+          other.get_macro().get_builtin();
+      else {
+        if (other.get_macro().arity() != get_macro().arity())
+          return false;
+        for (u32 i = 0; i < get_macro().arity(); i ++) {
+          if (other.get_macro().args()[i] !=
+              get_macro().args()[i]) return false;
+        }
+        return get_macro().body() == other.get_macro().body();
+      }
+    }
     return type() == other.type();
+  }
+
+  Value Value::clone() const {
+    if (is_list())
+      return Value(new ListValue(get_list().head().clone(),
+        get_list().tail().clone()));
+    else if (is_sum())
+      return Value(new SumValue(get_sum().value()), type());
+    else if (is_product()) {
+      vector<Value> values;
+      for (const Value& v : get_product()) values.push(v);
+      return Value(new ProductValue(values));
+    }
+    else if (is_function()) {
+      if (get_function().is_builtin()) {
+        return Value(new FunctionValue(get_function().get_env()->clone(),
+          get_function().get_builtin(), get_function().arity()));
+      }
+      else {
+        return Value(new FunctionValue(get_function().get_env()->clone(),
+          get_function().args(), get_function().body().clone()));
+      }
+    }
+    else if (is_alias())
+      return Value(new AliasValue(get_alias().value()));
+    else if (is_macro()) {
+      if (get_macro().is_builtin()) {
+        return Value(new MacroValue(get_macro().get_env()->clone(),
+          get_macro().get_builtin(), get_macro().arity()));
+      }
+      else {
+        return Value(new MacroValue(get_macro().get_env()->clone(),
+          get_macro().args(), get_macro().body().clone()));
+      }
+    }
+    return *this;
   }
 
   bool Value::operator!=(const Value& other) const {
@@ -324,8 +468,9 @@ namespace basil {
     const Value& code):
     _code(code), _builtin(nullptr), _env(env), _args(args) {}
 
-  FunctionValue::FunctionValue(ref<Env> env, Builtin builtin):
-    _builtin(builtin), _env(env) {}
+  FunctionValue::FunctionValue(ref<Env> env, BuiltinFn builtin, 
+    u64 arity):
+    _builtin(builtin), _env(env), _builtin_arity(arity) {}
 
   const vector<u64>& FunctionValue::args() const {
     return _args;
@@ -335,7 +480,7 @@ namespace basil {
     return _builtin;
   }
 
-  Builtin FunctionValue::get_builtin() const {
+  BuiltinFn FunctionValue::get_builtin() const {
     return _builtin;
   }
 
@@ -347,7 +492,58 @@ namespace basil {
     return _env;
   }
 
+  u64 FunctionValue::arity() const {
+    return _builtin ? _builtin_arity : _args.size();
+  }
+
   const Value& FunctionValue::body() const {
+    return _code;
+  }
+
+  AliasValue::AliasValue(const Value& value):
+    _value(value) {}
+
+  Value& AliasValue::value() {
+    return _value;
+  }
+
+  const Value& AliasValue::value() const {
+    return _value;
+  }
+
+  MacroValue::MacroValue(ref<Env> env, const vector<u64>& args,
+    const Value& code):
+    _code(code), _builtin(nullptr), _env(env), _args(args) {}
+
+  MacroValue::MacroValue(ref<Env> env, BuiltinMacro builtin, 
+    u64 arity):
+    _builtin(builtin), _env(env), _builtin_arity(arity) {}
+
+  const vector<u64>& MacroValue::args() const {
+    return _args;
+  }
+
+  bool MacroValue::is_builtin() const {
+    return _builtin;
+  }
+
+  BuiltinMacro MacroValue::get_builtin() const {
+    return _builtin;
+  }
+
+  ref<Env> MacroValue::get_env() {
+    return _env;
+  }
+
+  const ref<Env> MacroValue::get_env() const {
+    return _env;
+  }
+
+  u64 MacroValue::arity() const {
+    return _builtin ? _builtin_arity : _args.size();
+  }
+
+  const Value& MacroValue::body() const {
     return _code;
   }
 
@@ -385,6 +581,86 @@ namespace basil {
 
   Value rem(const Value& lhs, const Value& rhs) {
     return binary_arithmetic(lhs, rhs, [](i64 a, i64 b) -> i64 { return a % b; });
+  }
+
+  Value binary_logic(const Value& lhs, const Value& rhs, bool(*op)(bool, bool)) {
+    if (!lhs.is_bool() && !lhs.is_error()) {
+      err(lhs.loc(), "Expected boolean value in logical expression, found '",
+          lhs.type(), "'.");
+      return error();
+    }
+    if (!rhs.is_bool() && !lhs.is_error()) {
+      err(rhs.loc(), "Expected boolean value in logical expression, found '",
+          rhs.type(), "'.");
+      return error();
+    }
+    if (lhs.is_error() || rhs.is_error()) return error();
+
+    return Value(op(lhs.get_bool(), rhs.get_bool()), BOOL);
+  }
+
+  Value logical_and(const Value& lhs, const Value& rhs) {
+    return binary_logic(lhs, rhs, [](bool a, bool b) -> bool { return a && b; });
+  }
+  
+  Value logical_or(const Value& lhs, const Value& rhs) {
+    return binary_logic(lhs, rhs, [](bool a, bool b) -> bool { return a || b; });
+  }
+  
+  Value logical_xor(const Value& lhs, const Value& rhs) {
+    return binary_logic(lhs, rhs, [](bool a, bool b) -> bool { return a ^ b; });
+  }
+
+  Value logical_not(const Value& v) {
+    if (!v.is_bool() && !v.is_error()) {
+      err(v.loc(), "Expected boolean value in logical expression, found '",
+        v.type(), "'.");
+      return error();
+    }
+    if (v.is_error()) return error();
+
+    return Value(!v.get_bool(), BOOL);
+  }
+
+  Value equal(const Value& lhs, const Value& rhs) {
+    if (lhs.is_error() || rhs.is_error()) return error();
+    return Value(lhs == rhs, BOOL);
+  }
+  
+  Value inequal(const Value& lhs, const Value& rhs) {
+    return Value(!equal(lhs, rhs).get_bool(), BOOL);
+  }
+
+  Value binary_relation(const Value& lhs, const Value& rhs, bool(*op)(i64, i64)) {
+    if (!lhs.is_int() && !lhs.is_error()) {
+      err(lhs.loc(), "Expected integer value in relational expression, found '",
+          lhs.type(), "'.");
+      return error();
+    }
+    if (!rhs.is_int() && !lhs.is_error()) {
+      err(rhs.loc(), "Expected integer value in relational expression, found '",
+          rhs.type(), "'.");
+      return error();
+    }
+    if (lhs.is_error() || rhs.is_error()) return error();
+
+    return Value(op(lhs.get_int(), rhs.get_int()), BOOL);
+  }
+
+  Value less(const Value& lhs, const Value& rhs) {
+    return binary_relation(lhs, rhs, [](i64 a, i64 b) -> bool { return a < b; });
+  }
+
+  Value greater(const Value& lhs, const Value& rhs) {
+    return binary_relation(lhs, rhs, [](i64 a, i64 b) -> bool { return a > b; });
+  }
+
+  Value less_equal(const Value& lhs, const Value& rhs) {
+    return binary_relation(lhs, rhs, [](i64 a, i64 b) -> bool { return a <= b; });
+  }
+
+  Value greater_equal(const Value& lhs, const Value& rhs) {
+    return binary_relation(lhs, rhs, [](i64 a, i64 b) -> bool { return a >= b; });
   }
 
   Value head(const Value& v) {
@@ -431,7 +707,7 @@ namespace basil {
 
   Value list_of(const vector<Value>& elements) {
     Value l = empty();
-    for (i64 i = elements.size() - 1; i >= 0; i --) {
+    for (i64 i = i64(elements.size()) - 1; i >= 0; i --) {
       l = cons(elements[i], l);
     }
     return l;

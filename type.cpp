@@ -148,6 +148,41 @@ namespace basil {
     write(io, "(", _arg, " -> ", _ret, ")");
   }
 
+  AliasType::AliasType():
+    Type(9323462044786133851ul) {}
+
+  TypeKind AliasType::kind() const {
+    return KIND_ALIAS;
+  }
+
+  bool AliasType::operator==(const Type& other) const {
+    return other.kind() == kind();
+  }
+
+  void AliasType::format(stream& io) const {
+    write(io, "alias");
+  }
+
+  MacroType::MacroType(u32 arity):
+    Type(18254210403858406693ul ^ ::hash(arity)), _arity(arity) {}
+
+  u32 MacroType::arity() const {
+    return _arity;
+  }
+
+  TypeKind MacroType::kind() const {
+    return KIND_MACRO;
+  }
+
+  bool MacroType::operator==(const Type& other) const {
+    return other.kind() == kind() &&
+      ((const MacroType&)other).arity() == arity();
+  }
+
+  void MacroType::format(stream& io) const {
+    write(io, "macro(", _arity, ")");
+  }
+
   struct TypeBox {
     const Type* t;
 
@@ -173,7 +208,9 @@ namespace basil {
              *SYMBOL = find<SingletonType>("symbol"), 
              *VOID = find<SingletonType>("void"),
              *ERROR = find<SingletonType>("error"),
-             *TYPE = find<SingletonType>("type");
+             *TYPE = find<SingletonType>("type"),
+             *ALIAS = find<AliasType>(),
+             *BOOL = find<SingletonType>("bool");
 }
 
 template<>

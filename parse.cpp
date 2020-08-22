@@ -60,7 +60,7 @@ namespace basil {
   Value apply_op(TokenView& view, Value lhs, Value rhs, TokenType op) {
     switch (op) {
       case T_COLON: {
-        Value v = list_of(string("annotate"), lhs, rhs);
+        Value v = list_of(Value("annotate"), lhs, rhs);
         v.set_location(lhs.loc());
         return v;
       }
@@ -125,6 +125,12 @@ namespace basil {
         v.set_location(first);
         return v;
       }
+      case T_COEFF: {
+        i64 i = parse_int(view.read().value);
+        Value v = list_of(Value("*"), i, parse_primary(view, indent));
+        v.set_location(first);
+        return v;
+      }
       case T_LPAREN: {
         view.read();
         vector<Value> terms;
@@ -174,7 +180,8 @@ namespace basil {
       view.read(), v = parse_binary(view, v, T_DOT, indent);
     if (view.peek().type == T_COLON) {
       view.read();
-      if (view.peek().type == T_NEWLINE) {
+      // parse a labeled block
+      if (v.is_symbol() && view.peek().type == T_NEWLINE) {
         view.read();
         vector<Value> terms;
         terms.push(v); // label;
@@ -182,6 +189,10 @@ namespace basil {
         if (view.peek().column > indent)
           parse_block(view, terms, indent, view.peek().column);
         return list_of(terms);
+      }
+      else if (view.peek().type == T_NEWLINE) {
+        view.rewind(); // unget :
+        return v; // unlabeled block, handled in parse_line
       }
       else v = parse_binary(view, v, T_COLON, indent);
     }
@@ -192,12 +203,26 @@ namespace basil {
     SourceLocation first = view.peek();
     vector<Value> terms;
     while (view.peek() && view.peek().type != T_NEWLINE) {
+      if (view.peek().type == T_COLON) {
+        view.read();
+        if (view.peek().type == T_NEWLINE) {
+          view.read();
+          if (!view.peek() && out_of_input(view)) return error();
+          if (view.peek().column > indent)
+            parse_block(view, terms, indent, view.peek().column);
+          return list_of(terms);
+        }
+        else {
+          err(view.peek(), "Unexpected colon in input.");
+          return error();
+        }
+      }
       Value v = parse(view, indent);
       if (v.is_error()) return error();
       else terms.push(v);
     }
     if (consume_line) view.read();
-    Value v = terms.size() == 1 ? terms[0] : list_of(terms);
+    Value v = list_of(terms);
     v.set_location(first);
     return v;
   }

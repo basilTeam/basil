@@ -32,6 +32,14 @@ typedef int64_t i64;
 #define BOLDMAGENTA "\033[1m\033[35m"      /* Bold Magenta */
 #define BOLDCYAN    "\033[1m\033[36m"      /* Bold Cyan */
 #define BOLDWHITE   "\033[1m\033[37m"      /* Bold White */
+#define ITALICBLACK 	"\033[3m\033[30m"      /* Italic Black */
+#define ITALICRED   	"\033[3m\033[31m"      /* Italic Red */
+#define ITALICGREEN 	"\033[3m\033[32m"      /* Italic Green */
+#define ITALICYELLOW	"\033[3m\033[33m"      /* Italic Yellow */
+#define ITALICBLUE  	"\033[3m\033[34m"      /* Italic Blue */
+#define ITALICMAGENT	"\033[3m\033[35m"      /* Italic Magenta */
+#define ITALICCYAN  	"\033[3m\033[36m"      /* Italic Cyan */
+#define ITALICWHITE 	"\033[3m\033[37m"      /* Italic White */
 
 // hash.h
 
@@ -71,23 +79,5 @@ class ustring;
 
 template<typename T>
 class vector;
-
-namespace basil {
-  struct Definition;
-  class Env;
-
-  class Value;
-  class ListValue;
-  class SumValue;
-  class ProductValue;
-  class FunctionValue;
-
-  class Type;
-  class SingletonType;
-  class ListType;
-  class SumType;
-  class ProductType;
-  class FunctionType;
-}
 
 #endif

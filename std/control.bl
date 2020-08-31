@@ -1,0 +1,7 @@
+macro (for name :in list expr)
+	def l |list|
+	def |name| l head
+	while l != []
+		|name| = l head
+		|expr|
+		l = l tail

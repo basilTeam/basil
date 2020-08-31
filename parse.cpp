@@ -1,6 +1,5 @@
 #include "parse.h"
 #include "errors.h"
-#include <cstdlib>
 
 namespace basil {
   i64 parse_int(const string& s) {
@@ -11,11 +10,39 @@ namespace basil {
     return i;
   }
 
-  Value flatten(Value term) {
-    return term.is_list() && head(term).is_list() && &term.get_list().head() == &term.get_list().tail() ? head(term) : term;
-  }
+	string parse_string(const string& s) {
+		string t;
+		const u8* sptr = s.raw();
+		sptr ++; // skip initial quote
+		while (*sptr && *sptr != '\"') {
+			if (*sptr == '\\') {
+				sptr ++;
+				switch (*sptr) {
+					case 'a': t += '\a'; break;
+					case 'b': t += '\b'; break;
+					case 'f': t += '\f'; break;
+					case 'n': t += '\n'; break;
+					case 'r': t += '\r'; break;
+					case 't': t += '\t'; break;
+					case 'v': t += '\v'; break;
+					case '0': t += '\0'; break;
+					case '"': t += '"'; break;
+					case '\'': t += '\''; break;
+					case '\\': t += '\\'; break;
+					case '?': t += '\?'; break;
+					case '\0': break;
+				}
+				sptr ++;
+			}
+			t += *(sptr ++);
+		}
+		sptr ++; // skip final quote
+		return t;
+	}
 
-  Value parse_primary(TokenView& view, u32 indent);
+  Value parse_primary(TokenView& view, u32 indent);	
+	void parse_line(TokenView& view, u32 indent, bool consume_line,
+		vector<Value>& terms);
 
   bool out_of_input(TokenView& view) { // returns true if out of input
     if (view.repl()) {
@@ -41,20 +68,22 @@ namespace basil {
   void parse_block(TokenView& view, vector<Value>& terms, 
     u32 prev_indent, u32 indent) {
     while (view.peek().column > prev_indent) {
-      terms.push(parse_line(view, indent, false));
-      if (view.peek().type == T_NEWLINE 
-        && view.peek().column > prev_indent) view.read();
-      if (!view.peek() && out_of_input(view)) return;
+			if (view.peek().type != T_NEWLINE)
+      	terms.push(parse_line(view, indent, false));
+      if (view.peek().type == T_NEWLINE) {
+				if (view.peek().column <= prev_indent && view.repl()) {
+					view.read();
+					return;
+				}
+				else view.read();
+			}
+      if (!view.peek() && (!view.repl() || out_of_input(view))) return;
     }
-  }
-
-  void parse_continuation(TokenView& view, vector<Value>& terms, 
-    u32 prev_indent, u32 indent) {
-    while (!view.peek() || view.peek().column > prev_indent) {
-      while (view.peek().type != T_NEWLINE)
-        terms.push(parse(view, indent));
-      if (!view.peek() && out_of_input(view)) return;
-    }
+		if (view.peek().type == T_QUOTE 
+			&& view.peek().column == prev_indent) { // continuation
+			u32 new_indent = view.peek().column;
+			parse_line(view, new_indent, true, terms);
+		}
   }
 
   Value apply_op(TokenView& view, Value lhs, Value rhs, TokenType op) {
@@ -107,6 +136,11 @@ namespace basil {
         v.set_location(first);
         return v;
       }
+			case T_STRING: {
+				Value v(parse_string(view.read().value), STRING);
+				v.set_location(first);
+				return v;
+			}
       case T_PLUS: {
         view.read();
         Value v = list_of(Value("+"), 0, parse_primary(view, indent));
@@ -161,9 +195,9 @@ namespace basil {
         view.read();
         vector<Value> terms;
         parse_enclosed(view, terms, T_PIPE, indent);
-        Value v = terms.size() == 1 ? terms[0] : list_of(terms);
+        Value v = cons(Value("splice"), list_of(terms));
         v.set_location(first);
-        return list_of(Value("splice"), v);
+        return v;
       }
       default:
         err(view.peek(), "Unexpected token '", 
@@ -199,29 +233,38 @@ namespace basil {
     return v;
   }
 
-  Value parse_line(TokenView& view, u32 indent, bool consume_line) {
-    SourceLocation first = view.peek();
-    vector<Value> terms;
-    while (view.peek() && view.peek().type != T_NEWLINE) {
-      if (view.peek().type == T_COLON) {
+	void parse_line(TokenView& view, u32 indent, bool consume_line,
+		vector<Value>& terms) {
+		SourceLocation first = view.peek();
+    while (view.peek()) {
+      if (view.peek().type == T_NEWLINE) {
         view.read();
-        if (view.peek().type == T_NEWLINE) {
-          view.read();
-          if (!view.peek() && out_of_input(view)) return error();
-          if (view.peek().column > indent)
-            parse_block(view, terms, indent, view.peek().column);
-          return list_of(terms);
-        }
-        else {
-          err(view.peek(), "Unexpected colon in input.");
-          return error();
-        }
+        if (!view.peek() && (!view.repl() || out_of_input(view))) return;
+        if (view.peek().column > indent) 
+          parse_block(view, terms, indent, view.peek().column);
+				else if (view.peek().type == T_QUOTE 
+					&& view.peek().column == indent) { // continuation
+					u32 new_indent = view.peek().column;
+					parse_line(view, new_indent, true, terms);
+				}
+        else if (!consume_line) view.rewind();
+				
+				return;
       }
       Value v = parse(view, indent);
-      if (v.is_error()) return error();
-      else terms.push(v);
+      if (!v.is_error()) terms.push(v);
     }
-    if (consume_line) view.read();
+	}
+
+  Value parse_line(TokenView& view, u32 indent, bool consume_line) {
+		SourceLocation first = view.peek();
+    vector<Value> terms;
+		if (view.peek().type == T_NEWLINE) {
+			if (consume_line) view.read();
+			return empty();
+		}
+		parse_line(view, indent, consume_line, terms);
+
     Value v = list_of(terms);
     v.set_location(first);
     return v;

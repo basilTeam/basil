@@ -1,11 +1,12 @@
 #ifndef BASIL_ENV_H
 #define BASIL_ENV_H
 
-#include "defs.h"
-#include "hash.h"
-#include "str.h"
-#include "rc.h"
+#include "util/defs.h"
+#include "util/hash.h"
+#include "util/str.h"
+#include "util/rc.h"
 #include "values.h"
+#include "ssa.h"
 
 namespace basil {
   struct Def {
@@ -15,6 +16,7 @@ namespace basil {
     bool is_proc; // is the definition a scalar or procedure?
     u8 arity; // number of arguments taken by a procedure.
     u8 precedence; // precedence of infix procedure
+		Location location;
 
     Def(bool is_macro_in = false, bool is_procedure_in = false, 
         bool is_infix_in = false, u8 arity_in = 0, u8 precedence_in = 0);
@@ -30,6 +32,7 @@ namespace basil {
   class Env {
     map<string, Def> _defs;
     ref<Env> _parent;
+		bool _runtime;
   public:
     Env(const ref<Env>& parent = ref<Env>::null());
 
@@ -49,6 +52,11 @@ namespace basil {
     Def* find(const string& name);
     void format(stream& io) const;
     ref<Env> clone() const;
+		map<string, Def>::const_iterator begin() const;
+		map<string, Def>::const_iterator end() const;
+		void import(ref<Env> env);
+		void make_runtime();
+		bool is_runtime() const;
   };
 }
 

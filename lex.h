@@ -1,13 +1,13 @@
 #ifndef BASIL_LEX_H
 #define BASIL_LEX_H
 
-#include "defs.h"
+#include "util/defs.h"
 #include "source.h"
 
 namespace basil {
   enum TokenType : u8 {
     T_NONE,
-    T_INT, T_SYMBOL, T_COEFF,
+    T_INT, T_SYMBOL, T_STRING, T_COEFF,
     T_LPAREN, T_RPAREN, T_LBRACK, T_RBRACK, T_LBRACE, T_RBRACE,
     T_SEMI, T_DOT, T_COLON, T_PIPE,
     T_PLUS, T_MINUS, T_QUOTE,

@@ -13,12 +13,12 @@ file::file(const char* fname, const char* flags):
     //
 }
 
-file::file(FILE* f_in): f(f_in), done(false) {
+file::file(FILE* f_in): f(f_in), done(!f) {
     //
 }
 
 file::~file() {
-    fclose(f);
+    if (f) fclose(f);
 }
 
 void file::write(u8 c) {
@@ -45,6 +45,7 @@ void file::unget(u8 c) {
 }
 
 file::operator bool() const {
+		if (!f) return false;
     int i = fgetc(f);
     ungetc(i, f);
     return i != EOF;

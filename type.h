@@ -1,23 +1,25 @@
 #ifndef BASIL_TYPE_H
 #define BASIL_TYPE_H
 
-#include "defs.h"
-#include "str.h"
-#include "hash.h"
-#include "io.h"
-#include "vec.h"
+#include "util/defs.h"
+#include "util/str.h"
+#include "util/hash.h"
+#include "util/io.h"
+#include "util/vec.h"
 
 namespace basil {
   const u8 GC_KIND_FLAG = 128;
 
   enum TypeKind : u8 {
     KIND_SINGLETON = 0, 
+		KIND_TYPEVAR = 1,
     KIND_LIST = GC_KIND_FLAG | 0, 
     KIND_SUM = GC_KIND_FLAG | 1,
     KIND_PRODUCT = GC_KIND_FLAG | 2,
     KIND_FUNCTION = GC_KIND_FLAG | 3,
     KIND_ALIAS = GC_KIND_FLAG | 4,
-    KIND_MACRO = GC_KIND_FLAG | 5
+    KIND_MACRO = GC_KIND_FLAG | 5,
+		KIND_RUNTIME = GC_KIND_FLAG | 6
   };
 
   class Type {
@@ -28,6 +30,7 @@ namespace basil {
   public:
     virtual TypeKind kind() const = 0;
     u64 hash() const;
+		virtual bool concrete() const;
     virtual bool operator==(const Type& other) const = 0;
     virtual void format(stream& io) const = 0;
   };
@@ -48,6 +51,7 @@ namespace basil {
     ListType(const Type* element);
 
     const Type* element() const;
+		bool concrete() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
     void format(stream& io) const override;
@@ -110,6 +114,32 @@ namespace basil {
     void format(stream& io) const override;
   };
 
+  class RuntimeType : public Type {
+    const Type* _base;
+  public:
+    RuntimeType(const Type* base);
+
+    const Type* base() const;
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
+    void format(stream& io) const override;
+  };
+
+	class TypeVariable : public Type {
+		u32 _id;
+	protected:
+		TypeVariable(u32 id);
+	public:
+		TypeVariable();
+
+		const Type* actual() const;
+		void bind(const Type* concrete) const;
+		bool concrete() const override;
+		TypeKind kind() const override;
+		bool operator==(const Type& other) const override;
+		void format(stream& io) const override;
+	};
+
   const Type* find_existing_type(const Type* t);
   const Type* create_type(const Type* t);
 
@@ -123,7 +153,9 @@ namespace basil {
   }
 
   extern const Type *INT, *SYMBOL, *VOID, *ERROR, *TYPE, 
-                    *ALIAS, *BOOL;
+                    *ALIAS, *BOOL, *ANY, *STRING;
+
+	const Type* unify(const Type* a, const Type* b);
 }
 
 template<>

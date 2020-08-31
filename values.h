@@ -1,15 +1,19 @@
 #ifndef BASIL_VALUES_H
 #define BASIL_VALUES_H
 
-#include "defs.h"
+#include "util/defs.h"
 #include "type.h"
-#include "io.h"
-#include "hash.h"
+#include "util/io.h"
+#include "util/hash.h"
 #include "errors.h"
-#include "vec.h"
-#include "rc.h"
+#include "util/vec.h"
+#include "util/rc.h"
 
 namespace basil {
+  class Def;
+  class Env;
+	class ASTNode;
+
   u64 symbol_value(const string& symbol);
   const string& symbol_for(u64 value);
 
@@ -42,6 +46,7 @@ namespace basil {
     Value(FunctionValue* f);
     Value(AliasValue* f);
     Value(MacroValue* f);
+		Value(ASTNode* n);
     ~Value();
     Value(const Value& other);
     Value& operator=(const Value& other);
@@ -53,6 +58,10 @@ namespace basil {
     bool is_symbol() const;
     u64 get_symbol() const;
     u64& get_symbol();
+
+		bool is_string() const;
+		const string& get_string() const;
+		string& get_string();
 
     bool is_void() const;
 
@@ -90,6 +99,10 @@ namespace basil {
     const MacroValue& get_macro() const;
     MacroValue& get_macro(); 
 
+		bool is_runtime() const;
+		const ASTNode* get_runtime() const;
+		ASTNode* get_runtime();
+
     const Type* type() const;
     void format(stream& io) const;
     u64 hash() const;
@@ -100,6 +113,15 @@ namespace basil {
     void set_location(SourceLocation loc);
     SourceLocation loc() const;
   };
+
+	class StringValue : public RC {
+		string _value;
+	public:
+		StringValue(const string& value);
+
+		string& value();
+		const string& value() const;
+	};
 
   class ListValue : public RC {
     Value _head, _tail;
@@ -137,16 +159,26 @@ namespace basil {
 
   using BuiltinFn = Value (*)(ref<Env>, const Value& params);
 
+	extern const u64 KEYWORD_ARG_BIT;
+	extern const u64 ARG_NAME_MASK;
+
   class FunctionValue : public RC {
+		i64 _name;
     Value _code;
     BuiltinFn _builtin;
     ref<Env> _env;
     u64 _builtin_arity;
     vector<u64> _args;
+		set<const FunctionValue*>* _calls;
+		map<const Type*, ASTNode*>* _insts;
   public:
     FunctionValue(ref<Env> env, const vector<u64>& args, 
-      const Value& code);
-    FunctionValue(ref<Env> env, BuiltinFn builtin, u64 arity);
+      const Value& code, i64 name = -1);
+    FunctionValue(ref<Env> env, BuiltinFn builtin, u64 arity, 
+			i64 name = -1);
+		~FunctionValue();
+		FunctionValue(const FunctionValue& other);
+		FunctionValue& operator=(const FunctionValue& other);
 
     const vector<u64>& args() const;
     const Value& body() const;
@@ -155,6 +187,12 @@ namespace basil {
     BuiltinFn get_builtin() const;
     ref<Env> get_env();
     const ref<Env> get_env() const;
+		i64 name() const;
+		bool found_calls() const;
+		bool recursive() const;
+		void add_call(const FunctionValue* other);
+		ASTNode* instantiation(const Type* args) const;
+		void instantiate(const Type* args, ASTNode* body);
   };  
 
   class AliasValue : public RC {
@@ -188,6 +226,8 @@ namespace basil {
     const ref<Env> get_env() const;
   };
 
+	Value lower(const Value& v);
+
   Value add(const Value& lhs, const Value& rhs);
   Value sub(const Value& lhs, const Value& rhs);
   Value mul(const Value& lhs, const Value& rhs);
@@ -211,6 +251,8 @@ namespace basil {
   Value cons(const Value& head, const Value& tail);
   Value empty();
   Value list_of(const Value& element);
+	vector<Value> to_vector(const Value& list);
+	Value is_empty(const Value& list);
 
   template<typename ...Args>
   Value list_of(const Value& element, Args... args) {
@@ -220,9 +262,16 @@ namespace basil {
   Value list_of(const vector<Value>& elements);
 
   Value error();
+
+  Value read_line();
+
   Value type_of(const Value& v);
 
-  Value call(const Value& function, const Value& arg);
+  Value call(ref<Env> env, Value& function, const Value& arg);
+
+	Value display(const Value& arg);
+
+	Value assign(ref<Env> env, const Value& dest, const Value& src);
 }
 
 template<>

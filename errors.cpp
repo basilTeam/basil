@@ -1,5 +1,5 @@
 #include "errors.h"
-#include "vec.h"
+#include "util/vec.h"
 #include "lex.h"
 
 namespace basil {
@@ -20,9 +20,10 @@ namespace basil {
   };
 
   static vector<Error> errors;
+	static i64 silenced = 0;
 
   void err(SourceLocation loc, const string& message) {
-    errors.push({ loc, message });
+    if (!silenced) errors.push({ loc, message });
   }
 
   u32 error_count() {
@@ -39,6 +40,7 @@ namespace basil {
         write(io, "[", e.loc.line + 1, ":", e.loc.column + 1, "] ");
       writeln(io, e.message);
     }
+		clear_errors();
   }
 
   void print_errors(stream& io, const Source& src) {
@@ -59,4 +61,13 @@ namespace basil {
       writeln(io, "");
     }
   }
+	
+	void silence_errors() {
+		silenced ++;
+	}
+
+	void unsilence_errors() {
+		silenced --;
+		if (silenced < 0) silenced = 0;
+	}
 }

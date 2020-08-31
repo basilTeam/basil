@@ -1,8 +1,9 @@
 #include "source.h"
-#include "io.h"
+#include "util/io.h"
 
 namespace basil {
   void Source::add_lines(string* s) {
+		if ((*s)[s->size() - 1] != '\n') *s += '\n';
     const u8* p = s->raw();
     const u8* start = p;
     u32 size = 0;
@@ -33,8 +34,8 @@ namespace basil {
     if (!f) return;
 
     _sections.push(new string());
-    while (f) {
-      if (f.peek() == '\t') *_sections.back() += "    ";
+    while (f.peek()) {
+      if (f.peek() == '\t') *_sections.back() += "    ", f.read();
       else *_sections.back() += f.read();
     }
 
@@ -64,6 +65,11 @@ namespace basil {
     calc_lines();
     return *this;
   }
+
+	void Source::add_line(const string& text) {
+		string* line = new string(text);
+		add_lines(line);
+	}
 
   const_slice<u8> Source::line(u32 i) const {
     return _lines[i];

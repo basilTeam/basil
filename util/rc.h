@@ -39,6 +39,7 @@ public:
     if (other._value) other._value->count ++;
     if (_value && !--_value->count) delete _value;
     _value = other._value;
+		return *this;
   }
 
   const T& operator*() const {

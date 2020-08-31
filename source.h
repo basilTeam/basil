@@ -1,9 +1,9 @@
 #ifndef BASIL_SOURCE_H
 #define BASIL_SOURCE_H
 
-#include "defs.h"
-#include "vec.h"
-#include "str.h"
+#include "util/defs.h"
+#include "util/vec.h"
+#include "util/str.h"
 
 namespace basil {
   class Source {
@@ -18,7 +18,8 @@ namespace basil {
     ~Source();
     Source(const Source& other);
     Source& operator=(const Source& other);
-  
+
+		void add_line(const string& text);
     const_slice<u8> line(u32 i) const;
     const vector<const_slice<u8>>& lines() const;
   

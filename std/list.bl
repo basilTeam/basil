@@ -1,0 +1,40 @@
+infix (list length)
+	if list empty? 0 else (list tail length) + 1
+
+def (append a b)
+	if a empty? b else a.head :: (append a.tail b)
+
+infix (list take n)
+	if n == 0 or list empty? []
+	:else list.head :: (list.tail take n - 1)
+
+infix (list drop n)
+	if list empty? []
+	:elif n == 0 list
+	:else list.tail drop n - 1
+
+def (reverse list)
+	reverse-internal list []
+
+def (reverse-internal list acc)
+	if list empty? acc
+	:else (reverse-internal list.tail list.head :: acc)
+
+def (merge a b)
+	if a empty? b
+	:elif b empty? a
+	:elif a.head < b.head
+		a.head :: (merge a.tail b)
+	:else
+		b.head :: (merge a b.tail)
+
+def (sort list)
+	if list empty? 
+		[]
+	:elif list tail empty? 
+		list
+	:else
+		def half (list length / 2)
+		def front (list take half)
+		def back (list drop half)
+		merge (sort front) (sort back)

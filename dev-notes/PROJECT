@@ -1,0 +1,43 @@
+Project Structure
+-----------------
+
+[Included library code]
+
+All of the following was implemented before the jam. None of Basil's
+functionality is contained within these files, they simply provide an 
+independent implementation of classes in the C++ standard library.
+
+ - defs.h: a few shared typedefs and forward declarations.
+
+ - hash.h/cpp: a standard polymorphic hash function,
+   hash set, and hash map based on robin hood probing.
+
+ - io.h/cpp: a suite of variadic io functions and a stream abstraction,
+   which is implemented both by a file wrapper class and an in-memory buffer.
+
+ - slice.h: a slice type, for representing subranges of strings and
+   containers.
+
+ - str.h/cpp: a resizable byte string type. implements small string
+   optimization and only allocates for strings greater than 15
+   characters.
+
+ - vec.h: a resizable vector type.
+
+[Compiler/interpreter code]
+
+Code for implementing Basil's compiler phases.
+
+ - source.h/cpp: an abstraction over a Basil source file.
+
+ - lex.h/cpp: token type and lexer.
+
+ - parse.h/cpp: parser implementation.
+
+ - ast.h/cpp: nodes for Basil's syntax tree.
+
+ - value.h/cpp: a type for representing any Basil value at compile time.
+
+ - eval.h/cpp: evaluates a syntax tree to a Basil value.
+
+ - main.cpp: driver function for the Basil compiler and utilities.

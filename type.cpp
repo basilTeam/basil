@@ -8,6 +8,10 @@ namespace basil {
     return _hash;
   }
 
+	bool Type::concrete() const {
+		return this != ANY;
+	}
+
   SingletonType::SingletonType(const string& repr) : Type(::hash(repr)),  _repr(repr) {}
 
   TypeKind SingletonType::kind() const {
@@ -24,6 +28,10 @@ namespace basil {
 
   ListType::ListType(const Type* element):
     Type(element->hash() ^ 11340086872871314823ul), _element(element) {}
+
+	bool ListType::concrete() const {
+		return _element->concrete();
+	}
 
   const Type* ListType::element() const {
     return _element;
@@ -183,6 +191,75 @@ namespace basil {
     write(io, "macro(", _arity, ")");
   }
 
+	RuntimeType::RuntimeType(const Type* base):
+		Type(base->hash() ^ 5857490642180150551ul), _base(base) {}
+
+	const Type* RuntimeType::base() const {
+		return _base;
+	}
+
+	TypeKind RuntimeType::kind() const {
+		return KIND_RUNTIME;
+	}
+
+	bool RuntimeType::operator==(const Type& other) const {
+		return other.kind() == kind() && 
+			*((const RuntimeType&)other).base() == *base();
+	}
+
+	void RuntimeType::format(stream& io) const {
+    write(io, "runtime<", _base, ">");
+	}
+
+	static vector<const Type*> type_variables;
+	static vector<string> typevar_names;
+
+	static string next_typevar() {
+		buffer b;
+		write(b, "'T", type_variables.size());
+		string s;
+		read(b, s);
+		return s;
+	}
+
+	static u32 create_typevar() {
+		type_variables.push(ANY);
+		typevar_names.push(next_typevar());
+		return type_variables.size() - 1;
+	}
+
+	TypeVariable::TypeVariable(u32 id):
+		Type(::hash(id) ^ 3860592187614349697ul), _id(id) {}
+
+	TypeVariable::TypeVariable():
+		TypeVariable(create_typevar()) {}
+
+	const Type* TypeVariable::actual() const {
+		return type_variables[_id];
+	}
+
+	void TypeVariable::bind(const Type* concrete) const {
+		type_variables[_id] = concrete;
+	}
+
+	bool TypeVariable::concrete() const {
+		return type_variables[_id]->concrete();
+	}
+
+	TypeKind TypeVariable::kind() const {
+		return KIND_TYPEVAR; 
+	}
+
+	bool TypeVariable::operator==(const Type& other) const {
+		return other.kind() == kind() && _id == ((const TypeVariable&)other)._id;
+	}
+
+	void TypeVariable::format(stream& io) const {
+		write(io, typevar_names[_id]);
+		if (type_variables[_id]->concrete()) 
+			write(io, "(", type_variables[_id], ")");
+	}
+
   struct TypeBox {
     const Type* t;
 
@@ -210,7 +287,38 @@ namespace basil {
              *ERROR = find<SingletonType>("error"),
              *TYPE = find<SingletonType>("type"),
              *ALIAS = find<AliasType>(),
-             *BOOL = find<SingletonType>("bool");
+             *BOOL = find<SingletonType>("bool"),
+						 *ANY = find<SingletonType>("any"),
+						 *STRING = find<SingletonType>("string");
+
+	const Type* unify(const Type* a, const Type* b) {
+		if (!a || !b) return nullptr; 
+		
+		if (a == ANY) return b;
+		else if (b == ANY) return a;
+
+		if (a->kind() == KIND_TYPEVAR) {
+			if (!((const TypeVariable*)a)->actual()->concrete())
+				return ((const TypeVariable*)a)->bind(b), b;
+			a = ((const TypeVariable*)a)->actual();
+		}
+
+		if (b->kind() == KIND_TYPEVAR) {
+			if (!((const TypeVariable*)b)->actual()->concrete())
+				return ((const TypeVariable*)b)->bind(a), a;
+			b = ((const TypeVariable*)b)->actual();
+		}
+
+		if (a->kind() == KIND_LIST && b->kind() == KIND_LIST)
+			return find<ListType>(unify(((const ListType*)a)->element(),
+				((const ListType*)b)->element()));
+
+		if (a == VOID && b->kind() == KIND_LIST) return b;
+		if (b == VOID && a->kind() == KIND_LIST) return a;
+		
+		if (a != b) return nullptr;
+		return a;
+	}
 }
 
 template<>

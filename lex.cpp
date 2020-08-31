@@ -1,5 +1,5 @@
 #include "lex.h"
-#include "io.h"
+#include "util/io.h"
 #include "errors.h"
 #include <cctype>
 #include <cstdlib>
@@ -13,7 +13,7 @@ namespace basil {
   }
 
   static const char* TOKEN_NAMES[NUM_TOKEN_TYPES] = {
-    "none", "int", "symbol", "coeff", "left paren", "right paren",
+    "none", "int", "symbol", "string", "coeff", "left paren", "right paren",
     "left bracket", "right bracket", "left brace", "right brace",
     "semicolon", "dot", "colon", "pipe", "plus", "minus", "quote",
     "newline"
@@ -26,7 +26,7 @@ namespace basil {
     T_NONE, T_NONE, T_NEWLINE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 08
     T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 10
     T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 18
-    T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 20
+    T_NONE, T_NONE, T_STRING, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 20
     T_LPAREN, T_RPAREN, T_NONE, T_NONE, T_NONE, T_NONE, T_DOT, T_NONE, // 28
     T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 30
     T_NONE, T_NONE, T_COLON, T_SEMI, T_NONE, T_NONE, T_NONE, T_NONE, // 38
@@ -71,6 +71,20 @@ namespace basil {
       while (view.peek() && view.peek() != '\n') view.read();
       return scan(view);
     }
+		else if (ch == '"') {
+			view.read();
+			while (view.peek() && view.peek() != '\n' && view.peek() != '"') {
+				if (view.read() == '\\' && view.peek() == '"') view.read();
+			}
+			if (view.peek() != '"') 
+				err({ line, u16(view.col()) }, 
+					"Expected closing quote in string literal.");
+			else {
+				view.read();
+				return Token(T_STRING, { u32(view.pos() - start), start }, 
+					line, start_col);
+			}
+		}
     else if (ch == '.') {
       while (view.peek() == '.') view.read();
       u32 len = view.pos() - start;
@@ -113,7 +127,7 @@ namespace basil {
       view.read();
       return scan(view);
     }
-    else err({ line, u16(view.col()) }, "Unexpected character in input '", view.peek(), "'.");
+    else err({ line, u16(view.col()) }, "Unexpected character in input '", view.read(), "'.");
     return NONE;
   }    
   

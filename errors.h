@@ -1,10 +1,10 @@
 #ifndef BASIL_ERRORS_H
 #define BASIL_ERRORS_H
 
-#include "defs.h"
-#include "str.h"
-#include "io.h"
-#include "slice.h"
+#include "util/defs.h"
+#include "util/str.h"
+#include "util/io.h"
+#include "util/slice.h"
 
 namespace basil {
   class Token;
@@ -28,6 +28,8 @@ namespace basil {
   void clear_errors();
   void print_errors(stream& io);
   void print_errors(stream& io, const Source& src);
+	void silence_errors();
+	void unsilence_errors();
   
   template<typename ...Args>
   void err(SourceLocation loc, Args... args) {

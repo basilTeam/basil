@@ -29,7 +29,7 @@ namespace basil {
   }
 
   Env::Env(const ref<Env>& parent):
-    _parent(parent) {}
+    _parent(parent), _runtime(false) {}
 
   void Env::def(const string& name) {
     _defs[name] = Def(false, false, false);
@@ -107,6 +107,27 @@ namespace basil {
     Env new_env(_parent);
     ref<Env> new_ref(new_env);
     for (auto& p : _defs) new_ref->_defs.put(p.first, p.second);
-    return new_env;
+		new_ref->_runtime = _runtime;
+    return new_ref;
   }
+
+	map<string, Def>::const_iterator Env::begin() const {
+		return _defs.begin();
+	}
+
+	map<string, Def>::const_iterator Env::end() const {
+		return _defs.end();
+	}
+
+	void Env::import(ref<Env> env) {
+		for (auto& p : env->_defs) _defs.put(p.first, p.second);
+	}
+
+	void Env::make_runtime() {
+		_runtime = true;
+	}
+
+	bool Env::is_runtime() const {
+		return _runtime;
+	}
 }

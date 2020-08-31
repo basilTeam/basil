@@ -1,9 +1,9 @@
 #ifndef BASIL_PARSE_H
 #define BASIL_PARSE_H
 
-#include "defs.h"
+#include "util/defs.h"
 #include "lex.h"
-#include "vec.h"
+#include "util/vec.h"
 #include "values.h"
 
 namespace basil {

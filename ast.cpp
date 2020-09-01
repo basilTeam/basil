@@ -15,10 +15,7 @@ namespace basil {
 
 	const Type* ASTNode::type() {
 		if (!_type) _type = lazy_type();
-		if (_type->kind() == KIND_TYPEVAR 
-			&& ((const TypeVariable*)_type)->actual() != ANY)
-			return ((const TypeVariable*)_type)->actual(); // unwrap concrete typevars
-		return _type;
+		return _type->concretify();
 	}
 
 	ASTSingleton::ASTSingleton(const Type* type):
@@ -245,8 +242,8 @@ namespace basil {
 		return BOOL;
 	}
 
-	Location ASTNot::emit(Function& function) {
-		return function.add(new NotInsn(_child->emit(function)));
+	Location ASTNot::emit(Function& func) {
+		return func.add(new NotInsn(_child->emit(func)));
 	}
 
 	void ASTNot::format(stream& io) const {
@@ -266,7 +263,10 @@ namespace basil {
     if (_left->type() == STRING || _right->type() == STRING) {
       func.add(new StoreArgumentInsn(_left->emit(func), 0, _left->type()));
       func.add(new StoreArgumentInsn(_right->emit(func), 1, _right->type()));
-      Location result = func.add(new CallInsn(ssa_find_label("_strcmp"), INT));
+			Location label;
+			label.type = SSA_LABEL;
+			label.label_index = ssa_find_label("_strcmp");
+      Location result = func.add(new CallInsn(label, INT));
       return func.add(new EqualInsn(result, ssa_immediate(0)));
     }
 
@@ -315,7 +315,10 @@ namespace basil {
     if (_left->type() == STRING || _right->type() == STRING) {
       func.add(new StoreArgumentInsn(_left->emit(func), 0, _left->type()));
       func.add(new StoreArgumentInsn(_right->emit(func), 1, _right->type()));
-      Location result = func.add(new CallInsn(ssa_find_label("_strcmp"), INT));
+			Location label;
+			label.type = SSA_LABEL;
+			label.label_index = ssa_find_label("_strcmp");
+      Location result = func.add(new CallInsn(label, INT));
 
       switch(_op) {
         case AST_LESS:
@@ -386,12 +389,16 @@ namespace basil {
 		const Type* fntype = _func->type();
 		const Type* argt = ((const FunctionType*)fntype)->arg();
 		if (fntype == ERROR || argt == ERROR) return ERROR;
+		vector<const Type*> argts;
 		for (u32 i = 0; i < _args.size(); i ++) {
 			if (_args[i]->type() == ERROR) return ERROR;
-			if (!unify(_args[i]->type(), ((const ProductType*)argt)->member(i))) {
-				err(_args[i]->loc(), "Invalid argument ", i, " to function call.");
-				return ERROR;
-			}
+			argts.push(_args[i]->type());
+		}
+		const Type* provided_argt = find<ProductType>(argts);
+		// println("calling ", _func, argt, " on ", provided_argt);
+		if (!unify(argt, provided_argt)) {
+			err(loc(), "Invalid arguments ", provided_argt, " to ", _func, ".");
+			return ERROR;
 		}
 		return ((const FunctionType*)fntype)->ret();
 	}
@@ -404,10 +411,14 @@ namespace basil {
 			arglocs.push(_args[i]->emit(func));
 		}
 		for (u32 i = 0; i < _args.size(); i ++) {
+			if (arglocs[i].type == SSA_LABEL) {
+				arglocs[i] = func.add(new AddressInsn(arglocs[i], 
+					((const ProductType*)argt)->member(i)));
+			}
 			func.add(new StoreArgumentInsn(arglocs[i], i, 
 				((const ProductType*)argt)->member(i)));
 		}
-		return func.add(new CallInsn(fn.label_index, type()));
+		return func.add(new CallInsn(fn, type()));
 	}
 
 	void ASTCall::format(stream& io) const {
@@ -606,8 +617,8 @@ namespace basil {
 		return BOOL;
 	}
 
-	Location ASTIsEmpty::emit(Function& function) {
-		return function.add(new EqualInsn(_child->emit(function), ssa_immediate(0)));
+	Location ASTIsEmpty::emit(Function& func) {
+		return func.add(new EqualInsn(_child->emit(func), ssa_immediate(0)));
 	}
 
 	void ASTIsEmpty::format(stream& io) const {
@@ -630,8 +641,8 @@ namespace basil {
 		return ((const ListType*) _child->type())->element();
 	}
 
-	Location ASTHead::emit(Function& function) {
-		return function.add(new LoadPtrInsn(_child->emit(function), type(), 0));
+	Location ASTHead::emit(Function& func) {
+		return func.add(new LoadPtrInsn(_child->emit(func), type(), 0));
 	}
 
 	void ASTHead::format(stream& io) const {
@@ -654,8 +665,8 @@ namespace basil {
 		return _child->type();
 	}
 
-	Location ASTTail::emit(Function& function) {
-		return function.add(new LoadPtrInsn(_child->emit(function), type(), 8));
+	Location ASTTail::emit(Function& func) {
+		return func.add(new LoadPtrInsn(_child->emit(func), type(), 8));
 	}
 
 	void ASTTail::format(stream& io) const {
@@ -686,16 +697,51 @@ namespace basil {
 		}
 	}
 
-	Location ASTCons::emit(Function& function) {
-		Location l = _left->emit(function), r = _right->emit(function);
-		function.add(new StoreArgumentInsn(l, 0, _left->type()));
-		function.add(new StoreArgumentInsn(r, 1, _right->type()));
-		return function.add(new CallInsn(ssa_find_label("_cons"), type()));
+	Location ASTCons::emit(Function& func) {
+		Location l = _left->emit(func), r = _right->emit(func);
+		func.add(new StoreArgumentInsn(l, 0, _left->type()));
+		func.add(new StoreArgumentInsn(r, 1, _right->type()));
+		Location label;
+		label.type = SSA_LABEL;
+		label.label_index = ssa_find_label("_cons");
+		return func.add(new CallInsn(label, type()));
 	}
 
 	void ASTCons::format(stream& io) const {
 		write(io, "(cons ", _left, " ", _right, ")");
 	}
+
+	const Type* ASTLength::lazy_type() {
+		const Type *child = _child->type();
+		if (child == ERROR) return ERROR;
+		if (unify(_child->type(), STRING) != STRING
+			&& unify(_child->type(), find<ListType>(find<TypeVariable>()))->kind() 
+				!= KIND_LIST) {
+			err(_child->loc(), "Argument to 'length' expression must be string or list, ",
+				"given '", _child->type());
+			return ERROR;
+		}
+		return INT;
+	}
+
+	ASTLength::ASTLength(SourceLocation loc, ASTNode* child)
+    : basil::ASTUnary(loc, child) {}
+
+  Location ASTLength::emit(Function& func) {
+    func.add(new StoreArgumentInsn(_child->emit(func), 0, _child->type()));
+
+    Location label;
+    label.type = SSA_LABEL;
+    if (_child->type() == STRING) label.label_index = ssa_find_label("_strlen");
+    else label.label_index = ssa_find_label("_listlen");
+    
+    return func.add(new CallInsn(label, INT));
+  }
+
+  void ASTLength::format(stream& io) const {
+    write(io, "(length ", _child, ")");
+  }
+
 
 	const Type* ASTDisplay::lazy_type() {
 		return VOID;
@@ -704,7 +750,7 @@ namespace basil {
 	ASTDisplay::ASTDisplay(SourceLocation loc, ASTNode* node):
 		ASTUnary(loc, node) {}
 
-	Location ASTDisplay::emit(Function& function) {
+	Location ASTDisplay::emit(Function& func) {
 		const char* name;
 		if (_child->type() == INT) name = "_display_int";
 		else if (_child->type() == SYMBOL) name = "_display_symbol";
@@ -715,50 +761,52 @@ namespace basil {
 		else if (_child->type() == find<ListType>(BOOL)) name = "_display_bool_list";
 		else if (_child->type() == find<ListType>(STRING)) name = "_display_string_list";
 		else if (_child->type() == VOID) name = "_display_int_list";
-		function.add(new StoreArgumentInsn(_child->emit(function), 0, _child->type()));
-		return function.add(new CallInsn(ssa_find_label(name), type()));
+		func.add(new StoreArgumentInsn(_child->emit(func), 0, _child->type()));
+		Location label;
+		label.type = SSA_LABEL;
+		label.label_index = ssa_find_label(name);
+		return func.add(new CallInsn(label, type()));
 	}
 
 	void ASTDisplay::format(stream& io) const {
 		write(io, "(display ", _child, ")");
 	}
 
-  const Type* ASTReadLine::lazy_type() {
-    return STRING;
+  ASTNativeCall::ASTNativeCall(SourceLocation loc, const string &func_name, const Type* ret)
+    : basil::ASTNode(loc), _func_name(func_name), _ret(ret) {}
+
+  ASTNativeCall::ASTNativeCall(SourceLocation loc, const string &func_name, const Type *ret, const vector<ASTNode*>& args, const vector<const Type*>& arg_types)
+    : ASTNode(loc), _func_name(func_name), _ret(ret), _args(args), _arg_types(arg_types) {
+		for (ASTNode* node : _args) node->inc();
+	}
+
+	ASTNativeCall::~ASTNativeCall() {
+		for (ASTNode* node : _args) node->dec();
+	}
+
+  const Type* ASTNativeCall::lazy_type() {
+    for (int i = 0; i < _args.size(); i ++) {
+      if (!unify(_args[i]->type(), _arg_types[i])) {
+        err(_args[i]->loc(), "Expected '", _arg_types[i], "', given '", _args[i]->type(), "'.");
+      }
+    }
+    return _ret;
   }
-  
-  ASTReadLine::ASTReadLine(SourceLocation loc) : ASTNode(loc) {}
 
-  Location ASTReadLine::emit(Function& function) {
-    return function.add(new CallInsn(ssa_find_label("_read_line"), STRING));
+  Location ASTNativeCall::emit(Function& func) {
+    for (int i = 0; i < _args.size(); i ++)
+      func.add(new StoreArgumentInsn(_args[i]->emit(func), i, _args[i]->type()));
+		Location label;
+		label.type = SSA_LABEL;
+		label.label_index = ssa_find_label(_func_name);
+    return func.add(new CallInsn(label, _ret));
   }
 
-  void ASTReadLine::format(stream& io) const {
-    write(io, "(read-line)");
+  void ASTNativeCall::format(stream& io) const {
+    write(io, "(", _func_name);
+    for (const ASTNode *arg : _args) write(io, " ", arg);
+    write(io, ")");
   }
-
-  // const Type* ASTNativeCall::lazy_type() {
-
-  // }
-
-  // ASTNativeCall::ASTNativeCall(SourceLocation loc, const string &func, vector<ASTNode*> args)
-  //   : ASTNode(loc), _func(func), _args(args) {}
-
-  // Location ASTNativeCall::emit(Function& function) {
-  //   for (int i = 0; i < _args.size(); i ++)
-  //     function.add(new StoreArgumentInsn(_args[i]->emit(function), i, _args[i]->type()));
-  //   // return function.add(new CallInsn(ssa_find_label(_func), ));
-  // }
-
-  // void ASTNativeCall::format(stream& io) const {
-  //   write(io, "(", _func, _args.size() ? " " : "");
-  //   for (const ASTNode *arg : _args) {
-  //     write(io, " ", arg);
-  //   }
-  //   write(io, ")");
-  // }
-  
-
 	
 	ASTAssign::ASTAssign(SourceLocation loc, const ref<Env> env,
 		u64 dest, ASTNode* src): ASTUnary(loc, src), _env(env), _dest(dest) {}

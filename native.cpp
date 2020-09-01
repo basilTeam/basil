@@ -23,6 +23,15 @@ namespace basil {
 		return result;
 	}
 
+  i64 _listlen(void* list) {
+    u32 size = 0;
+    while (list) {
+      list = *((void**)list + 1);
+      size ++;
+    }
+    return size;
+  }
+
 	void _display_int(i64 value) {
 		println(value);
 	}
@@ -91,6 +100,12 @@ namespace basil {
     return *(const unsigned char*)a - *(const unsigned char*)b;
   }
 
+  i64 _strlen(const char *s) {
+    const char *copy = s;
+    while (*s++);
+    return s - copy - 1;
+  }
+
   const u8* _read_line() {
     string s;
     while (_stdin.peek() != '\n') { s += _stdin.read(); }
@@ -100,11 +115,37 @@ namespace basil {
     return buf;
   }
 
+	i64 _read_int() {
+		i64 i;
+		read(_stdin, i);
+		return i;
+	}
+
+  const u8* _read_word() {
+    string s;
+		read(_stdin, s);
+		u8* buf = new u8[s.size() + 1];
+		for (u32 i = 0; i < s.size(); i ++) buf[i] = s[i];
+		buf[s.size()] = '\0';
+    return buf;
+  }
+
+  u8 _char_at(const char *s, i64 idx) {
+    return s[idx];
+  }
+
+  // const u8* _substr(const char *s, i64 start, i64 end)
+
 	void add_native_functions(Object& object) {
 		add_native_function(object, "_cons", (void*)_cons);
 
     add_native_function(object, "_strcmp", (void*)_strcmp);
+    add_native_function(object, "_strlen", (void*)_strlen);
     add_native_function(object, "_read_line", (void*)_read_line);
+    add_native_function(object, "_read_int", (void*)_read_int);
+    add_native_function(object, "_read_word", (void*)_read_word);
+    add_native_function(object, "_char_at", (void*)_char_at);
+    add_native_function(object, "_listlen", (void*)_listlen);
 
 		add_native_function(object, "_display_int", (void*)_display_int);
 		add_native_function(object, "_display_symbol", (void*)_display_symbol);

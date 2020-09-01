@@ -263,7 +263,10 @@ namespace basil {
 
   Value error();
 
+  Value length(const Value& str);
+
   Value read_line();
+  Value char_at(const Value& str, const Value& idx);
 
   Value type_of(const Value& v);
 

@@ -1,0 +1,17 @@
+display "Enter a seed."
+
+def (scramble x)
+	(x * 62192187 + 29681) % 1000
+
+def secret (scramble (read-int))
+def guess 0
+
+while guess != secret
+	display "Guess the number!"
+	guess = (read-int)
+	if guess == secret
+		display "You got it!"
+	:elif guess < secret
+		display "Too low!"
+	:else
+		display "Too high!"

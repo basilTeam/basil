@@ -339,6 +339,16 @@ namespace basil {
 		void format(stream& io) const override;
 	};
 
+  class ASTLength : public ASTUnary {
+	protected:
+		const Type* lazy_type() override;
+	public:
+		ASTLength(SourceLocation loc, ASTNode* child);
+
+		Location emit(Function& function) override;
+		void format(stream& io) const override;
+	};
+
 	class ASTDisplay : public ASTUnary {
 	protected:
 		const Type* lazy_type() override;
@@ -349,28 +359,21 @@ namespace basil {
 		void format(stream& io) const override;
 	};
 
-  class ASTReadLine : public ASTNode {
+  class ASTNativeCall : public ASTNode {
+      const string _func_name;
+      const Type * _ret;
+      const vector<ASTNode*> _args;
+      const vector<const Type*> _arg_types;
     protected:
       const Type* lazy_type() override;
     public:
-      ASTReadLine(SourceLocation loc);
-
+      ASTNativeCall(SourceLocation loc, const string &func_name, const Type* ret);
+      // TODO make args a variadic template instead of a vector
+      ASTNativeCall(SourceLocation loc, const string &func_name, const Type *ret, const vector<ASTNode*>& args, const vector<const Type*>& arg_types);
+			~ASTNativeCall();
       Location emit(Function& function) override;
       void format(stream& io) const override;
   };
-
-  // class ASTNativeCall : public ASTNode {
-  //     const string _func_name;
-  //     const Type * _ret;
-  //     vector<ASTNode*> _args;
-  //   protected:
-  //     const Type* lazy_type() override;
-  //   public:
-  //     ASTNativeCall(SourceLocation loc, const string &func_name, vector<ASTNode*> args);
-
-  //     Location emit(Function& function) override;
-  //     void format(stream& io) const override;
-  // };
 
 	class ASTAssign : public ASTUnary {
 		ref<Env> _env;

@@ -602,20 +602,25 @@ namespace basil {
 		write(io, "$", _index, " = ", _src);
 	}
 
-	CallInsn::CallInsn(u32 label, const Type* ret):
-		_label(label), _ret(ret) {}
+	CallInsn::CallInsn(Location fn, const Type* ret):
+		_fn(fn), _ret(ret) {}
 
 	Location CallInsn::lazy_loc() {
 		return _func->create_local(_ret);
 	}
 
 	void CallInsn::emit() {
-		call(label64(symbol_for_label(_label, GLOBAL_SYMBOL)));
+		if (_fn.type == SSA_LABEL)
+			call(label64(symbol_for_label(_fn.label_index, GLOBAL_SYMBOL)));
+		else {
+			mov(r64(RAX), x64_arg(_fn));
+			call(r64(RAX));
+		}
 		mov(x64_arg(_loc), r64(RAX));
 	}
 
 	void CallInsn::format(stream& io) const {
-		write(io, _loc, " = ", all_labels[_label], "()");
+		write(io, _loc, " = ", _fn, "()");
 	}
 
 	Label::Label(u32 label):
@@ -686,8 +691,10 @@ void write(stream& io, const basil::Location& loc) {
 			return;
 		case basil::SSA_LABEL:
 			write(io, basil::all_labels[loc.label_index]);
+			return;
 		case basil::SSA_CONSTANT:
 			write(io, basil::all_constants[loc.constant_index].name);
+			return;
 		default:
 			return;
 	}

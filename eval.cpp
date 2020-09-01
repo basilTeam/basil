@@ -98,7 +98,23 @@ namespace basil {
 	}
 
   Value builtin_read_line(ref <Env> env, const Value& args) {
-    return read_line();
+    return new ASTNativeCall(NO_LOCATION, "_read_line", STRING);
+  }
+
+  Value builtin_read_word(ref <Env> env, const Value& args) {
+    return new ASTNativeCall(NO_LOCATION, "_read_word", STRING);
+  }
+
+  Value builtin_read_int(ref <Env> env, const Value& args) {
+    return new ASTNativeCall(NO_LOCATION, "_read_int", INT);
+  }
+
+  Value builtin_length(ref<Env> env, const Value& args) {
+    return length(args.get_product()[0]);
+  }
+
+  Value builtin_char_at(ref<Env> env, const Value& args) {
+    return char_at(args.get_product()[0], args.get_product()[1]);
   }
 
 	Value builtin_if_macro(ref<Env> env, const Value& args) {
@@ -160,6 +176,10 @@ namespace basil {
 		root->infix_macro("?", new MacroValue(root, builtin_if_macro, 3), 3, 2);
 		root->infix("#?", new FunctionValue(root, builtin_if, 3), 3, 2);
     root->def("read-line", new FunctionValue(root, builtin_read_line, 0), 0);
+    root->def("read-word", new FunctionValue(root, builtin_read_word, 0), 0);
+    root->def("read-int", new FunctionValue(root, builtin_read_int, 0), 0);
+    root->infix("length", new FunctionValue(root, builtin_length, 1), 1, 50);
+    root->infix("at", new FunctionValue(root, builtin_char_at, 2), 2, 90);
     root->def("true", Value(true, BOOL));
     root->def("false", Value(false, BOOL));
     return root;
@@ -861,22 +881,23 @@ namespace basil {
 		}
 		if_true = cons(Value("do"), list_of(if_true_vals));
 		if (!params.is_list()) {
-			err(term.loc(), "If expression requires at least one else.");
-			return error();
+			if_false = list_of(Value("list-of"));
 		}
-		if (get_keyword(head(params)) == symbol_value("elif")) {
+		else if (get_keyword(head(params)) == symbol_value("elif")) {
 			if_false = if_expr(env, params);
 			return list_of(Value("#?"),
 				cond,
 				list_of(Value("quote"), if_true),
 				list_of(Value("quote"), if_false));
 		}
-		params = tail(params);
-		while (params.is_list()) {
-			if_false_vals.push(head(params));
+		else {
 			params = tail(params);
+			while (params.is_list()) {
+				if_false_vals.push(head(params));
+				params = tail(params);
+			}
+			if_false = cons(Value("do"), list_of(if_false_vals));
 		}
-		if_false = cons(Value("do"), list_of(if_false_vals));
 		return list_of(Value("#?"),
 			cond, 
 			list_of(Value("quote"), if_true),
@@ -958,6 +979,13 @@ namespace basil {
     return list_of(vals);
   }
 
+	struct CompilationUnit {
+		Source source;
+		ref<Env> env;
+	};
+
+	static map<string, CompilationUnit> modules;
+
 	Value use(ref<Env> env, const Value& term) {
 		if (!tail(term).is_list() || !head(tail(term)).is_symbol()) {
 			err(tail(term).loc(), "Expected symbol in use expression, given '",
@@ -968,21 +996,31 @@ namespace basil {
 		string path = symbol_for(h.get_symbol());
 		path += ".bl";
 
-		Source src((const char*)path.raw());
-		if (!src.begin().peek()) {
-			err(h.loc(), "Could not load source file at path '", path, "'.");
-			return error();
+		ref<Env> module;
+		auto it = modules.find(path);
+		if (it != modules.end()) {
+			module = it->second.env;
 		}
-		ref<Env> module = load(src);
-		if (error_count()) return error();
-
-		for (const auto& p : *module) {
-			if (env->find(p.first)) {
-				err(term.loc(), "Module '", symbol_for(h.get_symbol()), 
-					"' redefines '", p.first, "' in the current environment.");
+		else {
+			CompilationUnit unit { Source((const char*)path.raw()), {} };
+			if (!unit.source.begin().peek()) {
+				err(h.loc(), "Could not load source file at path '", path, "'.");
 				return error();
 			}
+			module = unit.env = load(unit.source);
+			if (error_count()) return error();
+
+			for (const auto& p : *module) {
+				if (env->find(p.first)) {
+					err(term.loc(), "Module '", symbol_for(h.get_symbol()), 
+						"' redefines '", p.first, "' in the current environment.");
+					return error();
+				}
+			}
+
+			modules.put(path, unit);
 		}
+
 		env->import(module);
 		return Value(VOID);
 	}
@@ -1033,10 +1071,12 @@ namespace basil {
 			u32 i = 0;
       while (v->is_list()) {
 				if (i < first.get_function().arity()
-						&& first.get_function().args()[i] & KEYWORD_ARG_BIT
-						&& v->get_list().head().is_symbol())
+					&& first.get_function().args()[i] & KEYWORD_ARG_BIT
+					&& v->get_list().head().is_symbol()) {
 					args.push(v->get_list().head()); // leave keywords quoted
+				}
         else args.push(eval(env, v->get_list().head()));
+			
         v = &v->get_list().tail();
 				i ++;
       }
@@ -1048,10 +1088,32 @@ namespace basil {
       }
       return call(env, first, Value(new ProductValue(args)));
     }
+		else if (first.is_runtime() && 
+			first.get_runtime()->type()->kind() == KIND_FUNCTION) {
+      vector<Value> args;
+      Value args_term = tail(term);
+      const Value* v = &args_term;
+			u32 i = 0;
+      while (v->is_list()) {
+				args.push(eval(env, v->get_list().head()));
+			
+        v = &v->get_list().tail();
+				i ++;
+      }
+			const FunctionType* fntype = (const FunctionType*)first.get_runtime()->type();
+			const ProductType* args_type = (const ProductType*)fntype->arg();
+      if (args.size() != args_type->count()) {
+        err(term.loc(), "Procedure expects ", 
+          args_type->count(), " arguments, ", 
+          args.size(), " provided.");
+        return error();
+      }
+      return call(env, first, Value(new ProductValue(args)));
+		}
 
     if (tail(term).is_void()) return first;
 
-		err(term.loc(), "Could not evaluate list.");
+		err(term.loc(), "Could not evaluate list '", term, "'.");
 		return error();
   }
 

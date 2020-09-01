@@ -336,12 +336,12 @@ namespace basil {
 	};
 
 	class CallInsn : public Insn {
-		u32 _label;
+		Location _fn;
 		const Type* _ret;
 	protected:
 		Location lazy_loc() override;
 	public:
-		CallInsn(u32 label, const Type* ret);
+		CallInsn(Location fn, const Type* ret);
 
 		void emit() override;
 		void format(stream& io) const override;

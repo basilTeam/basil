@@ -3,7 +3,7 @@ OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 
 CXX := clang++
 CXXHEADERS := -I. -Iutil -Ijasmine
-CXXFLAGS := $(CXXHEADERS) -std=c++17 -ffast-math -fno-rtti -fno-exceptions -ffunction-sections -Wno-null-dereference
+CXXFLAGS := $(CXXHEADERS) -std=c++17 -ffast-math -fno-rtti -fno-exceptions -Wno-null-dereference
 
 clean:
 	rm -f $(OBJS) *.o.tmp basil

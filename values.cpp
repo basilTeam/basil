@@ -541,6 +541,10 @@ namespace basil {
 			for (auto& p : *_insts) p.second->dec();
 			delete _insts;
 		}
+		if (_calls) {
+			for (auto& p : *_calls) ((FunctionValue*)p)->dec();
+			delete _calls;
+		}
 	}
 
 	FunctionValue::FunctionValue(const FunctionValue& other):
@@ -552,6 +556,7 @@ namespace basil {
 		_calls(other._calls ?
 			new set<const FunctionValue*>(*other._calls) : nullptr) {
 		if (_insts) for (auto& p : *_insts) p.second->inc();
+		if (_calls) for (auto p : *_calls) ((FunctionValue*)p)->inc();
 	}
 	
 	FunctionValue& FunctionValue::operator=(const FunctionValue& other) {
@@ -559,6 +564,10 @@ namespace basil {
 			if (_insts) {
 				for (auto& p : *_insts) p.second->dec();
 				delete _insts;
+			}
+			if (_calls) {
+				for (auto& p : *_calls) ((FunctionValue*)p)->dec();
+				delete _calls;
 			}
 			_name = other._name;
 			_code = other._code.clone();
@@ -568,7 +577,10 @@ namespace basil {
 			_insts = other._insts ?
 				new map<const Type*, ASTNode*>(*other._insts)
 				: nullptr;
+			_calls = other._calls ?
+				new set<const FunctionValue*>(*other._calls) : nullptr;
 			if (_insts) for (auto& p : *_insts) p.second->inc();
+			if (_calls) for (auto& p : *_calls) ((FunctionValue*)p)->inc();
 		}
 		return *this;
 	}
@@ -607,7 +619,8 @@ namespace basil {
 
 	void FunctionValue::add_call(const FunctionValue* other) {
 		if (!_calls) _calls = new set<const FunctionValue*>();
-		if (other->_calls) for (const FunctionValue* f : *other->_calls) {
+		if (other != this && other->_calls) 
+			for (const FunctionValue* f : *other->_calls) {
 			_calls->insert(f);
 			((FunctionValue*)f)->inc(); // evil
 		}
@@ -963,8 +976,41 @@ namespace basil {
     return Value(ERROR);
   }
 
-  Value read_line() {
-    return new ASTReadLine(NO_LOCATION);
+  Value length(const Value& val) {
+		if (val.is_error()) return error();
+
+    if (val.is_runtime())
+      return new ASTLength(val.loc(), lower(val).get_runtime());
+    
+    if (!val.is_string() && !val.is_list()) {
+      err(val.loc(), "Expected string or list, given '", val.type(), "'.");
+      return error();
+    }
+
+		if (val.is_string()) return Value(i64(val.get_string().size()));
+		else return Value(i64(to_vector(val).size()));
+  }
+
+  Value char_at(const Value& str, const Value& idx) {
+    if (str.is_runtime() || idx.is_runtime()) {
+      vector<ASTNode*> args;
+      Value s = lower(str), i = lower(idx);
+      args.push(s.get_runtime());
+      args.push(i.get_runtime());
+      vector<const Type*> arg_types;
+		  arg_types.push(STRING);
+      arg_types.push(INT);
+      return new ASTNativeCall(str.loc(), "_char_at", INT, args, arg_types);
+    }
+    if (!str.is_string()) {
+      err(str.loc(), "Expected string, given '", str.type(), "'.");
+      return error();
+    }
+    if (!idx.is_int()) {
+      err(idx.loc(), "Expected integer to index string, given '", str.type(), "'.");
+      return error();
+    }
+    return Value(i64(str.get_string()[idx.get_int()]));
   }
 
   Value type_of(const Value& v) {
@@ -986,7 +1032,8 @@ namespace basil {
 				new_args.push(fn.args()[i]);
 			}
 		}
-		Value v = eval(new_env, fn.body().clone());
+		Value cloned = fn.body().clone();
+		Value v = eval(new_env, cloned);
 		if (v.is_error()) return nullptr;
 		if (!v.is_runtime()) v = lower(v);
 		ASTNode* result = new ASTFunction(loc, new_env, args_type, 
@@ -1020,6 +1067,51 @@ namespace basil {
 	}
 
   Value call(ref<Env> env, Value& function, const Value& arg) {
+		if (function.is_runtime()) {
+      u32 argc = arg.get_product().size();
+			vector<const Type*> argts;
+			vector<Value> lowered_args;
+			for (u32 i = 0; i < argc; i ++) {
+				if (arg.get_product()[i].is_function()) {
+					vector<const Type*> inner_argts;
+					for (u32 j = 0; j < arg.get_product()[i].get_function().arity(); j ++)
+						inner_argts.push(find<TypeVariable>());
+					argts.push(find<FunctionType>(
+						find<ProductType>(inner_argts), find<TypeVariable>()));
+					lowered_args.push(arg.get_product()[i]); // we'll lower this later
+				}
+				else {
+					Value lowered = lower(arg.get_product()[i]);
+					argts.push(((const RuntimeType*)lowered.type())->base());
+					lowered_args.push(lowered);
+				}
+			}
+			const Type* argt = find<ProductType>(argts);
+			vector<ASTNode*> arg_nodes;
+			for (u32 i = 0; i < lowered_args.size(); i ++) {
+				if (lowered_args[i].is_function()) {
+					const Type* t = ((const ProductType*)argt)->member(i);
+					if (!t->concrete() || t->kind() != KIND_FUNCTION) {
+						err(lowered_args[i].loc(), "Could not deduce type for function ",
+							"parameter, resolved to '", t, "'.");
+						return error();
+					}
+					const Type* fnarg = ((const FunctionType*)t)->arg();
+					FunctionValue& fn = lowered_args[i].get_function();
+					ASTNode* argbody = fn.instantiation(fnarg);
+					if (!argbody) {
+						fn.instantiate(fnarg, new ASTIncompleteFn(lowered_args[i].loc(),
+							fnarg, fn.name()));
+						argbody = instantiate(lowered_args[i].loc(), fn, fnarg);
+					}
+					if (!argbody) return error();
+					arg_nodes.push(argbody);
+				}
+				else arg_nodes.push(lowered_args[i].get_runtime());
+			}
+			return new ASTCall(function.loc(), function.get_runtime(), arg_nodes);
+		}
+
     if (!function.is_function() && !function.is_error()) {
       err(function.loc(), "Called value is not a procedure.");
       return error();
@@ -1068,9 +1160,19 @@ namespace basil {
 						}
 					}
 					else {
-						Value lowered = lower(arg.get_product()[i]);
-						argts.push(((const RuntimeType*)lowered.type())->base());
-						lowered_args.push(lowered);
+						if (arg.get_product()[i].is_function()) {
+							vector<const Type*> inner_argts;
+							for (u32 j = 0; j < arg.get_product()[i].get_function().arity(); j ++)
+								inner_argts.push(find<TypeVariable>());
+							argts.push(find<FunctionType>(
+								find<ProductType>(inner_argts), find<TypeVariable>()));
+							lowered_args.push(arg.get_product()[i]); // we'll lower this later
+						}
+						else {
+							Value lowered = lower(arg.get_product()[i]);
+							argts.push(((const RuntimeType*)lowered.type())->base());
+							lowered_args.push(lowered);
+						}
 					}
 				}
 				const Type* argt = find<ProductType>(argts);
@@ -1081,7 +1183,30 @@ namespace basil {
 				} 
 				if (!body) return error();
 				vector<ASTNode*> arg_nodes;
-				for (Value& v : lowered_args) arg_nodes.push(v.get_runtime());
+				for (u32 i = 0; i < lowered_args.size(); i ++) {
+					if (lowered_args[i].is_function()) {
+						const Type* t = ((const ProductType*)argt)->member(i);
+						if (t->kind() != KIND_FUNCTION || 
+							!((const FunctionType*)t)->arg()->concrete()) {
+							err(lowered_args[i].loc(), "Could not deduce type for function ",
+								"parameter, resolved to '", t, "'.");
+							return error();
+						}
+						const Type* fnarg = ((const FunctionType*)t)->arg();
+						while (fnarg->kind() == KIND_TYPEVAR)
+							fnarg = ((const TypeVariable*)fnarg)->actual();
+						FunctionValue& fn = lowered_args[i].get_function();
+						ASTNode* argbody = fn.instantiation(fnarg);
+						if (!argbody) {
+							fn.instantiate(fnarg, new ASTIncompleteFn(lowered_args[i].loc(),
+								fnarg, fn.name()));
+							argbody = instantiate(lowered_args[i].loc(), fn, fnarg);
+						}
+						if (!argbody) return error();
+						arg_nodes.push(argbody);
+					}
+					else arg_nodes.push(lowered_args[i].get_runtime());
+				}
 				return new ASTCall(function.loc(), body, arg_nodes);
 			}
 

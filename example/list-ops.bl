@@ -1,0 +1,37 @@
+use std/list
+
+def nums 1 .. 20
+
+def (even? x) x % 2 == 0
+def (odd? x) x % 2 == 1
+
+def (add x y) x + y
+def (multiply x y) x * y
+
+display "Even number squares from 1 to 20:"
+display nums filter even? map (lambda (x) x * x)
+display ""
+
+display "Sum of odd numbers from 1 to 20 that aren't divisible by 5:"
+display nums filter odd? filter (lambda (x) x % 5 != 0) reduce add
+display ""
+
+display "Middle 10 of numbers from 1 to 20:"
+display nums take 15 drop 5
+display ""
+
+def (prime? x)
+	def factor 2
+	def result x > 1
+	while factor <= x / 2
+		if x % factor == 0 
+			result = false
+		:else []
+		factor = factor + 1
+	result
+
+display nums filter prime?
+
+display "Product of prime numbers between 1 and 20 (2 * 3 * 5 * 7 * 11 * 13 * 17):"
+display nums filter prime? reduce multiply
+display ""

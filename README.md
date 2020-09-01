@@ -490,6 +490,11 @@ specified in terms of the types they accept and produce.
 | `?`³ | `Bool * 'T0 * 'T0 -> 'T0` | Ternary conditional operator. |
 | `=` | `Symbol * 'T0 -> Void` | Assigns variable to value. |
 | `display` | `'T0 -> Void` | Prints a value to standard output on its own line. |
+| `read-line` | `() -> String` | Reads a line from standard input. |
+| `read-word` | `() -> String` | Reads a space-delimited string from standard input. |
+| `read-int` | `() -> Int` | Reads an integer from standard input. |
+| `length` | `String | 'T0 List -> Int` | Returns the length of a string or list. |
+| 
 
 1. Value equality for integers, bools, strings, and symbols; reference equality for
 lists.

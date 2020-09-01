@@ -1,0 +1,3 @@
+use std/math
+
+display 10 factorial

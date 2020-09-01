@@ -12,6 +12,10 @@ namespace basil {
 		return this != ANY;
 	}
 
+	const Type* Type::concretify() const {
+		return this;
+	}
+
   SingletonType::SingletonType(const string& repr) : Type(::hash(repr)),  _repr(repr) {}
 
   TypeKind SingletonType::kind() const {
@@ -31,6 +35,10 @@ namespace basil {
 
 	bool ListType::concrete() const {
 		return _element->concrete();
+	}
+
+	const Type* ListType::concretify() const {
+		return find<ListType>(_element->concretify());
 	}
 
   const Type* ListType::element() const {
@@ -100,6 +108,17 @@ namespace basil {
   const Type* ProductType::member(u32 i) const {
     return _members[i];
   }
+	
+	bool ProductType::concrete() const {
+		for (const Type* t : _members) if (!t->concrete()) return false;
+		return true;
+	}
+
+	const Type* ProductType::concretify() const {
+		vector<const Type*> ts = _members;
+		for (const Type*& t : ts) t = t->concretify();
+		return find<ProductType>(ts);
+	}
 
   TypeKind ProductType::kind() const {
     return KIND_PRODUCT;
@@ -141,6 +160,14 @@ namespace basil {
     return _arg->kind() == KIND_PRODUCT ? 
       ((const ProductType*)_arg)->count() : 1;
   }
+	
+	bool FunctionType::concrete() const {
+		return _arg->concrete() && _ret->concrete();
+	}
+
+	const Type* FunctionType::concretify() const {
+		return find<FunctionType>(_arg->concretify(), _ret->concretify());
+	}
 
   TypeKind FunctionType::kind() const {
     return KIND_FUNCTION;
@@ -246,6 +273,12 @@ namespace basil {
 		return type_variables[_id]->concrete();
 	}
 
+	const Type* TypeVariable::concretify() const {
+		const Type* t = actual();
+		if (t == ANY) return this;
+		return t->concretify();
+	}
+
 	TypeKind TypeVariable::kind() const {
 		return KIND_TYPEVAR; 
 	}
@@ -298,20 +331,55 @@ namespace basil {
 		else if (b == ANY) return a;
 
 		if (a->kind() == KIND_TYPEVAR) {
-			if (!((const TypeVariable*)a)->actual()->concrete())
-				return ((const TypeVariable*)a)->bind(b), b;
-			a = ((const TypeVariable*)a)->actual();
+			if (!((const TypeVariable*)a)->actual()->concrete()) {
+				if (b->concrete() || b->kind() != KIND_TYPEVAR)
+					return ((const TypeVariable*)a)->bind(b), b;
+				else if (b > a)
+					return ((const TypeVariable*)a)->bind(b), b;
+				else return a;
+			}
+			else a = ((const TypeVariable*)a)->actual();
 		}
 
 		if (b->kind() == KIND_TYPEVAR) {
-			if (!((const TypeVariable*)b)->actual()->concrete())
-				return ((const TypeVariable*)b)->bind(a), a;
+			if (!((const TypeVariable*)b)->actual()->concrete()) {
+				if (a->concrete() || a->kind() != KIND_TYPEVAR)
+					return ((const TypeVariable*)b)->bind(a), a;
+				else if (a > b)
+					return ((const TypeVariable*)b)->bind(a), a;
+				else return b;
+			}
 			b = ((const TypeVariable*)b)->actual();
 		}
 
-		if (a->kind() == KIND_LIST && b->kind() == KIND_LIST)
-			return find<ListType>(unify(((const ListType*)a)->element(),
-				((const ListType*)b)->element()));
+		if (a->kind() == KIND_LIST && b->kind() == KIND_LIST) {
+			const Type* elt = unify(((const ListType*)a)->element(),
+				((const ListType*)b)->element());
+			if (!elt) return nullptr;
+			return find<ListType>(elt);
+		}
+
+		if (a->kind() == KIND_PRODUCT && b->kind() == KIND_PRODUCT) {
+			vector<const Type*> members;
+			if (((const ProductType*)a)->count() != ((const ProductType*)b)->count())
+				return nullptr;
+			for (u32 i = 0; i < ((const ProductType*)a)->count(); i ++) {
+				const Type* member = unify(((const ProductType*)a)->member(i),
+					((const ProductType*)b)->member(i));
+				if (!member) return nullptr;
+				members.push(member);
+			}
+			return find<ProductType>(members);
+		}
+
+		if (a->kind() == KIND_FUNCTION && b->kind() == KIND_FUNCTION) {
+			const Type* arg = unify(((const FunctionType*)a)->arg(),
+				((const FunctionType*)b)->arg());
+			const Type* ret = unify(((const FunctionType*)a)->ret(),
+				((const FunctionType*)b)->ret());
+			if (!arg || !ret) return nullptr;
+			return find<FunctionType>(arg, ret);
+		}
 
 		if (a == VOID && b->kind() == KIND_LIST) return b;
 		if (b == VOID && a->kind() == KIND_LIST) return a;

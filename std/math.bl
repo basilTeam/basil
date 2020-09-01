@@ -1,0 +1,10 @@
+infix 45 (x ^ y)
+	if y < 0 1 / (x ^ -y) 
+	:elif y == 0 1 
+	:else x * x ^ (y - 1)
+
+infix 45 (x squared) x * x
+infix 45 (x cubed) x * x * x
+
+infix (x factorial)
+	if x == 0 1 else x - 1 factorial * x

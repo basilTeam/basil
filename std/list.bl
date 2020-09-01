@@ -1,5 +1,5 @@
-infix (list length)
-	if list empty? 0 else (list tail length) + 1
+# infix (list length)
+# 	if list empty? 0 else (list tail length) + 1
 
 def (append a b)
 	if a empty? b else a.head :: (append a.tail b)
@@ -19,6 +19,26 @@ def (reverse list)
 def (reverse-internal list acc)
 	if list empty? acc
 	:else (reverse-internal list.tail list.head :: acc)
+
+infix (xs map f)
+	if xs empty? [] else 
+		(f xs head) :: (xs tail map f)
+
+infix (xs filter f)
+	if xs empty? [] else
+		if (f xs head) 
+			xs head :: (xs tail filter f)
+		:else
+			xs tail filter f 
+
+infix 10 (x0 .. xN)
+	if x0 == xN [xN] else x0 :: (x0 + 1 .. xN)
+
+infix (xs reduce f)
+	if xs tail empty? 
+		xs head
+	:else
+		f xs head +(xs tail reduce f) # little bit of a hack to help type inference
 
 def (merge a b)
 	if a empty? b

@@ -1,6 +1,0 @@
-( ) { } [ ] ; |     # delimiters
-1 24 0591           # integers
-abc Abc123 ++ =!=   # symbols
-+12 -(1 + 2)        # prefix operators
-a . b  ...          # dot (first is dot token, second is symbol)
-:quoted :: n : int  # various colon usage

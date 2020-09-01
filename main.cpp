@@ -220,6 +220,12 @@ Value intro_set_section(ref<Env> env, const Value& args) {
 			args.get_product()[0]);
 		return Value(ERROR);
 	}
+	if (args.get_product()[0].get_int() < 1 
+		|| args.get_product()[0].get_int() > 7) {
+		err(args.get_product()[0].loc(), "Invalid section number. Must be between 1 ",
+			"and 7.");
+		return Value(ERROR);
+	}
 	intro_section = args.get_product()[0].get_int() - 1;
 	intro_section_index = 0;
 	return intro_start(env, args);
@@ -293,7 +299,7 @@ R"(Lists can be useful for storing data, but they can also
 be used to represent code. Basil programs themselves are
 just lists of terms that the Basil compiler evaluates.
 To write a list we want to be evaluated, we enclose other
-terms in parentheses.
+terms in parentheses, and separate them with spaces.
 )",
 R"(Type '(+ 1 2)' into the prompt, then press Enter twice.
 )", Value(3)});
@@ -306,7 +312,8 @@ is 3.
 
 Writing all these parentheses can be kind of a pain! So
 Basil treats lines on the top level of the program as 
-lists, as if they were surrounded by parentheses.
+lists, as if they were surrounded by parentheses. We still
+need to separate every term with spaces, though.
 )",
 R"(Type '* 3 3' into the prompt, then press Enter twice.
 )", Value(9)});
@@ -764,8 +771,7 @@ mixfix, with any number of keywords. This applies to both
 R"(Enter:
 	macro (print expr :if cond)
 		if |cond| 
-			display |expr| 
-		:else []
+			display |expr|
 	print "hello" if (3 > 2)
 into the prompt.
 )", runtime(VOID)});
@@ -815,8 +821,8 @@ R"(Congratulations! You've completed the Basil
 interactive tour!
 
 If you'd like to continue to play around with the 
-language, try running './basil help' in command line 
-for a full list of Basil commands!
+language, try quitting this tour and running './basil help' 
+in command line for a full list of Basil commands!
 
 If you really liked the project, consider:
  - starring it on GitHub! https://github.com/basilTeam/basil

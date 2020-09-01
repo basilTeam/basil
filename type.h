@@ -31,6 +31,7 @@ namespace basil {
     virtual TypeKind kind() const = 0;
     u64 hash() const;
 		virtual bool concrete() const;
+		virtual const Type* concretify() const;
     virtual bool operator==(const Type& other) const = 0;
     virtual void format(stream& io) const = 0;
   };
@@ -52,6 +53,7 @@ namespace basil {
 
     const Type* element() const;
 		bool concrete() const override;
+		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
     void format(stream& io) const override;
@@ -75,6 +77,8 @@ namespace basil {
 
     u32 count() const;
     const Type* member(u32 i) const;
+		bool concrete() const override;
+		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
     void format(stream& io) const override;
@@ -88,6 +92,8 @@ namespace basil {
     const Type* arg() const;
     const Type* ret() const;
     u32 arity() const;
+		bool concrete() const override;
+		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
     void format(stream& io) const override;
@@ -127,6 +133,7 @@ namespace basil {
 
 	class TypeVariable : public Type {
 		u32 _id;
+		friend void bind(const Type* a, const Type* b);
 	protected:
 		TypeVariable(u32 id);
 	public:
@@ -135,6 +142,7 @@ namespace basil {
 		const Type* actual() const;
 		void bind(const Type* concrete) const;
 		bool concrete() const override;
+		const Type* concretify() const override;
 		TypeKind kind() const override;
 		bool operator==(const Type& other) const override;
 		void format(stream& io) const override;
@@ -154,7 +162,7 @@ namespace basil {
 
   extern const Type *INT, *SYMBOL, *VOID, *ERROR, *TYPE, 
                     *ALIAS, *BOOL, *ANY, *STRING;
-
+	
 	const Type* unify(const Type* a, const Type* b);
 }
 

@@ -101,7 +101,8 @@ int main(int argc, char** argv) {
 	if (argc == 1) { // repl mode
 		print_banner();
 		println(BOLDGREEN, "Enter any Basil expression at the prompt, or '", 
-			RESET, "$help", BOLDGREEN, "' for a list of commands!", RESET);
+			RESET, "$help", BOLDGREEN, "' for a list of commands!", RESET,
+		        RESET, "$quit", " to exit from the REPL");
 		println("");
 		Source src;
 
@@ -860,6 +861,7 @@ int intro() {
 		"Great!",
 		"Nice!",
 		"Cool!",
+		"Dyno-Mite!",
 		"You did it!",
 		"You got it!"
 	};

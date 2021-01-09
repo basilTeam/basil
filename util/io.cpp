@@ -1,6 +1,5 @@
 #include "io.h"
 #include "str.h"
-#include <new>
 
 bool exists(const char* path) {
     FILE* f = fopen(path, "r");

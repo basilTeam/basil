@@ -9,7 +9,7 @@ def (add x y) x + y
 def (multiply x y) x * y
 
 display "Even number squares from 1 to 20:"
-display nums filter even? map (lambda (x) x * x)
+display nums filter even?
 display ""
 
 display "Sum of odd numbers from 1 to 20 that aren't divisible by 5:"
@@ -29,8 +29,6 @@ def (prime? x)
 		:else []
 		factor = factor + 1
 	result
-
-display nums filter prime?
 
 display "Product of prime numbers between 1 and 20 (2 * 3 * 5 * 7 * 11 * 13 * 17):"
 display nums filter prime? reduce multiply

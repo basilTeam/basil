@@ -8,6 +8,8 @@ struct pair {
     T first;
     U second;
 
+    pair() {}
+
     pair(const T& _first, const U& _second):
         first(_first), second(_second) {}
     

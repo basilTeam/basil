@@ -1,8 +1,8 @@
 #include "lex.h"
 #include "util/io.h"
 #include "errors.h"
-#include <cctype>
-#include <cstdlib>
+#include "ctype.h"
+#include "stdlib.h"
 
 namespace basil {
   Token::Token(TokenType type_in, const const_slice<u8>& value_in, u32 line_in, u32 column_in):
@@ -15,7 +15,7 @@ namespace basil {
   static const char* TOKEN_NAMES[NUM_TOKEN_TYPES] = {
     "none", "int", "symbol", "string", "coeff", "left paren", "right paren",
     "left bracket", "right bracket", "left brace", "right brace",
-    "semicolon", "dot", "colon", "pipe", "plus", "minus", "quote",
+    "semicolon", "dot", "comma", "colon", "pipe", "plus", "minus", "quote",
     "newline"
   };
 
@@ -27,7 +27,7 @@ namespace basil {
     T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 10
     T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 18
     T_NONE, T_NONE, T_STRING, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 20
-    T_LPAREN, T_RPAREN, T_NONE, T_NONE, T_NONE, T_NONE, T_DOT, T_NONE, // 28
+    T_LPAREN, T_RPAREN, T_NONE, T_NONE, T_COMMA, T_NONE, T_DOT, T_NONE, // 28
     T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 30
     T_NONE, T_NONE, T_COLON, T_SEMI, T_NONE, T_NONE, T_NONE, T_NONE, // 38
     T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, T_NONE, // 40

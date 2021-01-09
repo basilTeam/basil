@@ -62,8 +62,16 @@ namespace basil {
     _data.rc = p;
   }
 
+  Value::Value(ArrayValue* a) {
+    set<const Type*> ts;
+    for (const Value& v : *a) ts.insert(v.type());
+    _type = find<ArrayType>(find<SumType>(ts), a->size());
+    _data.rc = a;
+  }
+
   Value::Value(FunctionValue* f):
-    _type(find<FunctionType>(find<TypeVariable>(), find<TypeVariable>())) {
+    _type(f->is_builtin() ? find<FunctionType>(ANY, ANY) 
+      : find<FunctionType>(find<TypeVariable>(), find<TypeVariable>())) {
     _data.rc = f;
   }
 
@@ -181,6 +189,18 @@ namespace basil {
     return *(ListValue*)_data.rc;
   }
 
+  bool Value::is_array() const {
+    return _type->kind() == KIND_ARRAY;
+  }
+
+  const ArrayValue& Value::get_array() const {
+    return *(const ArrayValue*)_data.rc;
+  }
+
+  ArrayValue& Value::get_array() {
+    return *(ArrayValue*)_data.rc;
+  }
+
   bool Value::is_sum() const {
     return _type->kind() == KIND_SUM;
   }
@@ -245,12 +265,12 @@ namespace basil {
 		return _type->kind() == KIND_RUNTIME;
 	}
 
-	const ASTNode* Value::get_runtime() const {
+	ASTNode* Value::get_runtime() const {
 		return (ASTNode*)_data.rc;
 	}
 	
-	ASTNode* Value::get_runtime() {
-		return (ASTNode*)_data.rc;
+	ASTNode*& Value::get_runtime() {
+		return (ASTNode*&)_data.rc;
 	}
 
   const Type* Value::type() const {
@@ -275,6 +295,15 @@ namespace basil {
         first = false;
       }
       write(io, ")");
+    }
+    else if (is_array()) {
+      bool first = true;
+      write(io, "[");
+      for (const Value& v : get_array()) {
+        write(io, first ? "" : ", ", v);
+        first = false;
+      }
+      write(io, "]");
     }
     else if (is_sum()) write(io, get_sum().value());
     else if (is_product()) {
@@ -320,6 +349,11 @@ namespace basil {
       for (const Value& v : get_product()) h ^= v.hash();
       return h;
     }
+    else if (is_array()) {
+      u64 h = 7135911592309895053ul;
+      for (const Value& v : get_array()) h ^= v.hash();
+      return h;
+    }
     else if (is_function()) {
       u64 h = 10916307465547805281ul;
       if (get_function().is_builtin())
@@ -356,6 +390,18 @@ namespace basil {
     else if (is_type()) return get_type() == other.get_type();
     else if (is_bool()) return get_bool() == other.get_bool();
 		else if (is_string()) return get_string() == other.get_string();
+    else if (is_product()) {
+      if (get_product().size() != other.get_product().size()) return false;
+      for (u32 i = 0; i < get_product().size(); i ++) 
+        if (get_product()[i] != other.get_product()[i]) return false;
+      return true;
+    }
+    else if (is_array()) {
+      if (get_array().size() != other.get_array().size()) return false;
+      for (u32 i = 0; i < get_array().size(); i ++) 
+        if (get_array()[i] != other.get_array()[i]) return false;
+      return true;
+    }
     else if (is_list()) {
       const Value* l = this, *o = &other;
       while (l->is_list() && o->is_list()) {
@@ -409,6 +455,11 @@ namespace basil {
     else if (is_product()) {
       vector<Value> values;
       for (const Value& v : get_product()) values.push(v);
+      return Value(new ProductValue(values));
+    }
+    else if (is_array()) {
+      vector<Value> values;
+      for (const Value& v : get_array()) values.push(v);
       return Value(new ProductValue(values));
     }
     else if (is_function()) {
@@ -522,6 +573,13 @@ namespace basil {
   Value* ProductValue::end() {
     return _values.end();
   }
+
+  const vector<Value>& ProductValue::values() const {
+    return _values;
+  }
+
+  ArrayValue::ArrayValue(const vector<Value>& values):
+    ProductValue(values) {}
 
 	const u64 KEYWORD_ARG_BIT = 1ul << 63;
 	const u64 ARG_NAME_MASK = ~KEYWORD_ARG_BIT;
@@ -749,7 +807,7 @@ namespace basil {
           lhs.type(), "'.");
       return error();
     }
-    if (!rhs.is_int() && !lhs.is_error()) {
+    if (!rhs.is_int() && !rhs.is_error()) {
       err(rhs.loc(), "Expected integer value in arithmetic expression, found '",
           rhs.type(), "'.");
       return error();
@@ -799,7 +857,7 @@ namespace basil {
           lhs.type(), "'.");
       return error();
     }
-    if (!rhs.is_bool() && !lhs.is_error()) {
+    if (!rhs.is_bool() && !rhs.is_error()) {
       err(rhs.loc(), "Expected boolean value in logical expression, found '",
           rhs.type(), "'.");
       return error();
@@ -865,7 +923,7 @@ namespace basil {
           lhs.type(), "'.");
       return error();
     }
-    if (!rhs.is_int() && !rhs.is_string() && !lhs.is_error()) {
+    if (!rhs.is_int() && !rhs.is_string() && !rhs.is_error()) {
       err(rhs.loc(), "Expected integer or string value in relational expression, found '",
           rhs.type(), "'.");
       return error();
@@ -981,40 +1039,189 @@ namespace basil {
 
     if (val.is_runtime())
       return new ASTLength(val.loc(), lower(val).get_runtime());
-    
-    if (!val.is_string() && !val.is_list()) {
-      err(val.loc(), "Expected string or list, given '", val.type(), "'.");
-      return error();
-    }
 
 		if (val.is_string()) return Value(i64(val.get_string().size()));
-		else return Value(i64(to_vector(val).size()));
+		else if (val.is_list()) return Value(i64(to_vector(val).size()));
+    else if (val.is_product()) return Value(i64(val.get_product().size()));
+    else if (val.is_array()) return Value(i64(val.get_array().size()));
+    else {
+      err(val.loc(), "Cannot get length of value of type '", val.type(), "'.");
+      return error();
+    }
   }
 
-  Value char_at(const Value& str, const Value& idx) {
-    if (str.is_runtime() || idx.is_runtime()) {
+  Value tuple_of(const vector<Value>& elements) {
+    for (const Value& v : elements) {
+      if (v.is_runtime()) {
+        err(v.loc(), "Cannot compile tuples yet.");
+        return error();
+      }
+    }
+    return Value(new ProductValue(elements));
+  }
+
+  Value array_of(const vector<Value>& elements) {
+    for (const Value& v : elements) {
+      if (v.is_runtime()) {
+        err(v.loc(), "Cannot compile arrays yet.");
+        return error();
+      }
+    }
+    return Value(new ArrayValue(elements));
+  }
+
+  Value at(const Value& val, const Value& idx) {
+    if (val.is_error() || idx.is_error()) return error();
+    if (val.is_runtime() || idx.is_runtime()) {
       vector<ASTNode*> args;
-      Value s = lower(str), i = lower(idx);
+      Value s = lower(val), i = lower(idx);
       args.push(s.get_runtime());
       args.push(i.get_runtime());
       vector<const Type*> arg_types;
-		  arg_types.push(STRING);
-      arg_types.push(INT);
-      return new ASTNativeCall(str.loc(), "_char_at", INT, args, arg_types);
-    }
-    if (!str.is_string()) {
-      err(str.loc(), "Expected string, given '", str.type(), "'.");
-      return error();
+		  arg_types.push(args[0]->type());
+      arg_types.push(args[1]->type());
+      if (args[0]->type() == STRING) {
+        return new ASTNativeCall(val.loc(), "_char_at", INT, args, arg_types);
+      }
+      else {
+        err(val.loc(), "Accesses not implemented in AST yet.");
+        return error();
+      }
     }
     if (!idx.is_int()) {
-      err(idx.loc(), "Expected integer to index string, given '", str.type(), "'.");
+      err(idx.loc(), "Expected integer index in accessor, given '", val.type(), "'.");
       return error();
     }
-    return Value(i64(str.get_string()[idx.get_int()]));
+    if (val.is_string()) return Value(i64(val.get_string()[idx.get_int()]));
+    else if (val.is_product()) return val.get_product()[idx.get_int()];
+    else if (val.is_array()) return val.get_array()[idx.get_int()];
+    else {
+      err(val.loc(), "Cannot index into value of type '", val.type(), "'.");
+      return error();
+    }
+  }
+
+  Value strcat(const Value& a, const Value &b) {
+    if (a.is_error() || b.is_error()) return error();
+    if (a.is_runtime() || b.is_runtime()) {
+      vector<ASTNode*> args;
+      Value al = lower(a), bl = lower(b);
+      args.push(al.get_runtime());
+      args.push(bl.get_runtime());
+      vector<const Type*> arg_types;
+		  arg_types.push(STRING);
+      arg_types.push(STRING);
+      return new ASTNativeCall(a.loc(), "_strcat", STRING, args, arg_types);
+    }
+    if (!a.is_string() || !b.is_string()) {
+      err(a.loc(), "Expected string and string, given '", a.type(), "' and '", b.type(), "'.");
+      return error();
+    }
+    return Value(a.get_string() + b.get_string(), STRING);
+  }
+
+  Value substr(const Value& str, const Value &start, const Value &end) {
+    if (str.is_error() || start.is_error() || end.is_error()) return error();
+    if (str.is_runtime() || start.is_runtime() || end.is_runtime()) {
+      vector<ASTNode*> args;
+      Value strl = lower(str), startl = lower(start), endl = lower(end);
+      args.push(strl.get_runtime());
+      args.push(startl.get_runtime());
+      args.push(endl.get_runtime());
+      vector<const Type*> arg_types;
+		  arg_types.push(STRING);
+      arg_types.push(INT);
+      arg_types.push(INT);
+      return new ASTNativeCall(str.loc(), "_substr", STRING, args, arg_types);
+    }
+    if (!str.is_string() || !start.is_int() || !end.is_int()) {
+      err(str.loc(), "Expected string, integer, and integer, given '", str.type(), "' and '", start.type(), "' and '", end.type(), "'.");
+      return error();
+    }
+
+    return end.get_int() <  start.get_int() 
+      ? Value("", STRING) 
+      : Value(string(str.get_string()[{start.get_int(), end.get_int()}]), STRING);
   }
 
   Value type_of(const Value& v) {
     return Value(v.type(), TYPE);
+  }
+
+  Value cast(const Value& val, const Type* type) {
+    if (val.is_product()) {
+      if (type == TYPE) {
+        vector<const Type*> ts;
+        for (const Value& v : val.get_product())
+          ts.push(v.get_type());
+        return Value(find<ProductType>(ts), TYPE);
+      }
+    }
+
+    if (val.is_list() && type == TYPE) {
+      if (length(val) != 1) {
+        err(val.loc(), "Only single-element lists can be treated as types.");
+        return error();
+      }
+      return find<ListType>(head(val).get_type());
+    }
+
+    if (val.is_sum() && val.get_sum().value().type() == type)
+      return val.get_sum().value();
+    else {
+      err(val.loc(), "Sum value does not currently contain value of type '", type, "'.");
+      return error();
+    }
+
+    if (type->kind() == KIND_SUM) {
+      return Value(new SumValue(val), val.type());
+    }
+
+    err(val.loc(), "Could not convert value to type '", type, "'.");
+  }
+  
+  Value is(const Value& val, const Value& type) {
+    if (!type.is_type()) {
+      err(type.loc(), "Expected type value in is-expression, given '", type.type(), "'.");
+      return error();
+    }
+    if (val.type() == type.get_type()) 
+      return Value(true, BOOL);
+    else if (val.is_sum() && val.get_sum().value().type() == type.get_type()) 
+      return Value(true, BOOL);
+    else return Value(false, BOOL);
+  }
+
+  Value as(const Value& val, const Value& type) {
+    if (!type.is_type()) {
+      err(type.loc(), "Expected type value in explicit cast, given '", type.type(), "'.");
+      return error();
+    }
+    // if (val.is_runtime()) {
+    //   return Value(new ASTAnnotate(val.loc(), val.get_runtime(), type.get_type()));
+    // }
+    // else if (val.type()->coerces_to(*type.get_type())) {
+    //   err(val.loc(), "Could not unify value of type '", val.type(), "' with type '",
+    //       type.get_type(), "'.");
+    //   return error();
+    // }
+    return cast(val, type.get_type());
+  }
+  
+  Value annotate(const Value& val, const Value& type) {
+    if (!type.is_type()) {
+      err(type.loc(), "Expected type value in annotation, given '", type.type(), "'.");
+      return error();
+    }
+    if (val.is_runtime()) {
+      return Value(new ASTAnnotate(val.loc(), val.get_runtime(), type.get_type()));
+    }
+    else if (val.type()->coerces_to(*type.get_type())) {
+      err(val.loc(), "Could not unify value of type '", val.type(), "' with type '",
+          type.get_type(), "'.");
+      return error();
+    }
+    return cast(val, type.get_type());
   }
 
 	ASTNode* instantiate(SourceLocation loc, FunctionValue& fn, 
@@ -1033,6 +1240,7 @@ namespace basil {
 			}
 		}
 		Value cloned = fn.body().clone();
+    prep(new_env, cloned);
 		Value v = eval(new_env, cloned);
 		if (v.is_error()) return nullptr;
 		if (!v.is_runtime()) v = lower(v);
@@ -1226,7 +1434,9 @@ namespace basil {
         	env->find(argname)->value = arg.get_product()[i];
 				}
       }
-      return eval(env, fn.body());
+      Value prepped = fn.body().clone();
+      prep(env, prepped);
+      return eval(env, prepped);
     }
   }
 

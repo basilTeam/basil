@@ -494,7 +494,8 @@ specified in terms of the types they accept and produce.
 | `read-word` | `() -> String` | Reads a space-delimited string from standard input. |
 | `read-int` | `() -> Int` | Reads an integer from standard input. |
 | `length` | `String | 'T0 List -> Int` | Returns the length of a string or list. |
-| 
+| `at` | `String * Int -> Int` | Returns the character code at an index in a string. |
+| `^` | `String * String -> String` | Concatenates two strings. |
 
 1. Value equality for integers, bools, strings, and symbols; reference equality for
 lists.

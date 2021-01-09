@@ -25,8 +25,12 @@ namespace basil {
 		return _type;
 	}
 
+	ref<SSANode> ASTSingleton::emit(ref<BasicBlock>& parent) {
+		return nullptr;
+	}
+
 	Location ASTSingleton::emit(Function& func) {
-		return ssa_none();
+		return loc_none();
 	}
 
 	void ASTSingleton::format(stream& io) const {
@@ -40,8 +44,12 @@ namespace basil {
 		return VOID;
 	}
 
+	ref<SSANode> ASTVoid::emit(ref<BasicBlock>& parent) {
+		return ref<SSAVoid>(parent);
+	}
+
 	Location ASTVoid::emit(Function& function) {
-		return ssa_immediate(0);
+		return loc_immediate(0);
 	}
 
 	void ASTVoid::format(stream& io) const {
@@ -55,8 +63,12 @@ namespace basil {
 		return INT;
 	}
 
+	ref<SSANode> ASTInt::emit(ref<BasicBlock>& parent) {
+		return newref<SSAInt>(parent, _value);
+	}
+
 	Location ASTInt::emit(Function& func) {
-		return ssa_immediate(_value);
+		return loc_immediate(_value);
 	}
 
 	void ASTInt::format(stream& io) const {
@@ -70,8 +82,12 @@ namespace basil {
 		return SYMBOL;
 	}
 
+	ref<SSANode> ASTSymbol::emit(ref<BasicBlock>& parent) {
+		return newref<SSASymbol>(parent, _value);
+	}
+
 	Location ASTSymbol::emit(Function& func) {
-		return ssa_immediate(_value);
+		return loc_immediate(_value);
 	}
 
 	void ASTSymbol::format(stream& io) const {
@@ -85,8 +101,12 @@ namespace basil {
 		return STRING;
 	}
 
+	ref<SSANode> ASTString::emit(ref<BasicBlock>& parent) {
+		return newref<SSAString>(parent, _value);
+	}
+
 	Location ASTString::emit(Function& func) {
-		return func.add(new AddressInsn(ssa_const(ssa_next_label(), _value), type()));
+		return func.add(new AddressInsn(const_loc(next_label(), _value), type()));
 	}
 
 	void ASTString::format(stream& io) const {
@@ -100,8 +120,12 @@ namespace basil {
 		return BOOL;
 	}
 
+	ref<SSANode> ASTBool::emit(ref<BasicBlock>& parent) {
+		return newref<SSABool>(parent, _value);
+	}
+
 	Location ASTBool::emit(Function& func) {
-		return ssa_immediate(_value ? 1 : 0);
+		return loc_immediate(_value ? 1 : 0);
 	}
 
 	void ASTBool::format(stream& io) const {
@@ -120,14 +144,38 @@ namespace basil {
 		return ERROR;
 	}
 
+	ref<SSANode> ASTVar::emit(ref<BasicBlock>& parent) {
+		return nullptr; // todo
+	}
+
 	Location ASTVar::emit(Function& func) {
 		const Def* def = _env->find(symbol_for(_name));
-		if (!def) return ssa_none();
-		return func.add(new LoadInsn(def->location));
+		if (!def) return loc_none();
+		return def->location;
+		// return func.add(new LoadInsn(def->location)); <-- why?
 	}
 
 	void ASTVar::format(stream& io) const {
 		write(io, symbol_for(_name));
+	}
+
+	ASTExtern::ASTExtern(SourceLocation loc):
+		ASTNode(loc) {}
+
+	const Type* ASTExtern::lazy_type() {
+		return find<TypeVariable>();
+	}
+
+	ref<SSANode> ASTExtern::emit(ref<BasicBlock>& parent) {
+		return nullptr; // todo
+	}
+
+	Location ASTExtern::emit(Function& function) {
+		return loc_none();
+	}
+
+	void ASTExtern::format(stream& io) const {
+		write(io, "extern");
 	}
 
 	ASTUnary::ASTUnary(SourceLocation loc, ASTNode* child):
@@ -165,6 +213,23 @@ namespace basil {
 		return result;
 	}
 
+	ref<SSANode> ASTBinaryMath::emit(ref<BasicBlock>& parent) {
+		switch (_op) {
+			case AST_ADD:
+				return newref<SSABinary>(parent, type(), SSA_ADD, _left->emit(parent), _right->emit(parent));
+			case AST_SUB:
+				return newref<SSABinary>(parent, type(), SSA_SUB, _left->emit(parent), _right->emit(parent));
+			case AST_MUL:
+				return newref<SSABinary>(parent, type(), SSA_MUL, _left->emit(parent), _right->emit(parent));
+			case AST_DIV:
+				return newref<SSABinary>(parent, type(), SSA_DIV, _left->emit(parent), _right->emit(parent));
+			case AST_REM:
+				return newref<SSABinary>(parent, type(), SSA_REM, _left->emit(parent), _right->emit(parent));
+			default:
+				return nullptr;
+		}
+	}
+
 	Location ASTBinaryMath::emit(Function& func) {
 		switch (_op) {
 			case AST_ADD:
@@ -178,7 +243,7 @@ namespace basil {
 			case AST_REM:
 				return func.add(new RemInsn(_left->emit(func), _right->emit(func)));
 			default:
-				return ssa_none();
+				return loc_none();
 		}
 	}
 
@@ -208,6 +273,19 @@ namespace basil {
 		return BOOL;
 	}
 
+	ref<SSANode> ASTBinaryLogic::emit(ref<BasicBlock>& parent) {
+		switch (_op) {
+			case AST_AND:
+				return newref<SSABinary>(parent, type(), SSA_AND, _left->emit(parent), _right->emit(parent));
+			case AST_OR:
+				return newref<SSABinary>(parent, type(), SSA_OR, _left->emit(parent), _right->emit(parent));
+			case AST_XOR:
+				return newref<SSABinary>(parent, type(), SSA_XOR, _left->emit(parent), _right->emit(parent));
+			default:
+				return nullptr;
+		}
+	}
+
 	Location ASTBinaryLogic::emit(Function& func) {
 		switch (_op) {
 			case AST_AND:
@@ -217,7 +295,7 @@ namespace basil {
 			case AST_XOR:
 				return func.add(new XorInsn(_left->emit(func), _right->emit(func)));
 			default:
-				return ssa_none();
+				return loc_none();
 		}
 	}
 
@@ -242,6 +320,10 @@ namespace basil {
 		return BOOL;
 	}
 
+	ref<SSANode> ASTNot::emit(ref<BasicBlock>& parent) {
+		return newref<SSAUnary>(parent, type(), SSA_NOT, _child->emit(parent));
+	} 
+
 	Location ASTNot::emit(Function& func) {
 		return func.add(new NotInsn(_child->emit(func)));
 	}
@@ -259,16 +341,28 @@ namespace basil {
 		return BOOL;
 	}
 
+	ref<SSANode> ASTBinaryEqual::emit(ref<BasicBlock>& parent) {
+		switch (_op) {
+			case AST_EQUAL:
+				return newref<SSABinary>(parent, type(), SSA_EQ, _left->emit(parent), _right->emit(parent));
+			case AST_INEQUAL:
+				return newref<SSABinary>(parent, type(), SSA_NOT_EQ, _left->emit(parent), _right->emit(parent));
+			default:
+				return nullptr;
+		}
+	}
+
 	Location ASTBinaryEqual::emit(Function& func) {
-    if (_left->type() == STRING || _right->type() == STRING) {
-      func.add(new StoreArgumentInsn(_left->emit(func), 0, _left->type()));
-      func.add(new StoreArgumentInsn(_right->emit(func), 1, _right->type()));
+		if (_left->type() == STRING || _right->type() == STRING) {
+			vector<Location> args;
+			args.push(_left->emit(func));
+			args.push(_right->emit(func));
 			Location label;
-			label.type = SSA_LABEL;
-			label.label_index = ssa_find_label("_strcmp");
-      Location result = func.add(new CallInsn(label, INT));
-      return func.add(new EqualInsn(result, ssa_immediate(0)));
-    }
+			label.type = LOC_LABEL;
+			label.label_index = find_label("_strcmp");
+			Location result = func.add(new CallInsn(label, args, INT));
+			return func.add(new EqualInsn(result, loc_immediate(0)));
+		}
 
 		switch (_op) {
 			case AST_EQUAL:
@@ -276,7 +370,7 @@ namespace basil {
 			case AST_INEQUAL:
 				return func.add(new InequalInsn(_left->emit(func), _right->emit(func)));
 			default:
-				return ssa_none();
+				return loc_none();
 		}
 	}
 
@@ -299,40 +393,56 @@ namespace basil {
 		const Type* result = unify(lt, rt);
 
 		if (result != INT) {
-      lt = unify(_left->type(), STRING);
-      rt = unify(_right->type(), STRING);
-      result = unify(lt, rt);
-      if (result != STRING) {
-        err(loc(), "Invalid parameters to relational expression: '", 
-          _left->type(), "' and '", _right->type(), "'.");
-        return ERROR;
-      }
+			lt = unify(_left->type(), STRING);
+			rt = unify(_right->type(), STRING);
+			result = unify(lt, rt);
+			if (result != STRING) {
+				err(loc(), "Invalid parameters to relational expression: '", 
+				_left->type(), "' and '", _right->type(), "'.");
+				return ERROR;
+			}
 		}
 		return BOOL;
 	}
 
-	Location ASTBinaryRel::emit(Function& func) {
-    if (_left->type() == STRING || _right->type() == STRING) {
-      func.add(new StoreArgumentInsn(_left->emit(func), 0, _left->type()));
-      func.add(new StoreArgumentInsn(_right->emit(func), 1, _right->type()));
-			Location label;
-			label.type = SSA_LABEL;
-			label.label_index = ssa_find_label("_strcmp");
-      Location result = func.add(new CallInsn(label, INT));
+	ref<SSANode> ASTBinaryRel::emit(ref<BasicBlock>& parent) {
+		switch (_op) {
+			case AST_LESS:
+				return newref<SSABinary>(parent, type(), SSA_LESS, _left->emit(parent), _right->emit(parent));
+			case AST_LESS_EQUAL:
+				return newref<SSABinary>(parent, type(), SSA_LESS_EQ, _left->emit(parent), _right->emit(parent));
+			case AST_GREATER:
+				return newref<SSABinary>(parent, type(), SSA_GREATER, _left->emit(parent), _right->emit(parent));
+			case AST_GREATER_EQUAL:
+				return newref<SSABinary>(parent, type(), SSA_GREATER_EQ, _left->emit(parent), _right->emit(parent));
+			default:
+				return nullptr;
+		}
+	}
 
-      switch(_op) {
-        case AST_LESS:
-          return func.add(new LessInsn(result, ssa_immediate(0)));
-        case AST_LESS_EQUAL:
-          return func.add(new LessEqualInsn(result, ssa_immediate(0)));
-        case AST_GREATER:
-          return func.add(new GreaterInsn(result, ssa_immediate(0)));
-        case AST_GREATER_EQUAL:
-          return func.add(new GreaterEqualInsn(result, ssa_immediate(0)));
-        default:
-          return ssa_none();
-      }
-    }
+	Location ASTBinaryRel::emit(Function& func) {
+		if (_left->type() == STRING || _right->type() == STRING) {
+			vector<Location> args;
+			args.push(_left->emit(func));
+			args.push(_right->emit(func));
+			Location label;
+			label.type = LOC_LABEL;
+			label.label_index = find_label("_strcmp");
+			Location result = func.add(new CallInsn(label, args, INT));
+
+			switch(_op) {
+				case AST_LESS:
+					return func.add(new LessInsn(result, loc_immediate(0)));
+				case AST_LESS_EQUAL:
+					return func.add(new LessEqualInsn(result, loc_immediate(0)));
+				case AST_GREATER:
+					return func.add(new GreaterInsn(result, loc_immediate(0)));
+				case AST_GREATER_EQUAL:
+					return func.add(new GreaterEqualInsn(result, loc_immediate(0)));
+				default:
+					return loc_none();
+			}
+		}
 
 		switch (_op) {
 			case AST_LESS:
@@ -344,7 +454,7 @@ namespace basil {
 			case AST_GREATER_EQUAL:
 				return func.add(new GreaterEqualInsn(_left->emit(func), _right->emit(func)));
 			default:
-				return ssa_none();
+				return loc_none();
 		}
 	}
 
@@ -363,11 +473,15 @@ namespace basil {
 		return VOID;
 	}
 
+	ref<SSANode> ASTDefine::emit(ref<BasicBlock>& parent) {
+		return newref<SSAStore>(parent, _env, _name, _child->emit(parent));
+	}
+
 	Location ASTDefine::emit(Function& func) {
 		Location loc = func.create_local(symbol_for(_name), type());
 		_env->find(symbol_for(_name))->location = loc;
-		func.add(new StoreInsn(loc, _child->emit(func), true));
-		return ssa_none();
+		func.add(new StoreInsn(loc, _child->emit(func)));
+		return loc_none();
 	}
 
 	void ASTDefine::format(stream& io) const {
@@ -403,6 +517,12 @@ namespace basil {
 		return ((const FunctionType*)fntype)->ret();
 	}
 
+	ref<SSANode> ASTCall::emit(ref<BasicBlock>& parent) {
+		vector<ref<SSANode>> args;
+		for (ASTNode* n : _args) args.push(n->emit(parent));
+		return newref<SSACall>(parent, type(), _func->emit(parent), args);
+	}
+
 	Location ASTCall::emit(Function& func) {
 		Location fn = _func->emit(func);
 		vector<Location> arglocs;
@@ -411,14 +531,12 @@ namespace basil {
 			arglocs.push(_args[i]->emit(func));
 		}
 		for (u32 i = 0; i < _args.size(); i ++) {
-			if (arglocs[i].type == SSA_LABEL) {
+			if (arglocs[i].type == LOC_LABEL) {
 				arglocs[i] = func.add(new AddressInsn(arglocs[i], 
 					((const ProductType*)argt)->member(i)));
 			}
-			func.add(new StoreArgumentInsn(arglocs[i], i, 
-				((const ProductType*)argt)->member(i)));
 		}
-		return func.add(new CallInsn(fn, type()));
+		return func.add(new CallInsn(fn, arglocs, type()));
 	}
 
 	void ASTCall::format(stream& io) const {
@@ -435,10 +553,7 @@ namespace basil {
 		ASTNode(loc), _args(args), _name(name) {}
 
 	Location ASTIncompleteFn::emit(Function& func) {
-		Location loc;
-		loc.type = SSA_LABEL;
-		loc.label_index = ssa_find_label(symbol_for(_name));
-		return loc;
+		return loc_label(symbol_for(_name));
 	}
 
 	void ASTIncompleteFn::format(stream& io) const {
@@ -462,6 +577,10 @@ namespace basil {
 		return find<FunctionType>(_args_type, _body->type());
 	}
 
+	ref<SSANode> ASTFunction::emit(ref<BasicBlock>& parent) {
+		
+	}
+
 	Location ASTFunction::emit(Function& func) {
 		if (!_emitted) {
 			Function& fn = _name == -1 ? func.create_function() 
@@ -473,12 +592,13 @@ namespace basil {
 					((ProductType*)_args_type)->member(i)));
 			}
 			fn.add(new RetInsn(_body->emit(fn)));
+			fn.last()->succ().clear();
 
 			_emitted = true;
 		}
 
 		Location loc;
-		loc.type = SSA_LABEL;
+		loc.type = LOC_LABEL;
 		loc.label_index = _label;
 		return loc;
 	}
@@ -547,16 +667,22 @@ namespace basil {
 	}
 
 	Location ASTIf::emit(Function& func) {
-		u32 _else = ssa_next_label(), _end = ssa_next_label();
+		u32 _else = next_label(), _end = next_label();
 		Location result = func.create_local(type());
 		func.add(new IfZeroInsn(_else, _cond->emit(func)));
+		Insn* ifz = func.last();
 		Location true_result = _if_true->emit(func);
-		func.add(new StoreInsn(result, true_result, true));
+		func.add(new StoreInsn(result, true_result));
 		func.add(new GotoInsn(_end));
+		Insn* skip = func.last();
 		func.add(new Label(_else));
+		Insn* elselbl = func.last();
 		Location false_result = _if_false->emit(func);
-		func.add(new StoreInsn(result, false_result, true));
+		func.add(new StoreInsn(result, false_result));
 		func.add(new Label(_end));
+		Insn* end = func.last();
+		ifz->succ().push(elselbl); // ifz -> else
+		skip->succ()[0] = end; // goto -> end
 		return result;
 	}
 
@@ -587,13 +713,19 @@ namespace basil {
 	}
 
 	Location ASTWhile::emit(Function& func) {
-		u32 _start = ssa_next_label(), _end = ssa_next_label();
+		u32 _start = next_label(), _end = next_label();
 		Location result = func.create_local(type());
 		func.add(new Label(_start));
+		Insn* start = func.last();
 		func.add(new IfZeroInsn(_end, _cond->emit(func)));
+		Insn* ifz = func.last();
 		_body->emit(func);
 		func.add(new GotoInsn(_start));
+		Insn* loop = func.last();
 		func.add(new Label(_end));
+		Insn* end = func.last();
+		ifz->succ().push(end);
+		loop->succ()[0] = start;
 		return result;
 	}
 
@@ -618,7 +750,7 @@ namespace basil {
 	}
 
 	Location ASTIsEmpty::emit(Function& func) {
-		return func.add(new EqualInsn(_child->emit(func), ssa_immediate(0)));
+		return func.add(new EqualInsn(_child->emit(func), loc_immediate(0)));
 	}
 
 	void ASTIsEmpty::format(stream& io) const {
@@ -698,13 +830,13 @@ namespace basil {
 	}
 
 	Location ASTCons::emit(Function& func) {
-		Location l = _left->emit(func), r = _right->emit(func);
-		func.add(new StoreArgumentInsn(l, 0, _left->type()));
-		func.add(new StoreArgumentInsn(r, 1, _right->type()));
+		vector<Location> args;
+		args.push(_left->emit(func));
+		args.push(_right->emit(func));
 		Location label;
-		label.type = SSA_LABEL;
-		label.label_index = ssa_find_label("_cons");
-		return func.add(new CallInsn(label, type()));
+		label.type = LOC_LABEL;
+		label.label_index = find_label("_cons");
+		return func.add(new CallInsn(label, args, type()));
 	}
 
 	void ASTCons::format(stream& io) const {
@@ -724,24 +856,24 @@ namespace basil {
 		return INT;
 	}
 
-	ASTLength::ASTLength(SourceLocation loc, ASTNode* child)
-    : basil::ASTUnary(loc, child) {}
+	ASTLength::ASTLength(SourceLocation loc, ASTNode* child): 
+		basil::ASTUnary(loc, child) {}
 
-  Location ASTLength::emit(Function& func) {
-    func.add(new StoreArgumentInsn(_child->emit(func), 0, _child->type()));
+  	Location ASTLength::emit(Function& func) {
+		vector<Location> args;
+		args.push(_child->emit(func));
 
-    Location label;
-    label.type = SSA_LABEL;
-    if (_child->type() == STRING) label.label_index = ssa_find_label("_strlen");
-    else label.label_index = ssa_find_label("_listlen");
-    
-    return func.add(new CallInsn(label, INT));
-  }
+		Location label;
+		label.type = LOC_LABEL;
+		if (_child->type() == STRING) label.label_index = find_label("_strlen");
+		else label.label_index = find_label("_listlen");
+		
+		return func.add(new CallInsn(label, args, INT));
+  	}
 
-  void ASTLength::format(stream& io) const {
-    write(io, "(length ", _child, ")");
-  }
-
+  	void ASTLength::format(stream& io) const {
+    	write(io, "(length ", _child, ")");
+  	}
 
 	const Type* ASTDisplay::lazy_type() {
 		return VOID;
@@ -761,22 +893,23 @@ namespace basil {
 		else if (_child->type() == find<ListType>(BOOL)) name = "_display_bool_list";
 		else if (_child->type() == find<ListType>(STRING)) name = "_display_string_list";
 		else if (_child->type() == VOID) name = "_display_int_list";
-		func.add(new StoreArgumentInsn(_child->emit(func), 0, _child->type()));
+		vector<Location> args;
+		args.push(_child->emit(func));
 		Location label;
-		label.type = SSA_LABEL;
-		label.label_index = ssa_find_label(name);
-		return func.add(new CallInsn(label, type()));
+		label.type = LOC_LABEL;
+		label.label_index = find_label(name);
+		return func.add(new CallInsn(label, args, type()));
 	}
 
 	void ASTDisplay::format(stream& io) const {
 		write(io, "(display ", _child, ")");
 	}
 
-  ASTNativeCall::ASTNativeCall(SourceLocation loc, const string &func_name, const Type* ret)
-    : basil::ASTNode(loc), _func_name(func_name), _ret(ret) {}
+  	ASTNativeCall::ASTNativeCall(SourceLocation loc, const string &func_name, const Type* ret): 
+	  	basil::ASTNode(loc), _func_name(func_name), _ret(ret) {}
 
-  ASTNativeCall::ASTNativeCall(SourceLocation loc, const string &func_name, const Type *ret, const vector<ASTNode*>& args, const vector<const Type*>& arg_types)
-    : ASTNode(loc), _func_name(func_name), _ret(ret), _args(args), _arg_types(arg_types) {
+	ASTNativeCall::ASTNativeCall(SourceLocation loc, const string &func_name, const Type *ret, const vector<ASTNode*>& args, const vector<const Type*>& arg_types): 
+		ASTNode(loc), _func_name(func_name), _ret(ret), _args(args), _arg_types(arg_types) {
 		for (ASTNode* node : _args) node->inc();
 	}
 
@@ -784,23 +917,24 @@ namespace basil {
 		for (ASTNode* node : _args) node->dec();
 	}
 
-  const Type* ASTNativeCall::lazy_type() {
-    for (int i = 0; i < _args.size(); i ++) {
-      if (!unify(_args[i]->type(), _arg_types[i])) {
-        err(_args[i]->loc(), "Expected '", _arg_types[i], "', given '", _args[i]->type(), "'.");
-      }
-    }
-    return _ret;
-  }
+	const Type* ASTNativeCall::lazy_type() {
+		for (int i = 0; i < _args.size(); i ++) {
+			if (!unify(_args[i]->type(), _arg_types[i])) {
+				err(_args[i]->loc(), "Expected '", _arg_types[i], "', given '", _args[i]->type(), "'.");
+			}
+		}
+		return _ret;
+	}
 
-  Location ASTNativeCall::emit(Function& func) {
-    for (int i = 0; i < _args.size(); i ++)
-      func.add(new StoreArgumentInsn(_args[i]->emit(func), i, _args[i]->type()));
+  	Location ASTNativeCall::emit(Function& func) {
+		vector<Location> args;
+		for (int i = 0; i < _args.size(); i ++)
+			args.push(_args[i]->emit(func));
 		Location label;
-		label.type = SSA_LABEL;
-		label.label_index = ssa_find_label(_func_name);
-    return func.add(new CallInsn(label, _ret));
-  }
+		label.type = LOC_LABEL;
+		label.label_index = find_label(_func_name);
+    	return func.add(new CallInsn(label, args, _ret));
+  	}
 
   void ASTNativeCall::format(stream& io) const {
     write(io, "(", _func_name);
@@ -811,27 +945,58 @@ namespace basil {
 	ASTAssign::ASTAssign(SourceLocation loc, const ref<Env> env,
 		u64 dest, ASTNode* src): ASTUnary(loc, src), _env(env), _dest(dest) {}
 
-	const Type* ASTAssign::lazy_type() {
-    const Type* src_type = _child->type();
-    const Def* def = _env->find(symbol_for(_dest));
-    const Type* dest_type = ((const RuntimeType*)def->value.type())->base();
-    if (src_type == ERROR || dest_type == ERROR)
-      return ERROR;
-    if (!unify(src_type, dest_type)) {
-      err(loc(), "Invalid arguments to assignment '", src_type, "' and '", dest_type, "'.");
-      return ERROR;
-    }
-    return VOID;
+		const Type* ASTAssign::lazy_type() {
+		const Type* src_type = _child->type();
+		const Def* def = _env->find(symbol_for(_dest));
+		const Type* dest_type = ((const RuntimeType*)def->value.type())->base();
+		if (src_type == ERROR || dest_type == ERROR)
+			return ERROR;
+		if (!unify(src_type, dest_type)) {
+			err(loc(), "Invalid arguments to assignment '", src_type, "' and '", dest_type, "'.");
+			return ERROR;
+		}
+		return VOID;
 	}
 
 	Location ASTAssign::emit(Function& func) {
 		const Def* def = _env->find(symbol_for(_dest));
-		if (!def) return ssa_none();
-		return func.add(new StoreInsn(def->location, _child->emit(func), false));
+		if (!def) return loc_none();
+		return func.add(new StoreInsn(def->location, _child->emit(func)));
 	}
 
 	void ASTAssign::format(stream& io) const {
-    write(io, "(= ", symbol_for(_dest), " ", _child, ")");
+    	write(io, "(= ", symbol_for(_dest), " ", _child, ")");
+	}
+	
+	ASTAnnotate::ASTAnnotate(SourceLocation loc, ASTNode* value, const Type* type):
+		ASTNode(loc), _value(value), _type(type) {
+		_value->inc();
+	}
+
+	ASTAnnotate::~ASTAnnotate() {
+		_value->dec();
+	}
+
+	const Type* ASTAnnotate::lazy_type() {
+		const Type* inferred = unify(_value->type(), _type);
+		if (!inferred) {
+			err(_value->loc(), "Could not assign type '", _type,
+				"' to value of incompatible type '", _value->type(), "'.");
+			return ERROR;
+		}
+		return inferred;
+	}
+
+	ref<SSANode> ASTAnnotate::emit(ref<BasicBlock>& parent) {
+		return _value->emit(parent);
+	}
+
+	Location ASTAnnotate::emit(Function& function) {
+		return _value->emit(function);
+	}
+
+	void ASTAnnotate::format(stream& io) const {
+		write(io, "(: ", _value, " ", _type, ")");
 	}
 }
 

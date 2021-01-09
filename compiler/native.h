@@ -2,7 +2,7 @@
 #define BASIL_NATIVE_H
 
 #include "util/defs.h"
-#include "ssa.h"
+#include "ir.h"
 #include "jasmine/x64.h"
 
 namespace basil {

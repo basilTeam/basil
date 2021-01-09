@@ -3,7 +3,6 @@
 
 #include "defs.h"
 #include "slice.h"
-#include <new>
 
 template<typename T>
 class vector {
@@ -143,5 +142,23 @@ public:
         return *(end() - 1);
     }
 };
+
+template<typename T>
+void fill_vector(vector<T>& v, const T& t) {
+    v.push(t);
+}
+
+template<typename T, typename ...Args>
+void fill_vector(vector<T>& v, const T& t, const Args&... args) {
+    v.push(t);
+    fill_vector(v, args...);
+}
+
+template<typename T, typename ...Args>
+vector<T> vector_of(const Args&... args) {
+    vector<T> v;
+    fill_vector(v, args...);
+    return v;
+}
 
 #endif

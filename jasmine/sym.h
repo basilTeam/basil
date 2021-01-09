@@ -2,7 +2,6 @@
 #define JASMINE_SYMBOL_H
 
 #include "utils.h"
-#include <new>
 
 namespace jasmine {
     enum SymbolLinkage : u8 {

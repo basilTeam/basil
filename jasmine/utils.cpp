@@ -1,5 +1,5 @@
 #include "utils.h"
-#include <cstdlib>
+#include "stdlib.h"
 
 byte_buffer::byte_buffer():
     _start(0), _end(0), _capacity(32), _data(new u8[_capacity]) {

@@ -20,6 +20,7 @@ namespace basil {
   class ListValue;
   class SumValue;
   class ProductValue;
+  class ArrayValue;
   class FunctionValue;
   class AliasValue;
   class MacroValue;
@@ -43,6 +44,7 @@ namespace basil {
     Value(ListValue* l);
     Value(SumValue* s, const Type* type);
     Value(ProductValue* p);
+    Value(ArrayValue* a);
     Value(FunctionValue* f);
     Value(AliasValue* f);
     Value(MacroValue* f);
@@ -79,6 +81,10 @@ namespace basil {
     const ListValue& get_list() const;
     ListValue& get_list();
 
+    bool is_array() const;
+    const ArrayValue& get_array() const;
+    ArrayValue& get_array();
+
     bool is_sum() const;
     const SumValue& get_sum() const;
     SumValue& get_sum();
@@ -100,8 +106,8 @@ namespace basil {
     MacroValue& get_macro(); 
 
 		bool is_runtime() const;
-		const ASTNode* get_runtime() const;
-		ASTNode* get_runtime();
+		ASTNode* get_runtime() const;
+		ASTNode*& get_runtime();
 
     const Type* type() const;
     void format(stream& io) const;
@@ -155,6 +161,12 @@ namespace basil {
     const Value* end() const;
     Value* begin();
     Value* end();
+    const vector<Value>& values() const;
+  };
+
+  class ArrayValue : public ProductValue {
+  public:
+    ArrayValue(const vector<Value>& values);
   };
 
   using BuiltinFn = Value (*)(ref<Env>, const Value& params);
@@ -250,30 +262,45 @@ namespace basil {
   Value tail(const Value& v);
   Value cons(const Value& head, const Value& tail);
   Value empty();
-  Value list_of(const Value& element);
+  Value at(const Value& tuple, const Value& index);
 	vector<Value> to_vector(const Value& list);
 	Value is_empty(const Value& list);
 
+  Value list_of(const Value& element);
   template<typename ...Args>
   Value list_of(const Value& element, Args... args) {
     return cons(element, list_of(args...));
   }
-  
   Value list_of(const vector<Value>& elements);
+
+  template<typename ...Args>
+  Value tuple_of(const Value& element, Args... args) {
+    return tuple_of(vector_of(args...));
+  }
+  Value tuple_of(const vector<Value>& elements);
+
+  template<typename ...Args>
+  Value array_of(const Value& element, Args... args) {
+    return array_of(vector_of(args...));
+  }
+  Value array_of(const vector<Value>& elements);
 
   Value error();
 
   Value length(const Value& str);
 
   Value read_line();
-  Value char_at(const Value& str, const Value& idx);
+  Value strcat(const Value& a, const Value& b);
+  Value substr(const Value& str, const Value& start, const Value& end);
 
+  ASTNode* instantiate(SourceLocation loc, FunctionValue& fn, 
+		const Type* args_type);
   Value type_of(const Value& v);
-
+  Value is(const Value& v, const Value& t);
+  Value annotate(const Value& val, const Value& type);
+  Value as(const Value& v, const Value& t);
   Value call(ref<Env> env, Value& function, const Value& arg);
-
 	Value display(const Value& arg);
-
 	Value assign(ref<Env> env, const Value& dest, const Value& src);
 }
 

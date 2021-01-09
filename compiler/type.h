@@ -16,10 +16,11 @@ namespace basil {
     KIND_LIST = GC_KIND_FLAG | 0, 
     KIND_SUM = GC_KIND_FLAG | 1,
     KIND_PRODUCT = GC_KIND_FLAG | 2,
-    KIND_FUNCTION = GC_KIND_FLAG | 3,
-    KIND_ALIAS = GC_KIND_FLAG | 4,
-    KIND_MACRO = GC_KIND_FLAG | 5,
-		KIND_RUNTIME = GC_KIND_FLAG | 6
+    KIND_ARRAY = GC_KIND_FLAG | 3,
+    KIND_FUNCTION = GC_KIND_FLAG | 4,
+    KIND_ALIAS = GC_KIND_FLAG | 5,
+    KIND_MACRO = GC_KIND_FLAG | 6,
+		KIND_RUNTIME = GC_KIND_FLAG | 7
   };
 
   class Type {
@@ -33,6 +34,7 @@ namespace basil {
 		virtual bool concrete() const;
 		virtual const Type* concretify() const;
     virtual bool operator==(const Type& other) const = 0;
+    virtual bool coerces_to(const Type& other) const;
     virtual void format(stream& io) const = 0;
   };
 
@@ -56,6 +58,26 @@ namespace basil {
 		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
+    bool coerces_to(const Type& other) const override;
+    void format(stream& io) const override;
+  };
+
+  class ArrayType : public Type {
+    const Type* _element;
+    u32 _size;
+    bool _fixed;
+  public:
+    ArrayType(const Type* element);
+    ArrayType(const Type* element, u32 size);
+
+    const Type* element() const;
+    u32 count() const;
+    bool fixed() const;
+		bool concrete() const override;
+		const Type* concretify() const override;
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
+    bool coerces_to(const Type& other) const override;
     void format(stream& io) const override;
   };
 
@@ -67,6 +89,7 @@ namespace basil {
     bool has(const Type* member) const;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
+    bool coerces_to(const Type& other) const override;
     void format(stream& io) const override;
   };
 
@@ -81,6 +104,7 @@ namespace basil {
 		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
+    bool coerces_to(const Type& other) const override;
     void format(stream& io) const override;
   };
 
@@ -163,7 +187,7 @@ namespace basil {
   extern const Type *INT, *SYMBOL, *VOID, *ERROR, *TYPE, 
                     *ALIAS, *BOOL, *ANY, *STRING;
 	
-	const Type* unify(const Type* a, const Type* b);
+	const Type* unify(const Type* a, const Type* b, bool coercing = false, bool converting = false);
 }
 
 template<>

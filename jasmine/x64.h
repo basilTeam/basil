@@ -151,8 +151,10 @@ namespace x64 {
 
         ArgType type;
     };    
-		
-		bool is_register(ArgType type);
+
+    bool operator==(const Arg& lhs, const Arg& rhs);
+
+	bool is_register(ArgType type);
     bool is_immediate(ArgType type);
     bool is_memory(ArgType type);
     bool is_label(ArgType type);

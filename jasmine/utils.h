@@ -1,7 +1,7 @@
 #ifndef JASMINE_UTIL_H
 #define JASMINE_UTIL_H
 
-#include <cstdint>
+#include "stdint.h"
 
 #include "../util/defs.h"
 #include "../util/vec.h"

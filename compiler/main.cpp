@@ -7,18 +7,12 @@
 
 using namespace basil;
 
-#define PRINT_TOKENS false
-#define PRINT_AST false
-#define PRINT_EVAL true
-#define PRINT_SSA false
-#define PRINT_ASM false
-
 void print_banner() {
 	println("");
 	println("┌────────────────────────────────────────┐");
 	println("│                                        │");
 	println("│          ", BOLDGREEN, R"(𝐵𝑎𝑠𝑖𝑙)",
-		RESET, " — version 0.1           │");
+		RESET, " — version 0.1      │");
 	println("│                                        │");
 	println("└────────────────────────────────────────┘");
 	println(RESET);
@@ -61,13 +55,13 @@ Value print_ast(ref<Env> env, const Value& args) {
 	return Value(VOID);
 }
 
-Value print_ssa(ref<Env> env, const Value& args) {
+Value print_ir(ref<Env> env, const Value& args) {
 	if (!args.get_product()[0].is_bool()) {
 		err(args.get_product()[0].loc(), "Print SSA command requires bool, '",
 			args.get_product()[0], "' provided.");
 		return ERROR;
 	}
-	basil::print_ssa(args.get_product()[0].get_bool());
+	basil::print_ir(args.get_product()[0].get_bool());
 	return Value(VOID);
 }
 
@@ -89,7 +83,7 @@ Value repl_help(ref<Env> env, const Value& args) {
 	println(" - $print-tokens <bool>  => toggles token printing.");
 	println(" - $print-parse <bool>   => toggles parse tree printing.");
 	println(" - $print-ast <bool>     => toggles AST printing.");
-	println(" - $print-ssa <bool>     => toggles SSA printing.");
+	println(" - $print-ir <bool>      => toggles IR printing.");
 	println(" - $print-asm <bool>     => toggles assembly printing.");
 	println("");
 	return Value(VOID);
@@ -111,10 +105,9 @@ int main(int argc, char** argv) {
 		root->def("$print-tokens", new FunctionValue(root, print_tokens, 1), 1);
 		root->def("$print-parse", new FunctionValue(root, print_parse, 1), 1);
 		root->def("$print-ast", new FunctionValue(root, print_ast, 1), 1);
-		root->def("$print-ssa", new FunctionValue(root, print_ssa, 1), 1);
+		root->def("$print-ir", new FunctionValue(root, print_ir, 1), 1);
 		root->def("$print-asm", new FunctionValue(root, print_asm, 1), 1);
-		Env global_env(root);
-		ref<Env> global(global_env);
+		ref<Env> global = newref<Env>(root);
 		Function main_fn("main");
 
 		while (!repl_done) repl(global, src, main_fn);
@@ -126,6 +119,10 @@ int main(int argc, char** argv) {
 	else if (argc == 3 && string(argv[1]) == "run") {
 		Source src(argv[2]);
 		return run(src);
+	}
+	else if (argc == 3 && string(argv[1]) == "build") {
+		Source src(argv[2]);
+		return build(src, argv[2]);
 	}
 	else if (argc > 2 && string(argv[1]) == "exec") {
 		Source src;
@@ -152,6 +149,7 @@ int main(int argc, char** argv) {
 	println(" - basil help            => prints usage information.");
 	println(" - basil intro           => runs interactive introduction.");
 	println(" - basil exec <code...>  => executes <code...>.");
+	println(" - basil build <file>    => compiles <file> to object.");
 	println("");
 }
 
@@ -811,8 +809,8 @@ R"(Enter ':okay!' into the prompt when you're ready to continue.
 )", Value("okay!")});
 }
 
-#include <cstdlib>
-#include <ctime>
+#include "stdlib.h"
+#include "time.h"
 
 void print_intro_conclusion() {
 	println(BOLDGREEN, "Congratulations! \n", RESET);
@@ -865,8 +863,7 @@ int intro() {
 	};
 
 	while (!repl_done) {
-		Env global_env(root);
-		ref<Env> global(global_env);
+		ref<Env> global = newref<Env>(root);
 		Function main_fn("main");
 
 		bool is_running_intro = running_intro;

@@ -2,6 +2,7 @@
 #define BASIL_RC_H
 
 #include "defs.h"
+#include "stddef.h"
 
 class RC {
   u64 _count;
@@ -12,60 +13,72 @@ public:
   void dec();
 };
 
-enum NullType { NULL_VALUE };
-
 template<typename T>
 class ref {
-  struct BoxedValue {
-    u64 count;
-    T data;
-  }* _value;
-
-  ref(NullType): _value(nullptr) {}
 public:
-  static constexpr ref null();
-  template<typename... Args>
-  ref(Args... args): _value(new BoxedValue{1, T(args...)}) {}
-  
-  ~ref() {
-    if (_value && !--_value->count) delete _value;
+  u64* _count;
+  T* _data;
+
+  ref(): _count(nullptr), _data(nullptr) {}
+  ref(T* t): _count(new u64(1)), _data(t) {}
+  ref(decltype(nullptr) null): ref() {}
+  virtual ~ref() {
+    if (_data && !--*_count) {
+      delete _data;
+      delete _count;
+    }
   }
   
-  ref(const ref& other): _value(other._value) {
-    if (other._value) other._value->count ++;
+  ref(const ref& other): _count(other._count), _data(other._data) {
+    if (_data) ++ *_count;
   }
 
   ref& operator=(const ref& other) {
-    if (other._value) other._value->count ++;
-    if (_value && !--_value->count) delete _value;
-    _value = other._value;
+    if (other._data) ++ *(u64*)other._count;
+    if (_data && !--*_count) {
+      delete _data;
+      delete _count;
+    }
+    _data = other._data;
+    _count = other._count;
 		return *this;
   }
 
   const T& operator*() const {
-    return _value->data;
+    return *_data;
   }
 
   T& operator*() {
-    return _value->data;
+    return *_data;
   }
 
   const T* operator->() const {
-    return &_value->data;
+    return _data;
   }
 
   T* operator->() {
-    return &_value->data;
+    return _data;
   }
 
   operator bool() const {
-    return _value;
+    return _data;
+  }
+
+  template<typename U>
+  operator ref<U>() {
+    ref<U> copy;
+    if (_data) {
+      copy._data = (U*)_data;
+      copy._count = _count;
+      ++ *copy._count;
+    }
+    return copy;
   }
 };
 
-template<typename T>
-constexpr ref<T> ref<T>::null() {
-  return ref(NULL_VALUE);
+template<typename T, typename... Args>
+ref<T> newref(Args... args) {
+  return ref<T>(new T(args...));
 }
 
 #endif

@@ -1,9 +1,12 @@
-SRCS := $(wildcard *.cpp) $(wildcard util/*.cpp) $(wildcard jasmine/*.cpp)
+SRCS := $(wildcard *.cpp) \
+		$(wildcard compiler/*.cpp) \
+		$(wildcard util/*.cpp) \
+		$(wildcard jasmine/*.cpp)
 OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 
 CXX := clang++
-CXXHEADERS := -I. -Iutil -Ijasmine
-CXXFLAGS := $(CXXHEADERS) -std=c++17 -ffast-math -fno-rtti -fno-exceptions -Wno-null-dereference
+CXXHEADERS := -I. -Iutil -Ijasmine -Icompiler
+CXXFLAGS := $(CXXHEADERS) -std=c++17 -ffast-math -fno-rtti -fno-exceptions -Wno-null-dereference -Wl,--unresolved-symbols=ignore-in-object-files
 
 clean:
 	rm -f $(OBJS) *.o.tmp basil

@@ -1,9 +1,9 @@
 #include "obj.h"
 #include "sym.h"
 #include "target.h"
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
+#include "stdio.h"
+#include "stdlib.h"
+#include "string.h"
 
 namespace jasmine {
     Object::Object(Architecture architecture):
@@ -39,11 +39,11 @@ namespace jasmine {
         for (auto& ref : refs) {
             u8* pos = (u8*)loaded_code + ref.first;
             u8* sym = (u8*)find(ref.second.symbol);
-						if (!sym) {
-							fprintf(stderr, "[ERROR] Could not resolve ref '%s'.\n", 
-								name(ref.second.symbol));
-							exit(1);
-						}
+            if (!sym) {
+                fprintf(stderr, "[ERROR] Could not resolve ref '%s'.\n", 
+                    name(ref.second.symbol));
+                exit(1);
+            }
             u8* field = pos + ref.second.field_offset;
             switch (ref.second.type) {
                 case REL8:
@@ -261,8 +261,181 @@ namespace jasmine {
 
     void* Object::find(Symbol symbol) const {
         if (!loaded_code) return nullptr;
-				auto it = defs.find(symbol);
-				if (it == defs.end()) return nullptr;
+        auto it = defs.find(symbol);
+        if (it == defs.end()) return nullptr;
         return (u8*)loaded_code + it->second;
+    }
+
+    struct ELFSectionHeader { 
+        u32 type; 
+        u64 flags; 
+        u32 name_index;
+        byte_buffer* buf;
+        u32 entry_size;
+        u32 link = 0, info = 0;
+    };
+
+    static const u64 ELF_SHF_WRITE = 0x01,
+        ELF_SHF_ALLOC = 0x02,
+        ELF_SHF_EXECINSTR = 0x04,
+        ELF_SHF_STRINGS = 0x20;
+
+    u16 elf_machine_for(Architecture arch) {
+        switch (arch) {
+            case X86:
+                return 0x03;
+            case X86_64:
+                return 0x3e;
+            case AARCH64:
+                return 0xb7;
+            default:
+                return 0;
+        }
+    }
+
+    u8 elf_reloc_for(Architecture arch, RefType type) {
+        switch (arch) {
+            case X86_64: switch(type) {
+                case REL8:
+                    return 15;
+                case REL16_BE:
+                case REL16_LE:
+                    return 13;
+                case REL32_BE:
+                case REL32_LE:
+                    return 2;
+                case REL64_BE:
+                case REL64_LE:
+                    return 24;
+                case ABS8:
+                    return 14;
+                case ABS16_BE:
+                case ABS16_LE:
+                    return 12;
+                case ABS32_BE:
+                case ABS32_LE:
+                    return 10;
+                case ABS64_BE:
+                case ABS64_LE:
+                    return 1;
+                default:
+                    return 0;
+                }
+            default:
+                return 0;
+        }
+    }
+
+    void Object::writeELF(const char* path) {
+        FILE* file = fopen(path, "w");
+        if (!file) {
+            fprintf(stderr, "[ERROR] Could not open file '%s'.\n", path);
+            exit(1);
+        }
+
+        byte_buffer elf;
+        elf.write((char)0x7f, 'E', 'L', 'F');
+        elf.write<u8>(0x02); // ELFCLASS64
+        elf.write<u8>((EndianOrder)host_order.value == EndianOrder::UTIL_LITTLE_ENDIAN ?
+            1 : 2); // endianness
+        elf.write<u8>(1); // EV_CURRENT
+        for (int i = 7; i < 16; i ++) elf.write('\0');
+
+        elf.write<u16>(1); // relocatable
+        elf.write<u16>(elf_machine_for(arch));
+        elf.write<u32>(1); // original elf version
+        elf.write<u64>(0); // entry point
+        elf.write<u64>(0); // no program header
+        elf.write<u64>(0x40); // section header starts after elf header
+        elf.write<u32>(0); // no flags
+        elf.write<u16>(0x40); // elf header size
+        elf.write<u16>(0); // phentsize (unused)
+        elf.write<u16>(0); // phnum (unused)
+        elf.write<u16>(0x40); // section header entry size
+        elf.write<u16>(6); // num sections
+        elf.write<u16>(1); // section header strings are section 0
+
+        byte_buffer strtab, symtab;
+        strtab.write('\0');
+        symtab.write<u64>(0); // reserved symbol 0
+        symtab.write<u64>(0);
+        symtab.write<u64>(0);
+        map<Symbol, u64> sym_indices;
+        vector<pair<Symbol, u64>> locals, globals, total;
+        for (auto& entry : defs) {
+            if (entry.first.type == LOCAL_SYMBOL) locals.push(entry);
+            else globals.push(entry);
+        }
+        for (auto& entry : refs) {
+            if (defs.find(entry.second.symbol) == defs.end())
+                globals.push({ entry.second.symbol, -1ul });
+        }
+        for (auto& entry : locals) total.push(entry);
+        for (auto& entry : globals) total.push(entry);
+        for (u32 i = 0; i < total.size(); i ++)
+            sym_indices[total[i].first] = i;
+        for (auto& entry : total) {
+            u32 ind = strtab.size();
+            strtab.write(name(entry.first), strlen(name(entry.first)) + 1);
+            symtab.write<u32>(ind); // name
+            u8 info = 0;
+            info |= (entry.first.type == LOCAL_SYMBOL ? 0 : 1) << 4; // binding
+            info |= 2; // function value assumed...for now
+            symtab.write(info);
+            symtab.write('\0'); // padding
+            symtab.write<u16>(entry.second == -1ul ? 0 : 4); // .text section index
+            symtab.write<u64>(entry.second == -1ul ? 0 : entry.second); // address
+            symtab.write<u64>(8); // symbol size = word size?
+        }
+
+        byte_buffer rel;
+        for (auto& entry : refs) {
+            u64 sym = entry.first;
+            rel.write<u64>(sym + entry.second.field_offset);
+            u64 info = 0;
+            info |= sym_indices[entry.second.symbol] << 32l;
+            info |= elf_reloc_for(arch, entry.second.type);
+            rel.write<u64>(info);
+        }
+
+        byte_buffer shstrtab, shdrs;
+        vector<pair<string, ELFSectionHeader>> sections;
+        shstrtab.write('\0');
+        byte_buffer empty;
+        sections.push({ "", { 0, 0, 0, &empty, 0 } });
+        sections.push({ ".shstrtab", { 3, ELF_SHF_STRINGS, 0, &shstrtab, 0 } });
+        sections.push({ ".strtab", { 3, ELF_SHF_STRINGS, 0, &strtab, 0 } });
+        sections.push({ ".symtab", { 2, 0, 0, &symtab, 24, 2, locals.size() + 1 } });
+        sections.push({ ".text", { 1, ELF_SHF_ALLOC | ELF_SHF_EXECINSTR, 0, &buf, 0 } });
+        sections.push({ ".rel.text", { 9, 0, 0, &rel, 16, 3, 4 } });
+        sections.push({ ".data", { 1, ELF_SHF_ALLOC | ELF_SHF_WRITE, 0, &empty, 0 } });
+        sections.push({ ".bss", { 1, ELF_SHF_ALLOC | ELF_SHF_WRITE, 0, &empty, 0 } });
+        for (auto& entry : sections) {
+            entry.second.name_index = shstrtab.size();
+            shstrtab.write((const char*)entry.first.raw(), entry.first.size() + 1);
+        }
+        u64 offset = 0x40 + sections.size() * 0x40; // combined size of shdrs and elf header
+        for (auto& entry : sections) {
+            shdrs.write<u32>(entry.second.name_index); // offset to string
+            shdrs.write<u32>(entry.second.type);
+            shdrs.write<u64>(entry.second.flags);
+            shdrs.write<u64>(0);
+            shdrs.write<u64>(offset);
+            shdrs.write<u64>(entry.second.buf->size());
+            offset += entry.second.buf->size();
+            shdrs.write<u32>(entry.second.link);
+            shdrs.write<u32>(entry.second.info);
+            shdrs.write<u64>(1);
+            shdrs.write<u64>(entry.second.entry_size);
+        }
+
+        while (shdrs.size()) elf.write(shdrs.read());
+
+        for (auto& entry : sections) {
+            while (entry.second.buf->size()) elf.write(entry.second.buf->read());
+        }
+        
+        while (elf.size()) fputc(elf.read(), file);
+        fclose(file);
     }
 }

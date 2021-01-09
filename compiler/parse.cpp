@@ -57,12 +57,31 @@ namespace basil {
 
   void parse_enclosed(TokenView& view, vector<Value>& terms, 
     TokenType terminator, u32 indent) {
+    vector<Value> tuple_elements;
+    bool errored = false;
     while (view.peek().type != terminator) {
       while (view.peek().type == T_NEWLINE) view.read();
       if (!view.peek() && out_of_input(view)) return;
       terms.push(parse(view, indent));
+      if (view.peek().type == T_COMMA) {
+        if (terminator != T_RPAREN && !errored) { // not enclosed by parens
+          err(view.peek(), "Tuple literals require parentheses."), errored = true;
+          tuple_elements.push(error());
+        }
+        else if (!errored) { // correct usage
+          tuple_elements.push(list_of(terms));
+          terms.clear();
+        }
+        view.read();
+      }
     }
     view.read();
+    if (tuple_elements.size() > 0) {
+      tuple_elements.push(list_of(terms));
+      terms.clear();
+      terms.push(Value("tuple-of"));
+      for (const Value& v : tuple_elements) terms.push(v);
+    }
   }
 
   void parse_block(TokenView& view, vector<Value>& terms, 
@@ -169,6 +188,7 @@ namespace basil {
         view.read();
         vector<Value> terms;
         parse_enclosed(view, terms, T_RPAREN, indent);
+        for (const Value& v : terms) if (v.is_error()) return error();
         Value v = list_of(terms);
         v.set_location(first);
         return v;
@@ -178,6 +198,7 @@ namespace basil {
         vector<Value> terms;
         terms.push(Value("list-of"));
         parse_enclosed(view, terms, T_RBRACK, indent);
+        for (const Value& v : terms) if (v.is_error()) return error();
         Value v = list_of(terms);
         v.set_location(first);
         return v;
@@ -187,6 +208,7 @@ namespace basil {
         vector<Value> terms;
         terms.push(Value("set-of"));
         parse_enclosed(view, terms, T_RBRACE, indent);
+        for (const Value& v : terms) if (v.is_error()) return error();
         Value v = list_of(terms);
         v.set_location(first);
         return v;
@@ -195,6 +217,7 @@ namespace basil {
         view.read();
         vector<Value> terms;
         parse_enclosed(view, terms, T_PIPE, indent);
+        for (const Value& v : terms) if (v.is_error()) return error();
         Value v = cons(Value("splice"), list_of(terms));
         v.set_location(first);
         return v;

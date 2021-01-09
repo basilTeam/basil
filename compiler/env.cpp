@@ -104,8 +104,7 @@ namespace basil {
   }
   
   ref<Env> Env::clone() const {
-    Env new_env(_parent);
-    ref<Env> new_ref(new_env);
+    ref<Env> new_ref = newref<Env>(_parent);
     for (auto& p : _defs) new_ref->_defs.put(p.first, p.second);
 		new_ref->_runtime = _runtime;
     return new_ref;

@@ -1,7 +1,8 @@
 #ifndef BASIL_DEFS_H
 #define BASIL_DEFS_H
 
-#include <cstdint>
+#include "stdint.h"
+#include "utils.h"
 
 typedef uint8_t u8;
 typedef uint16_t u16;

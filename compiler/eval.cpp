@@ -113,8 +113,16 @@ namespace basil {
     return length(args.get_product()[0]);
   }
 
-  Value builtin_char_at(ref<Env> env, const Value& args) {
-    return char_at(args.get_product()[0], args.get_product()[1]);
+  Value builtin_at(ref<Env> env, const Value& args) {
+    return at(args.get_product()[0], args.get_product()[1]);
+  }
+
+  Value builtin_strcat(ref<Env> env, const Value& args) {
+    return strcat(args.get_product()[0], args.get_product()[1]); 
+  }
+
+  Value builtin_substr(ref<Env> env, const Value& args) {
+    return substr(args.get_product()[0], args.get_product()[1], args.get_product()[2]);
   }
 
 	Value builtin_if_macro(ref<Env> env, const Value& args) {
@@ -147,8 +155,16 @@ namespace basil {
     else return eval(env, args.get_product()[2]);
 	}
 
+  Value builtin_annotate(ref<Env> env, const Value& args) {
+    return annotate(args.get_product()[0], args.get_product()[1]);
+  }
+
+  Value builtin_typeof(ref<Env> env, const Value& args) {
+    return type_of(args.get_product()[0]);
+  }
+
   ref<Env> create_root_env() {
-    ref<Env> root;
+    ref<Env> root = newref<Env>();
     root->def("nil", Value(VOID));
     root->infix("+", new FunctionValue(root, builtin_add, 2), 2, 20);
     root->infix("-", new FunctionValue(root, builtin_sub, 2), 2, 20);
@@ -179,9 +195,18 @@ namespace basil {
     root->def("read-word", new FunctionValue(root, builtin_read_word, 0), 0);
     root->def("read-int", new FunctionValue(root, builtin_read_int, 0), 0);
     root->infix("length", new FunctionValue(root, builtin_length, 1), 1, 50);
-    root->infix("at", new FunctionValue(root, builtin_char_at, 2), 2, 90);
+    root->infix("at", new FunctionValue(root, builtin_at, 2), 2, 90);
+    root->infix("^", new FunctionValue(root, builtin_strcat, 2), 2, 20);
+    root->infix("substr", new FunctionValue(root, builtin_substr, 3), 3, 90);
+    root->def("annotate", new FunctionValue(root, builtin_annotate, 2), 2);
+    root->def("typeof", new FunctionValue(root, builtin_typeof, 1), 1);
+
     root->def("true", Value(true, BOOL));
     root->def("false", Value(false, BOOL));
+    root->def("extern", Value(new ASTExtern({})));
+    root->def("int", Value(INT, TYPE));
+    root->def("symbol", Value(SYMBOL, TYPE));
+    root->def("string", Value(STRING, TYPE));
     return root;
   }
 
@@ -214,20 +239,20 @@ namespace basil {
     return values;
   }
 
-  bool introduces_env(const Value& list) {
-    if (!list.is_list()) return false;
-    const Value& h = head(list);
-    if (!h.is_symbol()) return false;
-    const string& name = symbol_for(h.get_symbol());
-    if (name == "def") {
-      return tail(list).is_list() && 
-				head(tail(list)).is_list(); // is procedure
-    }
-    else if (name == "lambda" || name == "infix" 
-			|| name == "infix-macro" || name == "macro") return true;
+    bool introduces_env(const Value& list) {
+        if (!list.is_list()) return false;
+        const Value& h = head(list);
+        if (!h.is_symbol()) return false;
+        const string& name = symbol_for(h.get_symbol());
+        if (name == "def") {
+        return tail(list).is_list() && 
+                    head(tail(list)).is_list(); // is procedure
+        }
+        else if (name == "lambda" || name == "infix" 
+                || name == "infix-macro" || name == "macro") return true;
 
-    return false;
-  }
+        return false;
+    }
 
 	static i64 traverse_deep = 0;
 
@@ -325,32 +350,84 @@ namespace basil {
     else traverse_list(env, item, visit_macro_defs);
   }
 
+  bool symbol_matches(const Value& term, const string& sym) {
+    return term.is_symbol() && term.get_symbol() == symbol_value(sym);
+  }
+
+  bool is_annotation(const Value& term) {
+    return term.is_list() && symbol_matches(head(term), "annotate");
+  }
+
+  Value annotation_type(const Value& term) {
+    return head(tail(tail(term)));
+  }
+
+  bool is_valid_argument(const Value& term) {
+    return term.is_symbol() // name
+      || is_annotation(term) && tail(term).is_list() && head(tail(term)).is_symbol();
+  }
+
+  bool is_valid_def(const Value& term) {
+    return is_valid_argument(term)
+      || term.is_list() && head(term).is_symbol()
+      || is_annotation(term) && tail(term).is_list() && is_valid_def(head(tail(term)));
+  }
+
+  bool is_valid_infix_def(const Value& term) {
+    return term.is_list() && tail(term).is_list() && head(tail(term)).is_symbol()
+      || is_annotation(term) && tail(term).is_list() && is_valid_infix_def(head(tail(term)));
+  }
+
+  string get_arg_name(const Value& term) {
+    return is_annotation(term) ? get_arg_name(head(tail(term))) 
+      : symbol_for(term.get_symbol());
+  }
+
+  string get_def_name(const Value& term) {
+    if (term.is_symbol()) return symbol_for(term.get_symbol());
+    else if (is_annotation(term)) return get_def_name(head(tail(term)));
+    else return symbol_for(head(term).get_symbol());
+  }
+
+  Value get_def_info(const Value& term) {
+    if (is_annotation(term)) return get_def_info(head(tail(term)));
+    return term;
+  }
+
+  string get_infix_name(const Value& term) {
+    if (is_annotation(term)) return get_infix_name(head(tail(term)));
+    return symbol_for(head(tail(term)).get_symbol());
+  }
+
   void visit_defs(ref<Env> env, const Value& item) {
     if (!item.is_list()) return;
     Value h = head(item);
-    if (h.is_symbol() && 
-			(h.get_symbol() == symbol_value("def")
-				|| h.get_symbol() == symbol_value("infix"))) {
-      bool infix = h.get_symbol() == symbol_value("infix");
+    if (symbol_matches(h, "def") || symbol_matches(h, "infix")) {
+      bool infix = symbol_matches(h, "infix");
       u8 precedence = 0;
 			vector<Value> values = to_vector(item);
 			u32 i = 1;
 			if (values.size() >= 2 && infix && values[i].is_int()) {
-				precedence = u8(values[i].get_int());
+				precedence = u8(values[i].get_int()); // consume precedence
 				i ++;
 			}
 			if (i + 1 >= values.size() || 
-				(!values[i].is_symbol() && 
-					!(values[i].is_list() && head(values[i]).is_symbol()) &&
-					!(values[i].is_list() && tail(values[i]).is_list() &&
-						head(tail(values[i])).is_symbol()))) {
+				!(infix ? is_valid_infix_def(values[i]) : is_valid_def(values[i]))) {
         err(item.loc(), "Expected variable or function name ",
 					"in definition.");
 				return;
 			}
       if (values.size() < 3)
         err(item.loc(), "Expected value in definition.");
-      if (values[i].is_list()) { // procedure
+      if (is_valid_argument(values[i])) { // variable
+				string name = get_arg_name(values[i]);
+				// if (env->find(name)) {
+				// 	err(values[i].loc(), "Redefinition of '", name, "'.");
+				// 	return;
+				// }
+				env->def(name);
+      }
+      else { // procedure
         if (infix) {
 					Value rest = tail(values[i]);
 					if (!rest.is_list()) {
@@ -358,8 +435,8 @@ namespace basil {
 							"argument.");
 						return;
 					}
-					const string& name = symbol_for(head(rest).get_symbol());
-					// if (env->find(name)) {
+					string name = get_infix_name(values[i]);
+          // if (env->find(name)) {
 					// 	err(values[i].loc(), "Redefinition of '", name, "'.");
 					// 	return;
 					// }
@@ -367,7 +444,7 @@ namespace basil {
 						precedence);
 				}
 				else {
-					const string& name = symbol_for(head(values[i]).get_symbol());
+					const string& name = get_def_name(values[i]);
 					// if (env->find(name)) {
 					// 	err(values[i].loc(), "Redefinition of '", name, "'.");
 					// 	return;
@@ -375,14 +452,6 @@ namespace basil {
 					env->def(name, to_vector(tail(values[i])).size());
 				}
       }
-      else {
-				const string& name = symbol_for(values[i].get_symbol());
-				// if (env->find(name)) {
-				// 	err(values[i].loc(), "Redefinition of '", name, "'.");
-				// 	return;
-				// }
-				env->def(name);
-			}
     }
     else traverse_list(env, item, visit_defs);
   }
@@ -639,6 +708,11 @@ namespace basil {
 		visit_defs(env, term);
 	}
 
+  bool is_keyword(const Value& term) {
+    return term.is_list() && tail(term).is_list() && tail(tail(term)).is_void()
+      && symbol_matches(head(term), "quote") && symbol_matches(head(tail(term)), "quote");
+  }
+
   // definition stuff
   Value define(ref<Env> env, const Value& term, bool is_macro) {
     vector<Value> values = to_vector(term);
@@ -647,10 +721,14 @@ namespace basil {
 		// don't need to check the number of values or their types
 		// exhaustively.
 
-    if (values[1].is_symbol()) { // variable
-			const string& name = symbol_for(values[1].get_symbol());
+    if (is_valid_argument(values[1])) { // variable
+			string name = get_arg_name(values[1]);
 		
       if (is_macro) {
+        if (is_annotation(values[1])) {
+          err(values[1].loc(), "Type annotations are forbidden in macro definitions.");
+          return error();
+        }
         env->def_macro(name, Value(new AliasValue(values[2])));
       	return Value(VOID);
 			}
@@ -658,6 +736,8 @@ namespace basil {
 				Value init = eval(env, values[2]);
 				if (env->is_runtime())
 					init = lower(init);
+        if (is_annotation(values[1]))
+          init = annotate(init, eval(env, annotation_type(values[1])));
         env->def(name, init);
 				if (init.is_runtime()) 
 					return new ASTDefine(values[0].loc(), env, 
@@ -666,39 +746,67 @@ namespace basil {
 			}
     }
     else if (values[1].is_list()) { // procedure
-			const string& name = symbol_for(head(values[1]).get_symbol());
-			
-			Env env_descendant(env);
-      ref<Env> function_env(env_descendant);
-      vector<Value> args = to_vector(tail(values[1]));
+			string name = get_def_name(values[1]);
+
+      ref<Env> function_env = newref<Env>(env);
+      vector<Value> args = to_vector(tail(get_def_info(values[1])));
       vector<u64> argnames;
+      vector<Value> body;
+      vector<const Type*> argts;
       for (const Value& v : args) {
-        if (v.is_symbol()) {
-          argnames.push(v.get_symbol());
-          function_env->def(symbol_for(v.get_symbol()));
+        if (is_valid_argument(v)) {
+          string name = get_arg_name(v);
+          argnames.push(symbol_value(name));
+          function_env->def(name);
         }
-				else if (v.is_list() && head(v).is_symbol()
-					&& symbol_for(head(v).get_symbol()) == "quote") {
+				else if (is_keyword(v)) {
 					argnames.push(eval(env, v).get_symbol() | KEYWORD_ARG_BIT);
 				}
 				else {
-					err(v.loc(), "Only symbols and quoted symbols are permitted ",
-						"within an argument list.");
+					err(v.loc(), "Only symbols, annotated symbols, and quoted symbols "
+            "are permitted within an argument list; given '", v, "'.");
 					return error();
 				}
+        if (is_annotation(v)) {
+          if (is_macro) {
+            err(v.loc(), "Type annotations are forbidden in macro definitions.");
+            return error();
+          }
+          Value tval = eval(env, annotation_type(v));
+          if (!tval.is_type()) {
+            err(v.loc(), "Expected type value in annotation, given '", tval.type(), "'.");
+            return error();
+          }
+          body.push(v);
+          body.push(list_of(Value("list-of")));
+          argts.push(tval.get_type());
+        }
+        else argts.push(find<TypeVariable>());
       }
-      vector<Value> body;
       for (u32 i = 2; i < values.size(); i ++) body.push(values[i]);
 			Value body_term = cons(Value("do"), list_of(body));
       if (is_macro) {
+        if (is_annotation(values[1])) {
+          err(values[1].loc(), "Type annotations are forbidden in macro definitions.");
+          return error();
+        }
         Value mac(new MacroValue(function_env, argnames, body_term));
         env->def_macro(name, mac, argnames.size());
       }
       else {
-				prep(function_env, body_term);
         Value func(new FunctionValue(function_env, argnames, body_term, 
 					symbol_value(name)));
+        if (is_annotation(values[1])) {
+          Value tval = eval(env, annotation_type(values[1]));
+          if (!tval.is_type()) {
+            err(values[1].loc(), "Expected type value in annotation, given '", tval.type(), "'.");
+            return error();
+          }
+          func = annotate(func, Value(find<FunctionType>(find<ProductType>(argts), tval.get_type()), TYPE));
+        }
         env->def(name, func, argnames.size());
+        if (find<ProductType>(argts)->concrete())
+          instantiate(func.loc(), func.get_function(), find<ProductType>(argts));
       }
       return Value(VOID);
     }
@@ -749,8 +857,7 @@ namespace basil {
       return error();
     }
     i ++;
-    Env env_descendant(env);
-    ref<Env> function_env(env_descendant);
+    ref<Env> function_env = newref<Env>(env);
     vector<u64> argnames;
     for (const Value& v : args) {
       if (v.is_symbol()) {
@@ -797,8 +904,7 @@ namespace basil {
         "expression.");
       return error();
     }
-    Env env_descendant(env);
-    ref<Env> function_env(env_descendant);
+    ref<Env> function_env = newref<Env>(env);
     vector<Value> args = to_vector(values[1]);
     vector<u64> argnames;
     for (const Value& v : args) {
@@ -979,6 +1085,30 @@ namespace basil {
     return list_of(vals);
   }
 
+  Value tuple_of(ref<Env> env, const Value& term) {
+    Value items = tail(term);
+
+    const Value* v = &items;
+    vector<Value> vals;
+    while (v->is_list()) {
+      vals.push(eval(env, v->get_list().head()));
+      v = &v->get_list().tail();
+    }
+    return tuple_of(vals);
+  }
+
+  Value array_of(ref<Env> env, const Value& term) {
+    Value items = tail(term);
+
+    const Value* v = &items;
+    vector<Value> vals;
+    while (v->is_list()) {
+      vals.push(eval(env, v->get_list().head()));
+      v = &v->get_list().tail();
+    }
+    return array_of(vals);
+  }
+
 	struct CompilationUnit {
 		Source source;
 		ref<Env> env;
@@ -1038,11 +1168,19 @@ namespace basil {
       else if (name == "do") return do_block(env, term);
       else if (name == "if") return eval(env, if_expr(env, term));
       else if (name == "list-of") return list_of(env, term);
+      else if (name == "tuple-of") return tuple_of(env, term);
+      else if (name == "array-of") return array_of(env, term);
 			else if (name == "use") return use(env, term);
 			else if (name == "while") return while_stmt(env, term);
     }
 
     Value first = eval(env, h);
+
+    if (h.is_symbol() && tail(term).is_void()) {
+        const Def* def = env->find(symbol_for(h.get_symbol()));
+        if (def->is_infix) return first;
+    }
+    
     if (first.is_macro()) {
       vector<Value> args;
       const Value* v = &term.get_list().tail();

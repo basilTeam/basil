@@ -1,6 +1,6 @@
 #include "x64.h"
-#include <cstdio>
-#include <cstdlib>
+#include "stdio.h"
+#include "stdlib.h"
 
 namespace x64 {
     using namespace jasmine;
@@ -49,11 +49,11 @@ namespace x64 {
     }
 
     bool is_register(ArgType type) {
-        return type < 4;
+        return type >= REGISTER8 && type <= REGISTER64;
     }
 
     bool is_immediate(ArgType type) {
-        return (type >= 4 && type < 7) || type == IMM_AUTO;
+        return (type >= IMM8 && type <= IMM64) || type == IMM_AUTO;
     }
 
     bool is_memory(ArgType type) {
@@ -64,17 +64,17 @@ namespace x64 {
         return (type >= LABEL8 && type <= LABEL64) || type == LABEL_AUTO;
     }
 
-		bool is_absolute(ArgType type) {
-			return (type >= ABSOLUTE8 && type <= ABSOLUTE64) || type == ABSOLUTE_AUTO;
-		}
+    bool is_absolute(ArgType type) {
+        return (type >= ABSOLUTE8 && type <= ABSOLUTE64) || type == ABSOLUTE_AUTO;
+    }
 
-		bool is_rip_relative(ArgType type) {
-			return (type >= RIPRELATIVE8 && type <= RIPRELATIVE64) || type == RIPRELATIVE_AUTO;
-		}
+    bool is_rip_relative(ArgType type) {
+        return (type >= RIPRELATIVE8 && type <= RIPRELATIVE64) || type == RIPRELATIVE_AUTO;
+    }
 
-		bool is_displacement_only(ArgType type) {
-			return is_absolute(type) || is_rip_relative(type);
-		}
+    bool is_displacement_only(ArgType type) {
+        return is_absolute(type) || is_rip_relative(type);
+    }
 
     Size operand_size(ArgType type) {
         if (type >= IMM_AUTO) return AUTO;
@@ -129,18 +129,18 @@ namespace x64 {
             case SCALED_INDEX64:
             case SCALED_INDEX_AUTO:
                 return arg.data.scaled_index.offset;
-						case ABSOLUTE8:
-						case ABSOLUTE16:
-						case ABSOLUTE32:
-						case ABSOLUTE64:
-						case ABSOLUTE_AUTO:
-								return arg.data.absolute;
-						case RIPRELATIVE8:
-						case RIPRELATIVE16:
-						case RIPRELATIVE32:
-						case RIPRELATIVE64:
-						case RIPRELATIVE_AUTO:
-								return arg.data.rip_relative;
+                    case ABSOLUTE8:
+                    case ABSOLUTE16:
+                    case ABSOLUTE32:
+                    case ABSOLUTE64:
+                    case ABSOLUTE_AUTO:
+                        return arg.data.absolute;
+                    case RIPRELATIVE8:
+                    case RIPRELATIVE16:
+                    case RIPRELATIVE32:
+                    case RIPRELATIVE64:
+                    case RIPRELATIVE_AUTO:
+                        return arg.data.rip_relative;
             default: 
                 return 0;
         }
@@ -165,6 +165,22 @@ namespace x64 {
     bool is_scaled_addressing(ArgType type) {
         return (type >= SCALED_INDEX8 && type <= SCALED_INDEX64)
             || type == SCALED_INDEX_AUTO;
+    }
+
+    bool operator==(const Arg& lhs, const Arg& rhs) {
+        if (lhs.type != rhs.type) return false;
+        if (is_register(lhs.type)) return lhs.data.reg == rhs.data.reg;
+        if (is_immediate(lhs.type)) return lhs.data.imm64 == rhs.data.imm64;
+        if (is_label(lhs.type)) return lhs.data.label.id == rhs.data.label.id;
+        if (is_absolute(lhs.type)) return lhs.data.absolute == rhs.data.absolute;
+        if (is_rip_relative(lhs.type)) return lhs.data.rip_relative == rhs.data.rip_relative;
+        if (is_scaled_addressing(lhs.type)) return lhs.data.scaled_index.base == rhs.data.scaled_index.base
+            && lhs.data.scaled_index.index == rhs.data.scaled_index.index
+            && lhs.data.scaled_index.scale == rhs.data.scaled_index.scale
+            && lhs.data.scaled_index.offset == rhs.data.scaled_index.offset;
+        if (is_memory(lhs.type)) return lhs.data.register_offset.base == rhs.data.register_offset.base
+            && lhs.data.register_offset.offset == rhs.data.register_offset.offset;
+        return false;
     }
 
     RefType relative(Size size) {
@@ -526,7 +542,17 @@ namespace x64 {
     }
 
     void emitprefix(const Arg& dest, Size size) {
+        if (size == WORD) target->code().write(0x66); // 16-bit prefix
+        u8 rex = 0x40;
+        Register dest_reg = base_register(dest);
+        
+        if (is_64bit_register(dest_reg)) rex |= 1; // 64-bit r/m field
 
+        if (is_scaled_addressing(dest.type) && 
+            is_64bit_register(dest.data.scaled_index.index)) rex |= 2; // 64-bit SIB index
+        
+        if (size == QWORD) rex |= 8; // 64-bit operand size
+        if (rex > 0x40) target->code().write(rex);
     }
 
     void emitprefix(const Arg& dest, const Arg& src, Size size) {
@@ -535,6 +561,11 @@ namespace x64 {
         Register src_reg = base_register(src);
         Register dest_reg = base_register(dest);
         
+        if (is_memory(src.type)) {
+            Register temp = src_reg;
+            src_reg = dest_reg;
+            dest_reg = temp;
+        }
         if (is_64bit_register(dest_reg)) rex |= 1; // 64-bit r/m field
 
         if (is_scaled_addressing(dest.type) && 
@@ -639,14 +670,14 @@ namespace x64 {
             disp = memory_displacement(dest);
             
             if (is_absolute(src.type)) {
-								sib |= RSP << 3;
-								sib |= RBP;
-								has_sib = true;
-						}
+                sib |= RSP << 3;
+                sib |= RBP;
+                has_sib = true;
+            }
             else if (is_scaled_addressing(dest.type)) {
                 sib |= dest.data.scaled_index.scale << 6;
-                sib |= dest.data.scaled_index.index << 3;
-                sib |= dest.data.scaled_index.base;
+                sib |= (dest.data.scaled_index.index & 7) << 3;
+                sib |= (dest.data.scaled_index.base & 7);
                 has_sib = true;
             }
             else if (base_register(dest) == RSP) {
@@ -658,15 +689,15 @@ namespace x64 {
         else if (is_memory(src.type)) {
             disp = memory_displacement(src);
             
-						if (is_absolute(src.type)) {
-								sib |= RSP << 3;
-								sib |= RBP;
-								has_sib = true;
-						}
+            if (is_absolute(src.type)) {
+                sib |= RSP << 3;
+                sib |= RBP;
+                has_sib = true;
+            }
             else if (is_scaled_addressing(src.type)) {
                 sib |= src.data.scaled_index.scale << 6;
-                sib |= src.data.scaled_index.index << 3;
-                sib |= src.data.scaled_index.base;
+                sib |= (src.data.scaled_index.index & 7) << 3;
+                sib |= (src.data.scaled_index.base & 7);
                 has_sib = true;
             }
             else if (base_register(src) == RSP) {
@@ -678,7 +709,7 @@ namespace x64 {
         else modrm |= 0b11000000; // register-register mod
 
         if (disp && !is_displacement_only(src.type) && 
-						!is_displacement_only(dest.type)) {
+			!is_displacement_only(dest.type)) {
             if (disp > -129 && disp < 128) modrm |= 0b01000000; // 8-bit offset
             else if (disp < -0x80000000l || disp > 0x7fffffffl) {
                 fprintf(stderr, "[ERROR] Cannot represent memory offset %lx "
@@ -692,21 +723,21 @@ namespace x64 {
         else if (is_scaled_addressing(src.type)) 
             modrm |= (base_register(dest) & 7) << 3;
         else if (!is_displacement_only(src.type) && !is_immediate(src.type)) 
-						modrm |= (base_register(src) & 7) << 3; // source register in reg
+            modrm |= (base_register(src) & 7) << 3; // source register in reg
 
         if (is_scaled_addressing(dest.type)) modrm |= RSP;
         else if (is_scaled_addressing(src.type) || is_absolute(src.type))
             modrm |= RSP;
-				else if (is_rip_relative(src.type))
-						modrm |= RBP;
+        else if (is_rip_relative(src.type))
+            modrm |= RBP;
         else modrm |= (base_register(dest) & 7); // destination register in r/m byte
 
         target->code().write(modrm);
         if (has_sib) target->code().write(sib);
 
-				if (is_displacement_only(src.type) || is_displacement_only(dest.type)) {
-					target->code().write(little_endian((i32)disp));
-				}
+        if (is_displacement_only(src.type) || is_displacement_only(dest.type)) {
+            target->code().write(little_endian((i32)disp));
+        }
         else if (disp) {
             if (disp > -129 && disp < 128) target->code().write((i8)disp);
             else target->code().write(little_endian((i32)disp));
@@ -751,7 +782,7 @@ namespace x64 {
             if (is_memory(src.type)) opcode += 2; // set next lowest bit for memory source
             target->code().write(opcode);
 
-						if (is_memory(src.type)) emitargs(src, dest, actual_size);
+			if (is_memory(src.type)) emitargs(src, dest, actual_size);
             else emitargs(dest, src, actual_size);
         }
     }
@@ -850,7 +881,7 @@ namespace x64 {
             if (is_memory(src.type)) opcode += 2; // set next lowest bit for memory source
             target->code().write(opcode);
 
-						if (is_memory(src.type)) emitargs(src, dest, actual_size);
+			if (is_memory(src.type)) emitargs(src, dest, actual_size);
             else emitargs(dest, src, actual_size);
         }
     }
@@ -894,36 +925,36 @@ namespace x64 {
 
             u8 opcode = 0xc0;
             if (src_size != BYTE) {
-								fprintf(stderr, "[ERROR] Cannot shift by more than -128 - 127, "
-										"given %ld.\n", val);
-								exit(1);
-						}
+                    fprintf(stderr, "[ERROR] Cannot shift by more than -128 - 127, "
+                            "given %ld.\n", val);
+                    exit(1);
+            }
             if (dest_size != BYTE) opcode += 1; // use 0xc1 for larger dests
             if (val == 1) opcode += 0x10; // use 0xd0/d1 for shifts of 1
-						target->code().write(opcode);
+				target->code().write(opcode);
 
             emitargs(dest, dest_size, op);
-						if (val != 1) write_immediate(val, src_size); // immedate at end
+			if (val != 1) write_immediate(val, src_size); // immedate at end
         }
         else if (is_register(shift.type)) { // use normal opcode
-						if (base_register(shift) != RCX) {
-								fprintf(stderr, "[ERROR] Cannot shift by register other than CL.\n");
-								exit(1);
-						}
+            if (base_register(shift) != RCX) {
+                    fprintf(stderr, "[ERROR] Cannot shift by register other than CL.\n");
+                    exit(1);
+            }
             u8 opcode = 0xd2;
             if (dest_size != BYTE) opcode ++; // set bottom bit for non-8-bit mode
             target->code().write(opcode);
-						emitargs(dest, dest_size, op);
+			emitargs(dest, dest_size, op);
         }
     }
 
-		void rol(const Arg& dest, const Arg& src, Size size) {
+	void rol(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
         verify_args(dest, src);
         Size dest_size = resolve_size(dest, size);
 
         encode_shift(dest, src, dest_size, 0);
-		}
+	}
 
     void ror(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
@@ -931,7 +962,7 @@ namespace x64 {
         Size dest_size = resolve_size(dest, size);
 
         encode_shift(dest, src, dest_size, 1);
-		}
+	}
 
     void rcl(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
@@ -939,7 +970,7 @@ namespace x64 {
         Size dest_size = resolve_size(dest, size);
 
         encode_shift(dest, src, dest_size, 2);
-		}
+	}
 
     void rcr(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
@@ -947,7 +978,7 @@ namespace x64 {
         Size dest_size = resolve_size(dest, size);
 
         encode_shift(dest, src, dest_size, 3);
-		}
+	}
 
     void shl(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
@@ -955,7 +986,7 @@ namespace x64 {
         Size dest_size = resolve_size(dest, size);
 
         encode_shift(dest, src, dest_size, 4);
-		}
+	}
 
     void shr(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
@@ -963,7 +994,7 @@ namespace x64 {
         Size dest_size = resolve_size(dest, size);
 
         encode_shift(dest, src, dest_size, 5);
-		}
+	}
 
     void sar(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
@@ -971,7 +1002,7 @@ namespace x64 {
         Size dest_size = resolve_size(dest, size);
 
         encode_shift(dest, src, dest_size, 7);
-		}
+	}
 
     void idiv(const Arg& src, Size size) {
         verify_buffer();
@@ -984,54 +1015,54 @@ namespace x64 {
         }
 
         emitprefix(src, actual_size);
-				target->code().write<u8>(actual_size == BYTE ? 0xf6 : 0xf7);
+		target->code().write<u8>(actual_size == BYTE ? 0xf6 : 0xf7);
         emitargs(src, actual_size, 7);
     }
 
-		void not_(const Arg& src, Size size) {
+	void not_(const Arg& src, Size size) {
         verify_buffer();
         Size actual_size = resolve_size(src, size);
 				
-				if (is_immediate(src.type)) {
+		if (is_immediate(src.type)) {
             fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted "
                 "in 'not' instruction.\n");
             exit(1);
-				}
-
-        emitprefix(src, actual_size);
-				target->code().write<u8>(actual_size == BYTE ? 0xf6 : 0xf7);
-				emitargs(src, actual_size, 2);
 		}
 
-		void inc(const Arg& src, Size size) {
+        emitprefix(src, actual_size);
+        target->code().write<u8>(actual_size == BYTE ? 0xf6 : 0xf7);
+        emitargs(src, actual_size, 2);
+	}
+
+	void inc(const Arg& src, Size size) {
         verify_buffer();
         Size actual_size = resolve_size(src, size);
 				
-				if (is_immediate(src.type)) {
+		if (is_immediate(src.type)) {
             fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted "
                 "in 'inc' instruction.\n");
             exit(1);
-				}
-
-        emitprefix(src, actual_size);
-				target->code().write<u8>(actual_size == BYTE ? 0xfe : 0xff);
-				emitargs(src, actual_size, 0);
 		}
 
-		void dec(const Arg& src, Size size) {
+        emitprefix(src, actual_size);
+        target->code().write<u8>(actual_size == BYTE ? 0xfe : 0xff);
+        emitargs(src, actual_size, 0);
+    }
+
+	void dec(const Arg& src, Size size) {
         verify_buffer();
         Size actual_size = resolve_size(src, size);
 				
-				if (is_immediate(src.type)) {
+        if (is_immediate(src.type)) {
             fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted "
                 "in 'dec' instruction.\n");
             exit(1);
-				}
+        }
 
         emitprefix(src, actual_size);
-				target->code().write<u8>(actual_size == BYTE ? 0xfe : 0xff);
-				emitargs(src, actual_size, 1);
-		}
+        target->code().write<u8>(actual_size == BYTE ? 0xfe : 0xff);
+        emitargs(src, actual_size, 1);
+    }
 
     void push(const Arg& src, Size size) {
         verify_buffer();
@@ -1072,34 +1103,34 @@ namespace x64 {
     }
 
     void lea(const Arg& dest, const Arg& src, Size size) {
-				verify_buffer();
-				Size actual_size = resolve_size(dest, src, size);
+        verify_buffer();
+        Size actual_size = resolve_size(dest, src, size);
 
-				emitprefix(dest, src, actual_size);
-
+        emitprefix(src, dest, actual_size);
         if (is_immediate(src.type)) {
             fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted "
                 "in 'lea' instruction.\n");
             exit(1);
         }
-				else if (is_register(src.type)) {
-						fprintf(stderr, "[ERROR] Invalid source operand; register not permitted "
-								"in 'lea' instruction.\n");
-						exit(1);
-				}
+        else if (is_register(src.type)) {
+                fprintf(stderr, "[ERROR] Invalid source operand; register not permitted "
+                        "in 'lea' instruction.\n");
+                exit(1);
+        }
         else if (is_memory(src.type)) {
-						if (!is_register(dest.type)) {
-								fprintf(stderr, "[ERROR] Invalid dest operand; destination in 'lea' "
-									"instruction must be register.\n");
-						}
-						Arg disp = src;
-						if (is_label(src.type)) disp = riprel64(0);
+            if (!is_register(dest.type)) {
+                    fprintf(stderr, "[ERROR] Invalid dest operand; destination in 'lea' "
+                        "instruction must be register.\n");
+            }
+            Arg disp = src;
+            if (is_label(src.type)) disp = riprel64(0);
             target->code().write<u8>(0x8d);
-						emitargs(dest, disp, actual_size);
-						if (is_label(src.type))
+            if (is_displacement_only(disp.type)) emitargs(dest, disp, actual_size);
+            else emitargs(disp, dest, actual_size);
+            if (is_label(src.type))
                 target->reference(src.data.label, relative(DWORD), -4);
         }
-		}
+    }
 
     void cdq() {
         verify_buffer();
@@ -1201,28 +1232,29 @@ namespace x64 {
         if (actual_size <= BYTE) actual_size = WORD; // cannot call by smaller than dword
 
         if (is_label(dest.type) || is_immediate(dest.type)) {
-						if (actual_size > DWORD) actual_size = DWORD;
+			if (actual_size > DWORD) actual_size = DWORD;
             if (actual_size <= WORD) actual_size = DWORD; // cannot call by smaller than dword
 
             i64 imm = 0;
             if (is_immediate(dest.type)) imm = dest.data.imm64;
 
-						if (imm < -0x8000000l || imm > 0x7fffffffl) {
-								fprintf(stderr, "[ERROR] Call offset too large; must fit within 32 bits.\n");
-								exit(1);
-						}
+            if (imm < -0x8000000l || imm > 0x7fffffffl) {
+                fprintf(stderr, "[ERROR] Call offset too large; must fit within 32 bits.\n");
+                exit(1);
+            }
 
             target->code().write<u8>(0xe8); // opcode
             write_immediate(imm, actual_size);
             if (is_label(dest.type)) target->reference(dest.data.label, relative(actual_size), -4);
         }
         else {
+            emitprefix(dest, actual_size);
             target->code().write<u8>(0xff);
             emitargs(dest, actual_size, 2);
         }
     }
 
-		void setcc(const Arg& dest, Condition condition, Size size) {
+	void setcc(const Arg& dest, Condition condition, Size size) {
         verify_buffer();
         Size actual_size = resolve_size(dest, size);
 
@@ -1231,14 +1263,10 @@ namespace x64 {
                 "in 'setcc' instruction.\n");
             exit(1);
         }
-        else if (is_memory(dest.type)) {
-            fprintf(stderr, "[ERROR] Invalid operand; memory operand "
-							"not permitted in 'setcc' instruction.\n");
-            exit(1);
-        }
         else {
+            emitprefix(dest, BYTE);
             target->code().write<u8>(0x0f, 0x90 + (u8)condition);
             emitargs(dest, actual_size, 0);
         }
-		}
+	}
 }

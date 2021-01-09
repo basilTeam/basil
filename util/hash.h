@@ -4,7 +4,6 @@
 #include "defs.h"
 #include "str.h"
 #include "slice.h"
-#include <new>
 
 template<typename T>
 bool equals(const T& a, const T& b) {

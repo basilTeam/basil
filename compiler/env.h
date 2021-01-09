@@ -7,6 +7,7 @@
 #include "util/rc.h"
 #include "values.h"
 #include "ssa.h"
+#include "ir.h"
 
 namespace basil {
   struct Def {
@@ -16,6 +17,7 @@ namespace basil {
     bool is_proc; // is the definition a scalar or procedure?
     u8 arity; // number of arguments taken by a procedure.
     u8 precedence; // precedence of infix procedure
+    SSAIdent ident;
 		Location location;
 
     Def(bool is_macro_in = false, bool is_procedure_in = false, 
@@ -34,7 +36,7 @@ namespace basil {
     ref<Env> _parent;
 		bool _runtime;
   public:
-    Env(const ref<Env>& parent = ref<Env>::null());
+    Env(const ref<Env>& parent = nullptr);
 
     void def(const string& name);
     void def(const string& name, u8 arity);

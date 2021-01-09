@@ -1,7 +1,6 @@
 #include "str.h"
 #include "slice.h"
 #include "io.h"
-#include <new>
 
 void string::free() {
     if (_capacity > 16) delete[] data;

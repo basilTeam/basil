@@ -1,5 +1,5 @@
 #include "sym.h"
-#include <cstring>
+#include "string.h"
 #include "util/str.h"
 
 namespace jasmine {

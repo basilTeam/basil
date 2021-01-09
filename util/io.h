@@ -124,4 +124,13 @@ void read(stream& io, T& t, Args&... args) {
     read(io, args...);
 }
 
+template<typename String, typename... Args>
+String format(const Args&... args) {
+    String s;
+    buffer b;
+    write(b, args...);
+    while (b.peek()) s += b.read();
+    return s;
+}
+
 #endif

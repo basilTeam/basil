@@ -15,6 +15,12 @@ namespace basil {
 	const Type* Type::concretify() const {
 		return this;
 	}
+  
+  bool Type::coerces_to(const Type& other) const {
+    return other == *this
+      || &other == ANY 
+      || other.kind() == KIND_SUM && ((const SumType&)other).has(this);
+  }
 
   SingletonType::SingletonType(const string& repr) : Type(::hash(repr)),  _repr(repr) {}
 
@@ -38,7 +44,7 @@ namespace basil {
 	}
 
 	const Type* ListType::concretify() const {
-		return find<ListType>(_element->concretify());
+    return find<ListType>(_element->concretify());
 	}
 
   const Type* ListType::element() const {
@@ -54,9 +60,78 @@ namespace basil {
       ((const ListType&) other).element() == element();
   }
 
+  bool ListType::coerces_to(const Type& other) const {
+    return Type::coerces_to(other) || &other == TYPE && _element == TYPE;
+  }
+
   void ListType::format(stream& io) const {
     write(io, "[", _element, "]");
   }
+  
+  // ArrayType
+
+  ArrayType::ArrayType(const Type* element):
+    Type(element->hash() ^ 11745103813974897731ul), 
+    _element(element), _fixed(false), _size(0) {}
+
+  ArrayType::ArrayType(const Type* element, u32 size):
+    Type(element->hash() ^ 5095961086520768179ul * ::hash(size)), 
+    _element(element), _fixed(true), _size(size) {}
+
+  const Type* ArrayType::element() const {
+    return _element;
+  }
+
+  u32 ArrayType::count() const {
+    return _size;
+  }
+
+  bool ArrayType::fixed() const {
+    return _fixed;
+  }
+
+  bool ArrayType::concrete() const {
+    return _element->concrete();
+  }
+
+  const Type* ArrayType::concretify() const {
+    return _fixed ? find<ArrayType>(_element->concretify(), _size) 
+      : find<ArrayType>(_element->concretify());
+  }
+
+  TypeKind ArrayType::kind() const {
+    return KIND_ARRAY;
+  }
+
+  bool ArrayType::operator==(const Type& other) const {
+    return other.kind() == kind() && 
+      ((const ArrayType&) other).element() == element() && 
+      ((const ArrayType&) other).fixed() == fixed() && 
+      (((const ArrayType&) other).count() == count() || !fixed());
+  }
+
+  bool ArrayType::coerces_to(const Type& other) const {
+    if (Type::coerces_to(other)) return true;
+    
+    if (other.kind() == KIND_ARRAY 
+        && ((const ArrayType&)other).element() == element() 
+        && !((const ArrayType&)other).fixed()) return true;
+
+    if (fixed() && other.kind() == KIND_PRODUCT 
+        && ((const ProductType&)other).count() == count()) {
+      for (u32 i = 0; i < count(); i ++)
+        if (((const ProductType&)other).member(i) != element()) return false;
+      return true;
+    }
+
+    return false;
+  }
+
+  void ArrayType::format(stream& io) const {
+    if (_fixed) write(io, _element, "[", _size, "]");
+    else write(io, _element, "[]");
+  }
+
 
   u64 set_hash(const set<const Type*>& members) {
     u64 h = 6530804687830202173ul;
@@ -80,6 +155,18 @@ namespace basil {
     for (const Type* t : _members)
       if (!((const SumType&) other).has(t)) return false;
     return true;
+  }
+
+  bool SumType::coerces_to(const Type& other) const {
+    if (Type::coerces_to(other)) return true;
+
+    if (other.kind() == KIND_SUM) {
+      for (const Type* t : _members) 
+        if (!((const SumType&)other).has(t)) return false;
+      return true;
+    }
+
+    return false;
   }
 
   void SumType::format(stream& io) const {
@@ -132,6 +219,29 @@ namespace basil {
       if (!(*p.member(i) == *member(i))) return false;
     }
     return true;
+  }
+
+  bool ProductType::coerces_to(const Type& other) const {
+    if (Type::coerces_to(other)) return true;
+    
+    // if (other.kind() == KIND_ARRAY 
+    //     && ((const ArrayType&)other).element() == element() 
+    //     && !((const ArrayType&)other).fixed()) return true;
+
+    if (&other == TYPE) {
+      for (u32 i = 0; i < count(); i ++)
+        if (member(i) != TYPE) return false;
+      return true;
+    }
+
+    if (other.kind() == KIND_ARRAY && ((const ArrayType&)other).fixed()
+        && ((const ArrayType&)other).count() == count()) {
+      for (u32 i = 0; i < count(); i ++)
+        if (member(i) != ((const ArrayType&)other).element()) return false;
+      return true;
+    }
+
+    return false;
   }
 
   void ProductType::format(stream& io) const {
@@ -324,7 +434,7 @@ namespace basil {
 						 *ANY = find<SingletonType>("any"),
 						 *STRING = find<SingletonType>("string");
 
-	const Type* unify(const Type* a, const Type* b) {
+	const Type* unify(const Type* a, const Type* b, bool coercing, bool converting) {
 		if (!a || !b) return nullptr; 
 		
 		if (a == ANY) return b;
@@ -383,6 +493,11 @@ namespace basil {
 
 		if (a == VOID && b->kind() == KIND_LIST) return b;
 		if (b == VOID && a->kind() == KIND_LIST) return a;
+
+    if (coercing || converting) {
+      if (a->coerces_to(*b)) return b;
+      if (b->coerces_to(*a)) return a;
+    }
 		
 		if (a != b) return nullptr;
 		return a;

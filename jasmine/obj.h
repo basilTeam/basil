@@ -41,6 +41,7 @@ namespace jasmine {
         void load();
         void write(const char* path);
         void read(const char* path);
+        void writeELF(const char* path);
         Architecture architecture() const;
 
         void* find(Symbol symbol) const;

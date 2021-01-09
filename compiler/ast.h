@@ -9,6 +9,7 @@
 #include "type.h"
 #include "values.h"
 #include "ssa.h"
+#include "ir.h"
 
 namespace basil {
 	class Def;
@@ -25,6 +26,7 @@ namespace basil {
 
 		SourceLocation loc() const;
 		const Type* type();
+		virtual ref<SSANode> emit(ref<BasicBlock>& parent) = 0;
 		virtual Location emit(Function& function) = 0;
 		virtual void format(stream& io) const = 0;
 	};
@@ -36,6 +38,7 @@ namespace basil {
 	public:
 		ASTSingleton(const Type* type);
 	
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -46,6 +49,7 @@ namespace basil {
 	public:
 		ASTVoid(SourceLocation loc);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -57,6 +61,7 @@ namespace basil {
 	public:
 		ASTInt(SourceLocation loc, i64 value);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -68,6 +73,7 @@ namespace basil {
 	public:
 		ASTSymbol(SourceLocation loc, u64 value);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -79,6 +85,7 @@ namespace basil {
 	public:
 		ASTString(SourceLocation, const string& value);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -90,6 +97,7 @@ namespace basil {
 	public:
 		ASTBool(SourceLocation loc, bool value);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -102,6 +110,18 @@ namespace basil {
 	public:
 		ASTVar(SourceLocation loc, const ref<Env> env, u64 name);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
+		Location emit(Function& function) override;
+		void format(stream& io) const override;
+	};
+
+	class ASTExtern : public ASTNode {
+	protected:
+		const Type* lazy_type() override;
+	public:
+		ASTExtern(SourceLocation loc);
+
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -138,6 +158,7 @@ namespace basil {
 		ASTBinaryMath(SourceLocation loc, ASTMathOp op, 
 			ASTNode* left, ASTNode* right);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -157,6 +178,7 @@ namespace basil {
 		ASTBinaryLogic(SourceLocation loc, ASTLogicOp op, 
 			ASTNode* left, ASTNode* right);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -167,6 +189,7 @@ namespace basil {
 	public:
 		ASTNot(SourceLocation loc, ASTNode* child);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -184,6 +207,7 @@ namespace basil {
 		ASTBinaryEqual(SourceLocation loc, ASTEqualOp op, 
 			ASTNode* left, ASTNode* right);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -203,6 +227,7 @@ namespace basil {
 		ASTBinaryRel(SourceLocation loc, ASTRelOp op, 
 			ASTNode* left, ASTNode* right);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -215,6 +240,7 @@ namespace basil {
 	public:
 		ASTDefine(SourceLocation loc, ref<Env> env, u64 name, ASTNode* value);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -228,6 +254,7 @@ namespace basil {
 		ASTCall(SourceLocation loc, ASTNode* func, const vector<ASTNode*>& args);
 		~ASTCall();
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -240,6 +267,7 @@ namespace basil {
 	public:
 		ASTIncompleteFn(SourceLocation loc, const Type* args, i64 name);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -252,6 +280,7 @@ namespace basil {
 		i64 _name;
 		bool _emitted;
 		u32 _label;
+		ref<BasicBlock> _entry, _exit;
 	protected:
 		const Type* lazy_type() override;
 	public:
@@ -259,6 +288,7 @@ namespace basil {
 			const vector<u64>& args, ASTNode* body, i64 name = -1);
 		~ASTFunction();
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -271,6 +301,7 @@ namespace basil {
 		ASTBlock(SourceLocation loc, const vector<ASTNode*>& exprs);
 		~ASTBlock();
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -283,6 +314,7 @@ namespace basil {
 		ASTIf(SourceLocation loc, ASTNode* cond, ASTNode* if_true, ASTNode* if_false);
 		~ASTIf();
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -295,6 +327,7 @@ namespace basil {
 		ASTWhile(SourceLocation loc, ASTNode* cond, ASTNode* body);
 		~ASTWhile();
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -305,6 +338,7 @@ namespace basil {
 	public:
 		ASTIsEmpty(SourceLocation loc, ASTNode* list);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -315,6 +349,7 @@ namespace basil {
 	public:
 		ASTHead(SourceLocation loc, ASTNode* list);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -325,6 +360,7 @@ namespace basil {
 	public:
 		ASTTail(SourceLocation loc, ASTNode* list);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -335,6 +371,7 @@ namespace basil {
 	public:
 		ASTCons(SourceLocation loc, ASTNode* first, ASTNode* rest);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -345,6 +382,7 @@ namespace basil {
 	public:
 		ASTLength(SourceLocation loc, ASTNode* child);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
@@ -355,25 +393,28 @@ namespace basil {
 	public:
 		ASTDisplay(SourceLocation loc, ASTNode* node);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};
 
-  class ASTNativeCall : public ASTNode {
-      const string _func_name;
-      const Type * _ret;
-      const vector<ASTNode*> _args;
-      const vector<const Type*> _arg_types;
+  	class ASTNativeCall : public ASTNode {
+		const string _func_name;
+		const Type * _ret;
+		const vector<ASTNode*> _args;
+      	const vector<const Type*> _arg_types;
     protected:
-      const Type* lazy_type() override;
+      	const Type* lazy_type() override;
     public:
-      ASTNativeCall(SourceLocation loc, const string &func_name, const Type* ret);
-      // TODO make args a variadic template instead of a vector
-      ASTNativeCall(SourceLocation loc, const string &func_name, const Type *ret, const vector<ASTNode*>& args, const vector<const Type*>& arg_types);
-			~ASTNativeCall();
-      Location emit(Function& function) override;
-      void format(stream& io) const override;
-  };
+      	ASTNativeCall(SourceLocation loc, const string &func_name, const Type* ret);
+      	// TODO make args a variadic template instead of a vector
+      	ASTNativeCall(SourceLocation loc, const string &func_name, const Type *ret, const vector<ASTNode*>& args, const vector<const Type*>& arg_types);
+		~ASTNativeCall();
+			
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
+    	Location emit(Function& function) override;
+    	void format(stream& io) const override;
+  	};
 
 	class ASTAssign : public ASTUnary {
 		ref<Env> _env;
@@ -384,6 +425,21 @@ namespace basil {
 		ASTAssign(SourceLocation loc, const ref<Env> env, 
 			u64 dest, ASTNode* src);
 
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
+		Location emit(Function& function) override;
+		void format(stream& io) const override;
+	};
+
+	class ASTAnnotate : public ASTNode {
+		ASTNode* _value;
+		const Type* _type;
+	protected:
+		const Type* lazy_type() override;
+	public:
+		ASTAnnotate(SourceLocation loc, ASTNode* value, const Type* type);
+		~ASTAnnotate();
+
+		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
 	};

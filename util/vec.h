@@ -144,6 +144,11 @@ public:
 };
 
 template<typename T>
+void fill_vector(vector<T>& v) {
+    //
+}
+
+template<typename T>
 void fill_vector(vector<T>& v, const T& t) {
     v.push(t);
 }

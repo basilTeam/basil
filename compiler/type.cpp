@@ -16,10 +16,10 @@ namespace basil {
 		return this;
 	}
   
-  bool Type::coerces_to(const Type& other) const {
-    return other == *this
-      || &other == ANY 
-      || other.kind() == KIND_SUM && ((const SumType&)other).has(this);
+  bool Type::coerces_to(const Type* other) const {
+    return other == this
+      || other == ANY 
+      || other->kind() == KIND_SUM && ((const SumType*)other)->has(this);
   }
 
   SingletonType::SingletonType(const string& repr) : Type(::hash(repr)),  _repr(repr) {}
@@ -35,6 +35,47 @@ namespace basil {
   void SingletonType::format(stream& io) const {
     write(io, _repr);
   }
+
+  // NumericType
+
+  NumericType::NumericType(u32 size, bool floating):
+    Type(2659161638339667757ul ^ ::hash(size) ^ ::hash(floating)),
+    _size(size), _floating(floating) {}
+
+  bool NumericType::floating() const {
+    return _floating;
+  }
+
+  u32 NumericType::size() const {
+    return _size;
+  }
+
+  TypeKind NumericType::kind() const {
+    return KIND_NUMERIC;
+  }
+
+  bool NumericType::operator==(const Type& other) const {
+    return other.kind() == KIND_NUMERIC
+      && ((const NumericType&)other)._floating == _floating
+      && ((const NumericType&)other)._size == _size;
+  }
+
+  bool NumericType::coerces_to(const Type* other) const {
+    if (Type::coerces_to(other)) return true;
+    if (other->kind() != KIND_NUMERIC) return false;
+
+    bool other_floating = ((const NumericType*)other)->floating();
+    u32 other_size = ((const NumericType*)other)->size();
+    if (floating() == other_floating) return other_size >= size(); // both float, or both non-float
+    else if (!floating() && other_floating) return other_size > size(); // works for power-of-two type sizes
+    return false;
+  }
+
+  void NumericType::format(stream& io) const {
+    write(io, floating() ? "f" : "i", size());
+  }
+
+  // ListType
 
   ListType::ListType(const Type* element):
     Type(element->hash() ^ 11340086872871314823ul), _element(element) {}
@@ -60,8 +101,8 @@ namespace basil {
       ((const ListType&) other).element() == element();
   }
 
-  bool ListType::coerces_to(const Type& other) const {
-    return Type::coerces_to(other) || &other == TYPE && _element == TYPE;
+  bool ListType::coerces_to(const Type* other) const {
+    return Type::coerces_to(other) || other == TYPE && _element == TYPE;
   }
 
   void ListType::format(stream& io) const {
@@ -110,17 +151,17 @@ namespace basil {
       (((const ArrayType&) other).count() == count() || !fixed());
   }
 
-  bool ArrayType::coerces_to(const Type& other) const {
+  bool ArrayType::coerces_to(const Type* other) const {
     if (Type::coerces_to(other)) return true;
     
-    if (other.kind() == KIND_ARRAY 
-        && ((const ArrayType&)other).element() == element() 
-        && !((const ArrayType&)other).fixed()) return true;
+    if (other->kind() == KIND_ARRAY 
+        && ((const ArrayType*)other)->element() == element() 
+        && !((const ArrayType*)other)->fixed()) return true;
 
-    if (fixed() && other.kind() == KIND_PRODUCT 
-        && ((const ProductType&)other).count() == count()) {
+    if (fixed() && other->kind() == KIND_PRODUCT 
+        && ((const ProductType*)other)->count() == count()) {
       for (u32 i = 0; i < count(); i ++)
-        if (((const ProductType&)other).member(i) != element()) return false;
+        if (((const ProductType*)other)->member(i) != element()) return false;
       return true;
     }
 
@@ -132,7 +173,6 @@ namespace basil {
     else write(io, _element, "[]");
   }
 
-
   u64 set_hash(const set<const Type*>& members) {
     u64 h = 6530804687830202173ul;
     for (const Type* t : members) h ^= t->hash();
@@ -140,7 +180,7 @@ namespace basil {
   }
 
   SumType::SumType(const set<const Type*>& members):
-    Type(set_hash(members)), _members(members) {}
+    Type(2853124965035107823ul ^ set_hash(members)), _members(members) {}
 
   bool SumType::has(const Type* member) const {
     return _members.find(member) != _members.end();
@@ -157,12 +197,12 @@ namespace basil {
     return true;
   }
 
-  bool SumType::coerces_to(const Type& other) const {
+  bool SumType::coerces_to(const Type* other) const {
     if (Type::coerces_to(other)) return true;
 
-    if (other.kind() == KIND_SUM) {
+    if (other->kind() == KIND_SUM) {
       for (const Type* t : _members) 
-        if (!((const SumType&)other).has(t)) return false;
+        if (!((const SumType*)other)->has(t)) return false;
       return true;
     }
 
@@ -174,6 +214,51 @@ namespace basil {
     bool first = true;
     for (const Type* t : _members) {
       write(io, first ? "" : " | ", t);
+      first = false;
+    }
+    write(io, ")");
+  }
+
+  IntersectType::IntersectType(const set<const Type*>& members):
+    Type(15263450813870290249ul ^ set_hash(members)), _members(members), _has_function(false) {
+    for (const Type* t : _members) if (t->kind() == KIND_FUNCTION) _has_function = true;
+  }
+
+  bool IntersectType::has(const Type* member) const {
+    return _members.find(member) != _members.end();
+  }
+
+  bool IntersectType::has_function() const {
+    return _has_function;
+  }
+
+  TypeKind IntersectType::kind() const {
+    return KIND_INTERSECT;
+  }
+
+  bool IntersectType::operator==(const Type& other) const {
+    if (other.kind() != kind()) return false;
+    for (const Type *t : _members)
+      if (!((const IntersectType&)other).has(t)) return false;
+    return true;
+  }
+
+  bool IntersectType::coerces_to(const Type* other) const {
+    if (Type::coerces_to(other)) return true;
+    if (has(other)) return true;
+    if (other->kind() == KIND_INTERSECT) {
+      for (const Type* t : ((const IntersectType*)other)->_members) 
+        if (!has(t)) return false;
+      return true;
+    }
+    return false;
+  }
+
+  void IntersectType::format(stream& io) const {
+    write(io, "(");
+    bool first = true;
+    for (const Type* t : _members) {
+      write(io, first ? "" : " & ", t);
       first = false;
     }
     write(io, ")");
@@ -221,23 +306,23 @@ namespace basil {
     return true;
   }
 
-  bool ProductType::coerces_to(const Type& other) const {
+  bool ProductType::coerces_to(const Type* other) const {
     if (Type::coerces_to(other)) return true;
     
     // if (other.kind() == KIND_ARRAY 
     //     && ((const ArrayType&)other).element() == element() 
     //     && !((const ArrayType&)other).fixed()) return true;
 
-    if (&other == TYPE) {
+    if (other == TYPE) {
       for (u32 i = 0; i < count(); i ++)
         if (member(i) != TYPE) return false;
       return true;
     }
 
-    if (other.kind() == KIND_ARRAY && ((const ArrayType&)other).fixed()
-        && ((const ArrayType&)other).count() == count()) {
+    if (other->kind() == KIND_ARRAY && ((const ArrayType*)other)->fixed()
+        && ((const ArrayType*)other)->count() == count()) {
       for (u32 i = 0; i < count(); i ++)
-        if (member(i) != ((const ArrayType&)other).element()) return false;
+        if (member(i) != ((const ArrayType*)other)->element()) return false;
       return true;
     }
 
@@ -424,7 +509,8 @@ namespace basil {
     return t;
   }
 
-  const Type *INT = find<SingletonType>("int"), 
+  const Type *INT = find<NumericType>(64, false), 
+             *FLOAT = find<NumericType>(64, true),
              *SYMBOL = find<SingletonType>("symbol"), 
              *VOID = find<SingletonType>("void"),
              *ERROR = find<SingletonType>("error"),
@@ -495,8 +581,8 @@ namespace basil {
 		if (b == VOID && a->kind() == KIND_LIST) return a;
 
     if (coercing || converting) {
-      if (a->coerces_to(*b)) return b;
-      if (b->coerces_to(*a)) return a;
+      if (a->coerces_to(b)) return b;
+      if (b->coerces_to(a)) return a;
     }
 		
 		if (a != b) return nullptr;

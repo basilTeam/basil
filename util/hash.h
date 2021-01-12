@@ -394,4 +394,50 @@ public:
     }
 };
 
+template<typename T>
+void fill_set(set<T>& s) {
+    //
+}
+
+template<typename T>
+void fill_set(set<T>& s, const T& t) {
+    s.insert(t);
+}
+
+template<typename T, typename ...Args>
+void fill_set(set<T>& s, const T& t, const Args&... args) {
+    s.insert(t);
+    fill_set(s, args...);
+}
+
+template<typename T, typename ...Args>
+set<T> set_of(const Args&... args) {
+    set<T> s;
+    fill_set(s, args...);
+    return s;
+}
+
+template<typename K, typename V>
+void fill_map(map<K, V>& m) {
+    //
+}
+
+template<typename K, typename V>
+void fill_map(map<K, V>& m, const K& k, const V& v) {
+    m.put(k, v);
+}
+
+template<typename K, typename V, typename ...Args>
+void fill_map(map<K, V>& m, const K& k, const V& v, const Args&... args) {
+    m.put(k, v);
+    fill_map(m, args...);
+}
+
+template<typename K, typename V, typename ...Args>
+map<K, V> map_of(const Args&... args) {
+    map<K, V> m;
+    fill_map(m, args...);
+    return m;
+}
+
 #endif

@@ -3,6 +3,7 @@
 #include "values.h"
 #include "driver.h"
 #include "ast.h"
+#include "builtin.h"
 #include "unistd.h"
 
 using namespace basil;
@@ -26,51 +27,26 @@ Value repl_quit(ref<Env> env, const Value& args) {
 }
 
 Value print_tokens(ref<Env> env, const Value& args) {
-	if (!args.get_product()[0].is_bool()) {
-		err(args.get_product()[0].loc(), "Print tokens command requires bool, '",
-			args.get_product()[0], "' provided.");
-		return ERROR;
-	}
 	basil::print_tokens(args.get_product()[0].get_bool());
 	return Value(VOID);
 }
 
 Value print_parse(ref<Env> env, const Value& args) {
-	if (!args.get_product()[0].is_bool()) {
-		err(args.get_product()[0].loc(), "Print parse tree command requires bool, '",
-			args.get_product()[0], "' provided.");
-		return ERROR;
-	}
 	basil::print_parsed(args.get_product()[0].get_bool());
 	return Value(VOID);
 }
 
 Value print_ast(ref<Env> env, const Value& args) {
-	if (!args.get_product()[0].is_bool()) {
-		err(args.get_product()[0].loc(), "Print AST command requires bool, '",
-			args.get_product()[0], "' provided.");
-		return ERROR;
-	}
 	basil::print_ast(args.get_product()[0].get_bool());
 	return Value(VOID);
 }
 
 Value print_ir(ref<Env> env, const Value& args) {
-	if (!args.get_product()[0].is_bool()) {
-		err(args.get_product()[0].loc(), "Print SSA command requires bool, '",
-			args.get_product()[0], "' provided.");
-		return ERROR;
-	}
 	basil::print_ir(args.get_product()[0].get_bool());
 	return Value(VOID);
 }
 
 Value print_asm(ref<Env> env, const Value& args) {
-	if (!args.get_product()[0].is_bool()) {
-		err(args.get_product()[0].loc(), "Print ASM command requires bool, '",
-			args.get_product()[0], "' provided.");
-		return ERROR;
-	}
 	basil::print_asm(args.get_product()[0].get_bool());
 	return Value(VOID);
 }
@@ -92,6 +68,14 @@ Value repl_help(ref<Env> env, const Value& args) {
 int intro();
 
 int main(int argc, char** argv) {
+	Builtin REPL_HELP(find<FunctionType>(find<ProductType>(), VOID), repl_help, nullptr),
+		REPL_QUIT(find<FunctionType>(find<ProductType>(), VOID), repl_quit, nullptr),
+		PRINT_TOKENS(find<FunctionType>(find<ProductType>(BOOL), VOID), print_tokens, nullptr),
+		PRINT_PARSE(find<FunctionType>(find<ProductType>(BOOL), VOID), print_parse, nullptr),
+		PRINT_AST(find<FunctionType>(find<ProductType>(BOOL), VOID), print_ast, nullptr),
+		PRINT_IR(find<FunctionType>(find<ProductType>(BOOL), VOID), print_ir, nullptr),
+		PRINT_ASM(find<FunctionType>(find<ProductType>(BOOL), VOID), print_asm, nullptr);
+
 	if (argc == 1) { // repl mode
 		print_banner();
 		println(BOLDGREEN, "Enter any Basil expression at the prompt, or '", 
@@ -100,13 +84,13 @@ int main(int argc, char** argv) {
 		Source src;
 
 		ref<Env> root = create_root_env();
-		root->def("$help", new FunctionValue(root, repl_help, 0), 0);
-		root->def("$quit", new FunctionValue(root, repl_quit, 0), 0);
-		root->def("$print-tokens", new FunctionValue(root, print_tokens, 1), 1);
-		root->def("$print-parse", new FunctionValue(root, print_parse, 1), 1);
-		root->def("$print-ast", new FunctionValue(root, print_ast, 1), 1);
-		root->def("$print-ir", new FunctionValue(root, print_ir, 1), 1);
-		root->def("$print-asm", new FunctionValue(root, print_asm, 1), 1);
+		root->def("$help", Value(root, REPL_HELP), 0);
+		root->def("$quit", Value(root, REPL_QUIT), 0);
+		root->def("$print-tokens", Value(root, PRINT_TOKENS), 1);
+		root->def("$print-parse", Value(root, PRINT_PARSE), 1);
+		root->def("$print-ast", Value(root, PRINT_AST), 1);
+		root->def("$print-ir", Value(root, PRINT_IR), 1);
+		root->def("$print-asm", Value(root, PRINT_ASM), 1);
 		ref<Env> global = newref<Env>(root);
 		Function main_fn("main");
 
@@ -844,12 +828,18 @@ int intro() {
 
 	Source src;
 
+	Builtin REPL_QUIT(find<FunctionType>(find<ProductType>(), VOID), repl_quit, nullptr),
+		INTRO_HELP(find<FunctionType>(find<ProductType>(), VOID), intro_help, nullptr),
+		INTRO_CONTENTS(find<FunctionType>(find<ProductType>(), VOID), intro_contents, nullptr),
+		INTRO_START(find<FunctionType>(find<ProductType>(), VOID), intro_start, nullptr),
+		INTRO_SET_SECTION(find<FunctionType>(find<ProductType>(INT), VOID), intro_set_section, nullptr);
+
 	ref<Env> root = create_root_env();
-	root->def("$quit", new FunctionValue(root, repl_quit, 0), 0);
-	root->def("$help", new FunctionValue(root, intro_help, 0), 0);
-	root->def("$contents", new FunctionValue(root, intro_contents, 0), 0);
-	root->def("$start", new FunctionValue(root, intro_start, 0), 0);
-	root->def("$section", new FunctionValue(root, intro_set_section, 1), 1);
+	root->def("$quit", Value(root, REPL_QUIT), 0);
+	root->def("$help", Value(root, INTRO_HELP), 0);
+	root->def("$contents", Value(root, INTRO_CONTENTS), 0);
+	root->def("$start", Value(root, INTRO_START), 0);
+	root->def("$section", Value(root, INTRO_SET_SECTION), 1);
 
 	intro_help(root, Value(VOID));
 

@@ -13,12 +13,14 @@ namespace basil {
   class Def;
   class Env;
 	class ASTNode;
+  class Builtin;
 
   u64 symbol_value(const string& symbol);
   const string& symbol_for(u64 value);
 
   class ListValue;
   class SumValue;
+  class IntersectValue;
   class ProductValue;
   class ArrayValue;
   class FunctionValue;
@@ -30,6 +32,7 @@ namespace basil {
     union {
       i64 i;
       u64 u;
+      double f;
       const Type* t;
       bool b;
       RC* rc;
@@ -39,13 +42,16 @@ namespace basil {
     Value();
     Value(const Type* type);
     Value(i64 i, const Type* type = INT);
+    // Value(double d);
     Value(const string& s, const Type* type = SYMBOL);
     Value(const Type* type_value, const Type* type);
     Value(ListValue* l);
     Value(SumValue* s, const Type* type);
+    Value(IntersectValue* i, const Type* type);
     Value(ProductValue* p);
     Value(ArrayValue* a);
-    Value(FunctionValue* f);
+    Value(ref<Env> env, const Builtin& b);
+    Value(FunctionValue* f, const Type* ftype);
     Value(AliasValue* f);
     Value(MacroValue* f);
 		Value(ASTNode* n);
@@ -56,6 +62,10 @@ namespace basil {
     bool is_int() const;
     i64 get_int() const;
     i64& get_int();
+
+    bool is_float() const;
+    double get_float() const;
+    double& get_float();
 
     bool is_symbol() const;
     u64 get_symbol() const;
@@ -88,6 +98,10 @@ namespace basil {
     bool is_sum() const;
     const SumValue& get_sum() const;
     SumValue& get_sum();
+
+    bool is_intersect() const;
+    const IntersectValue& get_intersect() const;
+    IntersectValue& get_intersect();
 
     bool is_product() const;
     const ProductValue& get_product() const;
@@ -149,6 +163,21 @@ namespace basil {
     const Value& value() const;
   };
 
+  class IntersectValue : public RC {
+    map<const Type*, Value> _values;
+  public:
+    IntersectValue(const map<const Type*, Value>& values);
+
+    u32 size() const;
+    bool has(const Type* t) const;
+    map<const Type*, Value>::const_iterator begin() const;
+    map<const Type*, Value>::const_iterator end() const;
+    map<const Type*, Value>::iterator begin();
+    map<const Type*, Value>::iterator end();
+    const map<const Type*, Value>& values() const;
+    map<const Type*, Value>& values();
+  };
+
   class ProductValue : public RC {
     vector<Value> _values;
   public:
@@ -177,17 +206,15 @@ namespace basil {
   class FunctionValue : public RC {
 		i64 _name;
     Value _code;
-    BuiltinFn _builtin;
+    const Builtin* _builtin;
     ref<Env> _env;
-    u64 _builtin_arity;
     vector<u64> _args;
 		set<const FunctionValue*>* _calls;
 		map<const Type*, ASTNode*>* _insts;
   public:
-    FunctionValue(ref<Env> env, const vector<u64>& args, 
+    FunctionValue(ref<Env> env, const vector<u64>& args,
       const Value& code, i64 name = -1);
-    FunctionValue(ref<Env> env, BuiltinFn builtin, u64 arity, 
-			i64 name = -1);
+    FunctionValue(ref<Env> env, const Builtin& builtin, i64 name = -1);
 		~FunctionValue();
 		FunctionValue(const FunctionValue& other);
 		FunctionValue& operator=(const FunctionValue& other);
@@ -196,7 +223,7 @@ namespace basil {
     const Value& body() const;
     bool is_builtin() const;
     u64 arity() const;
-    BuiltinFn get_builtin() const;
+    const Builtin& get_builtin() const;
     ref<Env> get_env();
     const ref<Env> get_env() const;
 		i64 name() const;
@@ -220,20 +247,19 @@ namespace basil {
 
   class MacroValue : public RC {
     Value _code;
-    BuiltinMacro _builtin;
+    const Builtin* _builtin;
     ref<Env> _env;
-    u64 _builtin_arity;
     vector<u64> _args;
   public:
     MacroValue(ref<Env> env, const vector<u64>& args, 
       const Value& code);
-    MacroValue(ref<Env> env, BuiltinFn builtin, u64 arity);
+    MacroValue(ref<Env> env, const Builtin& builtin);
 
     const vector<u64>& args() const;
     const Value& body() const;
     bool is_builtin() const;
     u64 arity() const;
-    BuiltinFn get_builtin() const;
+    const Builtin& get_builtin() const;
     ref<Env> get_env();
     const ref<Env> get_env() const;
   };
@@ -297,6 +323,7 @@ namespace basil {
 		const Type* args_type);
   Value type_of(const Value& v);
   Value is(const Value& v, const Value& t);
+  Value cast(const Value& val, const Type* type);
   Value annotate(const Value& val, const Value& type);
   Value as(const Value& v, const Value& t);
   Value call(ref<Env> env, Value& function, const Value& arg);

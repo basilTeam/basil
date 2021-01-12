@@ -11,16 +11,18 @@ namespace basil {
   const u8 GC_KIND_FLAG = 128;
 
   enum TypeKind : u8 {
-    KIND_SINGLETON = 0, 
+    KIND_SINGLETON = 0,
 		KIND_TYPEVAR = 1,
-    KIND_LIST = GC_KIND_FLAG | 0, 
+    KIND_NUMERIC = 2,
+    KIND_LIST = GC_KIND_FLAG | 0,
     KIND_SUM = GC_KIND_FLAG | 1,
-    KIND_PRODUCT = GC_KIND_FLAG | 2,
-    KIND_ARRAY = GC_KIND_FLAG | 3,
-    KIND_FUNCTION = GC_KIND_FLAG | 4,
-    KIND_ALIAS = GC_KIND_FLAG | 5,
-    KIND_MACRO = GC_KIND_FLAG | 6,
-		KIND_RUNTIME = GC_KIND_FLAG | 7
+    KIND_INTERSECT = GC_KIND_FLAG | 2,
+    KIND_PRODUCT = GC_KIND_FLAG | 3,
+    KIND_ARRAY = GC_KIND_FLAG | 4,
+    KIND_FUNCTION = GC_KIND_FLAG | 5,
+    KIND_ALIAS = GC_KIND_FLAG | 6,
+    KIND_MACRO = GC_KIND_FLAG | 7,
+		KIND_RUNTIME = GC_KIND_FLAG | 8
   };
 
   class Type {
@@ -34,7 +36,7 @@ namespace basil {
 		virtual bool concrete() const;
 		virtual const Type* concretify() const;
     virtual bool operator==(const Type& other) const = 0;
-    virtual bool coerces_to(const Type& other) const;
+    virtual bool coerces_to(const Type* other) const;
     virtual void format(stream& io) const = 0;
   };
 
@@ -48,6 +50,20 @@ namespace basil {
     void format(stream& io) const override;
   };
 
+  class NumericType : public Type {
+    u32 _size;
+    bool _floating;
+  public:
+    NumericType(u32 size, bool floating);
+    
+    bool floating() const;
+    u32 size() const;
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
+    void format(stream& io) const override;
+  };
+
   class ListType : public Type {
     const Type* _element;
   public:
@@ -58,7 +74,7 @@ namespace basil {
 		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
-    bool coerces_to(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
     void format(stream& io) const override;
   };
 
@@ -77,7 +93,7 @@ namespace basil {
 		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
-    bool coerces_to(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
     void format(stream& io) const override;
   };
 
@@ -89,13 +105,31 @@ namespace basil {
     bool has(const Type* member) const;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
-    bool coerces_to(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
+    void format(stream& io) const override;
+  };
+
+  class IntersectType : public Type {
+    set<const Type*> _members;
+    bool _has_function;
+  public:
+    template<typename ...Args>
+    IntersectType(const Args&... args): IntersectType(set_of<const Type*>(args...)) {}
+    IntersectType(const set<const Type*>& members);
+
+    bool has(const Type* member) const;
+    bool has_function() const;
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
     void format(stream& io) const override;
   };
 
   class ProductType : public Type {
     vector<const Type*> _members;
   public:
+    template<typename ...Args>
+    ProductType(const Args&... args): ProductType(vector_of<const Type*>(args...)) {}
     ProductType(const vector<const Type*>& members);
 
     u32 count() const;
@@ -104,7 +138,7 @@ namespace basil {
 		const Type* concretify() const override;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
-    bool coerces_to(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
     void format(stream& io) const override;
   };
 
@@ -184,7 +218,7 @@ namespace basil {
     return create_type(new T(t));
   }
 
-  extern const Type *INT, *SYMBOL, *VOID, *ERROR, *TYPE, 
+  extern const Type *INT, *FLOAT, *SYMBOL, *VOID, *ERROR, *TYPE, 
                     *ALIAS, *BOOL, *ANY, *STRING;
 	
 	const Type* unify(const Type* a, const Type* b, bool coercing = false, bool converting = false);

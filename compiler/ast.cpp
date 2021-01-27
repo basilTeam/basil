@@ -583,6 +583,7 @@ namespace basil {
 
 	Location ASTFunction::emit(Function& func) {
 		if (!_emitted) {
+			_emitted = true;
 			Function& fn = _name == -1 ? func.create_function() 
 				: func.create_function(symbol_for(_name));
 			_label = fn.label();
@@ -593,8 +594,6 @@ namespace basil {
 			}
 			fn.add(new RetInsn(_body->emit(fn)));
 			fn.last()->succ().clear();
-
-			_emitted = true;
 		}
 
 		Location loc;
@@ -606,6 +605,10 @@ namespace basil {
 	void ASTFunction::format(stream& io) const {
 		if (_name == -1) write(io, "<anonymous>");
 		else write(io, symbol_for(_name));
+	}
+
+	u32 ASTFunction::label() const {
+		return _label;
 	}
 
 	ASTBlock::ASTBlock(SourceLocation loc, const vector<ASTNode*>& exprs):

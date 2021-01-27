@@ -35,7 +35,7 @@ namespace basil {
 	void print_asm(bool should) {
 		_print_asm = should;
 	}
-	
+
 	void compile_only(bool should) {
 		_compile_only = should;
 	}
@@ -58,11 +58,17 @@ namespace basil {
 
 	Value parse(TokenView& view) {
 		vector<Value> results;
+		TokenView end = view;
+		while (end) end.read();
 		while (view.peek()) {
 			Value line = parse_line(view, view.peek().column);
 			if (!line.is_void()) results.push(line);
 		}
-
+		if (_print_tokens) {
+			print(BOLDYELLOW);
+			while (end) print(end.read(), " ");
+			println(RESET);
+		}
 		if (_print_parsed) {
 			print(BOLDGREEN);
 			for (const Value& v : results) println(v);
@@ -217,6 +223,9 @@ namespace basil {
 
 		jasmine::Object object;
 		compile(result, object);
+		auto code = object.code();
+		while (code.size()) printf("%02x ", code.read());
+		printf("\n");
 		add_native_functions(object);
 		object.load();
 		if (error_count()) return print_errors(_stdout), 1;
@@ -230,6 +239,19 @@ namespace basil {
 		for (int i = 0; i < s.size(); i ++) if (s[i] == '.') last = i;
 		for (int i = 0; i < last; i ++) d += s[i];
 		return d + e;
+	}
+
+	vector<Value> instantiations(ref<Env> env) {
+		vector<Value> insts;
+		for (const auto& p : *env) {
+			if (p.second.value.is_function()) {
+				const FunctionValue& fn = p.second.value.get_function();
+				if (fn.instantiations()) for (auto& i : *fn.instantiations()) {
+					insts.push(i.second);
+				}
+			}
+		}
+		return insts;
 	}
 
 	int build(Source& src, const char* filename) {
@@ -248,15 +270,32 @@ namespace basil {
 		Value result = eval(global, program);
 		if (error_count()) return print_errors(_stdout), 1;
 
-		if (!result.is_runtime()) return 0;
-		if (_print_ast) 
-			println(BOLDCYAN, result.get_runtime(), RESET, "\n");
+		auto insts = instantiations(global);
+		if (result.is_runtime()) {
+			if (_print_ast) 
+				println(BOLDCYAN, result.get_runtime(), RESET, "\n");
 
-		jasmine::Object object;
-		compile(result, object);
-		if (error_count()) return print_errors(_stdout), 1;
+			jasmine::Object object;
+			compile(result, object);
+			if (error_count()) return print_errors(_stdout), 1;
+			object.writeELF((const char*)dest.raw());
+		}
+		else if (insts.size() > 0) {
+			jasmine::Object object;
+			Function container(string(".") + filename);
+			for (Value f : insts) f.get_runtime()->emit(container);
+			if (_print_ir) {
+				print(BOLDMAGENTA);
+				print(container);
+				println(RESET, "\n");
+			}
+			container.allocate();
+			container.emit(object);
+			emit_constants(object);
+			if (error_count()) return print_errors(_stdout), 1;
+			object.writeELF((const char*)dest.raw());
+		}
 
-		object.writeELF((const char*)dest.raw());
 		return 0;
 	}
 }

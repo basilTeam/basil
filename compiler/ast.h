@@ -291,6 +291,7 @@ namespace basil {
 		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;
+		u32 label() const;
 	};
 
 	class ASTBlock : public ASTNode {

@@ -326,6 +326,52 @@ namespace jasmine {
         }
     }
 
+    void Object::resolve_ELF_addends() {
+        auto size = buf.size();
+        u8* rawtext = new u8[size];
+        u32 i = 0;
+        while (buf.size()) rawtext[i ++] = buf.read();
+
+        for (auto& ref : refs) {
+            u8* pos = (u8*)rawtext + ref.first;
+            u8* field = pos + ref.second.field_offset;
+            switch (ref.second.type) {
+                case ABS8:
+                case REL8:
+                    *(i8*)field = i8(ref.second.field_offset);
+                    break;
+                case ABS16_LE:
+                case REL16_LE:
+                    *(i16*)field = little_endian<i16>(ref.second.field_offset);
+                    break;
+                case ABS16_BE:
+                case REL16_BE:
+                    *(i16*)field = big_endian<i16>(ref.second.field_offset);
+                    break;
+                case ABS32_LE:
+                case REL32_LE:
+                    *(i32*)field = little_endian<i32>(ref.second.field_offset);
+                    break;
+                case ABS32_BE:
+                case REL32_BE:
+                    *(i32*)field = big_endian<i32>(ref.second.field_offset);
+                    break;
+                case ABS64_LE:
+                case REL64_LE:
+                    *(i64*)field = little_endian<i64>(ref.second.field_offset);
+                    break;
+                case ABS64_BE:
+                case REL64_BE:
+                    *(i64*)field = big_endian<i64>(ref.second.field_offset);
+                    break;
+                default:
+                    break;
+            }
+        }
+        for (u32 i = 0; i < size; i ++) buf.write(rawtext[i]);
+        delete[] rawtext;
+    }
+
     void Object::writeELF(const char* path) {
         FILE* file = fopen(path, "w");
         if (!file) {
@@ -373,7 +419,7 @@ namespace jasmine {
         for (auto& entry : locals) total.push(entry);
         for (auto& entry : globals) total.push(entry);
         for (u32 i = 0; i < total.size(); i ++)
-            sym_indices[total[i].first] = i;
+            sym_indices[total[i].first] = i + 1; // skip reserved symbol 0
         for (auto& entry : total) {
             u32 ind = strtab.size();
             strtab.write(name(entry.first), strlen(name(entry.first)) + 1);
@@ -388,6 +434,7 @@ namespace jasmine {
             symtab.write<u64>(8); // symbol size = word size?
         }
 
+        resolve_ELF_addends();
         byte_buffer rel;
         for (auto& entry : refs) {
             u64 sym = entry.first;

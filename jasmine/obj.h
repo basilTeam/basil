@@ -27,6 +27,7 @@ namespace jasmine {
         void* loaded_code;
 
         void resolve_refs();
+        void resolve_ELF_addends();
     public:
         Object(Architecture architecture = DEFAULT_ARCH);
         Object(const char* path, Architecture architecture = DEFAULT_ARCH);

@@ -7,8 +7,8 @@
 namespace basil {
   enum TokenType : u8 {
     T_NONE,
-    T_INT, T_SYMBOL, T_STRING, T_COEFF,
-    T_LPAREN, T_RPAREN, T_LBRACK, T_RBRACK, T_LBRACE, T_RBRACE,
+    T_INT, T_SYMBOL, T_STRING, T_COEFF, T_FLOAT,
+    T_LPAREN, T_RPAREN, T_ACCESS, T_LBRACK, T_RBRACK, T_LBRACE, T_RBRACE,
     T_SEMI, T_DOT, T_COMMA, T_COLON, T_PIPE,
     T_PLUS, T_MINUS, T_QUOTE,
     T_NEWLINE,
@@ -41,7 +41,7 @@ namespace basil {
     void expand();
   };
 
-  Token scan(Source::View& view);
+  Token scan(Source::View& view, bool follows_space = false);
 }
 
 void write(stream& io, const basil::Token& t); 

@@ -35,6 +35,7 @@ public:
     u8& operator[](u32 i);
     const_slice<u8> operator[](pair<u32, u32> range) const;
     slice<u8> operator[](pair<u32, u32> range);
+    bool endswith(u8 c) const;
     const u8* raw() const;
     bool operator==(const u8* s) const;
     bool operator==(const char* s) const;

@@ -50,6 +50,7 @@ namespace basil {
     Value(IntersectValue* i, const Type* type);
     Value(ProductValue* p);
     Value(ArrayValue* a);
+    Value(ArrayValue* a, const Type* type);
     Value(ref<Env> env, const Builtin& b);
     Value(FunctionValue* f, const Type* ftype);
     Value(AliasValue* f);
@@ -231,6 +232,7 @@ namespace basil {
 		bool recursive() const;
 		void add_call(const FunctionValue* other);
 		ASTNode* instantiation(const Type* args) const;
+    const map<const Type*, ASTNode*>* instantiations() const;
 		void instantiate(const Type* args, ASTNode* body);
   };  
 

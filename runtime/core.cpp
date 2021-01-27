@@ -1,7 +1,18 @@
 #include "util/defs.h"
+#include "sys.h"
 #include "stdlib.h"
-#include "stdio.h"
-#include "string.h"
+
+void* operator new[](unsigned long n) {
+    return malloc(n);
+}
+
+void* operator new(unsigned long n, void* p) {
+    return p;
+}
+
+void operator delete[](void* ptr) {
+    free(ptr);
+}
 
 extern "C" void* _cons(i64 value, void* next) {
     void* result = malloc(sizeof(i64) + sizeof(void*));
@@ -20,74 +31,7 @@ extern "C" i64 _listlen(void* list) {
 }
 
 extern "C" void _display_int(i64 value) {
-    printf("%ld\n", value);
-}
-
-static const char** symbol_table;
-
-extern "C" void _display_symbol(u64 value) {
-    printf("%s\n", symbol_table[value]);
-}
-
-extern "C" void _display_bool(bool value) {
-    printf("%s\n", value ? "true" : "false");
-}
-
-extern "C" void _display_string(const char* value) {
-    printf("%s\n", value);
-}
-
-extern "C" void _display_int_list(void* value) {
-    printf("(");
-    bool first = true;
-    while (value) {
-        i64 i = *(i64*)value;
-        printf("%s%ld", first ? "" : " ", i);
-        value = *((void**)value + 1);
-        first = false;
-    }
-    printf(")\n");
-}
-
-extern "C" void _display_bool_list(void* value) {
-    printf("(");
-    bool first = true;
-    while (value) {
-        u64 i = *(u64*)value;
-        printf("%s%s", first ? "" : " ", i ? "true" : "false");
-        value = *((void**)value + 1);
-        first = false;
-    }
-    printf(")\n");
-}
-
-extern "C" void _display_symbol_list(void* value) {
-    printf("(");
-    bool first = true;
-    while (value) {
-        u64 i = *(u64*)value;
-        printf("%s%s", first ? "" : " ", symbol_table[i]);
-        value = *((void**)value + 1);
-        first = false;
-    }
-    printf(")\n");
-}
-
-extern "C" void _display_native_string_list(void* value) {
-    printf("(");
-    bool first = true;
-    while (value) {
-        const char* i = *(const char**)value;
-        printf("%s%s%c", first ? "\"" : " \"", i, '"');
-        value = *((void**)value + 1);
-        first = false;
-    }
-    printf(")\n");
-}
-
-extern "C" i64 _strcmp(const char *a, const char *b) {
-    while (*a && *b && *a == *b) a ++, b ++;
-    return *(const unsigned char*)a - *(const unsigned char*)b;
+    print(value, '\n');
 }
 
 extern "C" i64 _strlen(const char *s) {
@@ -96,10 +40,88 @@ extern "C" i64 _strlen(const char *s) {
     return s - copy - 1;
 }
 
+static const char** symbol_table;
+
+extern "C" void _display_symbol(u64 value) {
+    write(_stdout, symbol_table[value], _strlen(symbol_table[value]));
+    write(_stdout, '\n');
+}
+
+extern "C" void _display_bool(bool value) {
+    if (value) write(_stdout, "true", 5);
+    else write(_stdout, "false", 6);
+    write(_stdout, '\n');
+}
+
+extern "C" void _display_string(const char* value) {
+    write(_stdout, value, _strlen(value));
+    write(_stdout, '\n');
+}
+
+extern "C" void _display_int_list(void* value) {
+    write(_stdout, '(');
+    bool first = true;
+    while (value) {
+        i64 i = *(i64*)value;
+        if (!first) write(_stdout, ' ');
+        write(_stdout, i);
+        value = *((void**)value + 1);
+        first = false;
+    }
+    write(_stdout, ")\n", 3);
+}
+
+extern "C" void _display_bool_list(void* value) {
+    write(_stdout, '(');
+    bool first = true;
+    while (value) {
+        u64 i = *(u64*)value;
+        if (!first) write(_stdout, ' ');
+        if (i) write(_stdout, "true", 5);
+        else write(_stdout, "false", 6);
+        value = *((void**)value + 1);
+        first = false;
+    }
+    write(_stdout, ")\n", 3);
+}
+
+extern "C" void _display_symbol_list(void* value) {
+    write(_stdout, '(');
+    bool first = true;
+    while (value) {
+        u64 i = *(u64*)value;
+        if (!first) write(_stdout, ' ');
+        write(_stdout, symbol_table[i], _strlen(symbol_table[i]));
+        value = *((void**)value + 1);
+        first = false;
+    }
+    write(_stdout, ")\n", 3);
+}
+
+extern "C" void _display_native_string_list(void* value) {
+    write(_stdout, '(');
+    bool first = true;
+    while (value) {
+        const char* i = *(const char**)value;
+        if (!first) write(_stdout, ' ');
+        write(_stdout, '"');
+        write(_stdout, i, _strlen(i));
+        write(_stdout, '"');
+        value = *((void**)value + 1);
+        first = false;
+    }
+    write(_stdout, ")\n", 3);
+}
+
+extern "C" i64 _strcmp(const char *a, const char *b) {
+    while (*a && *b && *a == *b) a ++, b ++;
+    return *(const unsigned char*)a - *(const unsigned char*)b;
+}
+
 extern "C" const u8* _read_line() {
     static char buffer[1024];
-    scanf("%s", buffer);
-    int length = strlen(buffer);
+    read(_stdin, buffer, 1024);
+    int length = _strlen(buffer);
     u8* buf = new u8[length + 1];
     for (u32 i = 0; i < length + 1; i ++) buf[i] = buffer[i];
     buf[length] = '\0';
@@ -107,9 +129,7 @@ extern "C" const u8* _read_line() {
 }
 
 extern "C" i64 _read_int() {
-    i64 i;
-    scanf("%ld", &i);
-    return i;
+    return read<i64>(_stdin);
 }
 
 extern "C" const u8* _read_word() {

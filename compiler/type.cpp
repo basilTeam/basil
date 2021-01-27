@@ -19,6 +19,8 @@ namespace basil {
   bool Type::coerces_to(const Type* other) const {
     return other == this
       || other == ANY 
+      || other->kind() == KIND_RUNTIME && this->coerces_to(((const RuntimeType*)other)->base())
+      || this == VOID && other->kind() == KIND_LIST
       || other->kind() == KIND_SUM && ((const SumType*)other)->has(this);
   }
 
@@ -73,6 +75,38 @@ namespace basil {
 
   void NumericType::format(stream& io) const {
     write(io, floating() ? "f" : "i", size());
+  }
+
+  // NamedType
+
+  NamedType::NamedType(const string& name, const Type* base):
+    Type(1921110990418496011ul ^ ::hash(name) ^ base->hash()),
+    _name(name), _base(base) {}
+
+  const string& NamedType::name() const {
+    return _name;
+  }
+
+  const Type* NamedType::base() const {
+    return _base;
+  }
+
+  TypeKind NamedType::kind() const {
+    return KIND_NAMED;
+  }
+
+  bool NamedType::operator==(const Type& other) const {
+    return other.kind() == KIND_NAMED
+      && ((const NamedType&)other)._base == _base 
+      && ((const NamedType&)other)._name == _name;
+  }
+
+  bool NamedType::coerces_to(const Type* other) const {
+    return Type::coerces_to(other) || other == _base;
+  }
+
+  void NamedType::format(stream& io) const {
+    write(io, _name);
   }
 
   // ListType
@@ -429,6 +463,11 @@ namespace basil {
 			*((const RuntimeType&)other).base() == *base();
 	}
 
+  bool RuntimeType::coerces_to(const Type* other) const {
+    return Type::coerces_to(other) 
+      || other->kind() == KIND_RUNTIME && base()->coerces_to(((const RuntimeType*)other)->base());
+  }
+
 	void RuntimeType::format(stream& io) const {
     write(io, "runtime<", _base, ">");
 	}
@@ -481,6 +520,10 @@ namespace basil {
 	bool TypeVariable::operator==(const Type& other) const {
 		return other.kind() == kind() && _id == ((const TypeVariable&)other)._id;
 	}
+
+  bool TypeVariable::coerces_to(const Type* other) const {
+    return Type::coerces_to(other) || !concrete() || actual()->coerces_to(other);
+  }
 
 	void TypeVariable::format(stream& io) const {
 		write(io, typevar_names[_id]);

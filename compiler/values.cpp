@@ -65,7 +65,13 @@ namespace basil {
     Value::Value(ArrayValue* a) {
         set<const Type*> ts;
         for (const Value& v : *a) ts.insert(v.type());
-        _type = find<ArrayType>(find<SumType>(ts), a->size());
+        if (ts.size() == 0) ts.insert(ANY);
+        _type = find<ArrayType>(ts.size() > 1 ? find<SumType>(ts) : *ts.begin(), a->size());
+        _data.rc = a;
+    }
+
+    Value::Value(ArrayValue* a, const Type* t) {
+        _type = t;
         _data.rc = a;
     }
 
@@ -87,7 +93,8 @@ namespace basil {
         _data.rc = m;
     }
 
-    Value::Value(ASTNode* n) : _type(find<RuntimeType>(n->type())) {
+    Value::Value(ASTNode* n) : 
+        _type(n->type()->kind() == KIND_RUNTIME ? n->type() : find<RuntimeType>(n->type())) {
         _data.rc = n;
     }
 
@@ -340,7 +347,7 @@ namespace basil {
             }
             write(io, ")");
         } else if (is_function())
-            write(io, "<#procedure>");
+            write(io, "<#", get_function().name() < 0 ? "procedure" : symbol_for(get_function().name()), ">");
         else if (is_alias())
             write(io, "<#alias>");
         else if (is_macro())
@@ -739,6 +746,10 @@ namespace basil {
             if (it != _insts->end()) return it->second;
         }
         return nullptr;
+    }
+
+    const map<const Type*, ASTNode*>* FunctionValue::instantiations() const {
+        return _insts;
     }
 
     void FunctionValue::instantiate(const Type* type, ASTNode* body) {
@@ -1182,12 +1193,27 @@ namespace basil {
     Value cast(const Value& val, const Type* type) {
         if (val.type() == type || type == ANY) return val;
 
+        if (val.type()->kind() == KIND_TYPEVAR) { 
+            unify(val.type(), type);
+            return val;
+        }
+
+        if (type->kind() == KIND_RUNTIME) {
+            // we don't lower for ANY, so that generic builtins can do custom things
+            return ((const RuntimeType*)type)->base() == ANY ? val : lower(val);
+        }
+
         if (val.is_product()) {
             if (type == TYPE) {
                 vector<const Type*> ts;
                 for (const Value& v : val.get_product()) ts.push(v.get_type());
                 return Value(find<ProductType>(ts), TYPE);
             }
+        }
+
+        if (val.type()->kind() == KIND_ARRAY && type->kind() == KIND_ARRAY
+            && ((const ArrayType*)val.type())->fixed() && !((const ArrayType*)type)->fixed()) {
+            return Value(new ArrayValue(val.get_array()), type);
         }
 
         if (val.is_list() && type == TYPE) {
@@ -1206,7 +1232,7 @@ namespace basil {
 
         if (type->kind() == KIND_SUM) { return Value(new SumValue(val), val.type()); }
 
-        err(val.loc(), "Could not convert value to type '", type, "'.");
+        err(val.loc(), "Could not convert value of type '", val.type(), "' to type '", type, "'.");
         return error();
     }
 
@@ -1300,7 +1326,18 @@ namespace basil {
         }
     }
 
+    Value cast_args(ref<Env> env, Value& args, const Type* argst) {
+        
+    }
+
     Value call(ref<Env> env, Value& callable, const Value& args) {
+        if (!args.is_product()) {
+            err(args.loc(), "Expected product value for arguments.");
+            return error();
+        }
+        for (u32 i = 0; i < args.get_product().size(); i ++) {
+            if (args.get_product()[i].is_error()) return error();
+        }
         Value function = callable;
         if (function.is_intersect()) {
             map<const FunctionType*, i64> ftypes;
@@ -1363,24 +1400,54 @@ namespace basil {
             return error();
         }
 
-        // Handle runtime arguments.
+        bool has_runtime = false;
+        for (u32 i = 0; i < argst->count(); i ++) {
+            if (args.get_product()[i].is_runtime()) {
+                has_runtime = true;
+                break;
+            }
+        }
+        FunctionValue& fn = function.get_function();
+        if (fn.is_builtin()) {
+            if (fn.get_builtin().runtime_only()) has_runtime = true;
+        }
+        else {
+            if (!fn.found_calls()) {
+                set<const FunctionValue*> visited;
+                find_calls(fn, env, fn.body(), visited);
+            }
+            if (fn.recursive()) has_runtime = true;
+        }
+
+        const ProductType* rtargst = argst;
+        if (has_runtime) {
+            vector<const Type*> argts;
+            for (u32 i = 0; i < argst->count(); i ++) {
+                if (argst->member(i)->kind() != KIND_RUNTIME) argts.push(find<RuntimeType>(argst->member(i)));
+                else argts.push(argst->member(i));
+            }
+            rtargst = (const ProductType*)find<ProductType>(argts);
+        }
 
         Value args_copy = args;
         for (u32 i = 0; i < argst->count(); i++) {
             const Value& arg = args.get_product()[i];
             const Type* argt = arg.type();
-            if (!argt->coerces_to(argst->member(i))) {
+            if (!argt->coerces_to(rtargst->member(i))) {
                 err(arg.loc(), "Incorrectly typed argument for function '", function, "' at position ", i,
-                    ": expected '", argst->member(i), "', given '", argt, "'.");
+                    ": expected '", rtargst->member(i), "', given '", argt, "'.");
                 return error();
             }
-            if (argt != argst->member(i)) args_copy.get_product()[i] = cast(args.get_product()[i], argst->member(i));
+            if (argt != rtargst->member(i)) args_copy.get_product()[i] = cast(args.get_product()[i], rtargst->member(i));
         }
 
-        FunctionValue& fn = function.get_function();
         if (fn.is_builtin()) {
-            return fn.get_builtin().eval(env, args_copy);
+            if (has_runtime && fn.get_builtin().should_lower()) 
+                for (Value& v : args_copy.get_product()) v = lower(v);
+            return has_runtime ? fn.get_builtin().compile(env, args_copy) 
+                : fn.get_builtin().eval(env, args_copy);
         } else {
+            vector<ASTNode*> rtargs;
             ref<Env> fnenv = fn.get_env();
             for (u32 i = 0; i < fn.arity(); i++) {
                 if (fn.args()[i] & KEYWORD_ARG_BIT) {
@@ -1393,12 +1460,29 @@ namespace basil {
                     }
                 } else {
                     const string& argname = symbol_for(fn.args()[i] & ARG_NAME_MASK);
-                    fnenv->find(argname)->value = args_copy.get_product()[i];
+                    if (has_runtime) {
+                        Value v = lower(args_copy.get_product()[i]);
+                        ASTNode* n = v.get_runtime();
+                        n->inc();
+                        rtargs.push(n);
+                    }
+                    else fnenv->find(argname)->value = args_copy.get_product()[i];
                 }
             }
-            Value prepped = fn.body().clone();
-            prep(fnenv, prepped);
-            return eval(fnenv, prepped);
+            if (has_runtime) {
+                ASTNode* body = fn.instantiation(argst);
+                if (!body) {
+                    fn.instantiate(argst, new ASTIncompleteFn(function.loc(), argst, fn.name()));
+                    body = instantiate(function.loc(), fn, argst);
+                }
+                if (!body) return error();
+                return new ASTCall(callable.loc(), body, rtargs);
+            }
+            else {
+                Value prepped = fn.body().clone();
+                prep(fnenv, prepped);
+                return eval(fnenv, prepped);
+            }
         }
     }
 
@@ -1502,6 +1586,7 @@ namespace basil {
                         }
                     }
                 }
+
                 const Type* argt = find<ProductType>(argts);
                 ASTNode* body = fn.instantiation(argt);
                 if (!body) {

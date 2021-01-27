@@ -126,6 +126,10 @@ slice<u8> string::operator[](pair<u32, u32> range) {
     return { range.second - range.first, data + range.first };
 }
 
+bool string::endswith(u8 c) const {
+    return data[_size - 1] == c;
+}
+
 const u8* string::raw() const {
     return data;
 }

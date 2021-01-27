@@ -237,7 +237,7 @@ namespace x64 {
     void jmp(const Arg& dest, Size size = AUTO);
     void jcc(const Arg& dest, Condition condition);
     void call(const Arg& dest, Size size = AUTO);
-		void setcc(const Arg& dest, Condition condition, Size size = AUTO);
+	void setcc(const Arg& dest, Condition condition, Size size = AUTO);
 }
 
 #endif

@@ -190,7 +190,7 @@ namespace basil {
 		bool changed = true;
 		while (changed) {
 			changed = false;
-			for (i64 i = _insns.size() - 1; i >= 0; i --) {
+			for (i64 i = i64(_insns.size()) - 1; i >= 0; i --) {
 				Insn* in = _insns[i];
 				u32 initial_in = in->in().size(), initial_out = in->out().size();
 				for (const Insn* succ : in->succ()) {
@@ -331,6 +331,11 @@ namespace basil {
 		open_frame(_stack);
 		for (Insn* i : _insns) i->emit();
 		local_label(all_labels[_end]);
+		if (_fns.size() > 0) { // hack
+			mov(x64::r64(x64::RAX), x64::imm64(60));
+			mov(x64::r64(x64::RDI), x64::imm64(0));
+			syscall();
+		}
 		close_frame(_stack);
 	}
 

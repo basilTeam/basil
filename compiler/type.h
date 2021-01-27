@@ -22,7 +22,8 @@ namespace basil {
     KIND_FUNCTION = GC_KIND_FLAG | 5,
     KIND_ALIAS = GC_KIND_FLAG | 6,
     KIND_MACRO = GC_KIND_FLAG | 7,
-		KIND_RUNTIME = GC_KIND_FLAG | 8
+		KIND_RUNTIME = GC_KIND_FLAG | 8,
+    KIND_NAMED = GC_KIND_FLAG | 9
   };
 
   class Type {
@@ -58,6 +59,20 @@ namespace basil {
     
     bool floating() const;
     u32 size() const;
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
+    void format(stream& io) const override;
+  };
+
+  class NamedType : public Type {
+    string _name;
+    const Type* _base;
+  public:
+    NamedType(const string& name, const Type* base);
+
+    const string& name() const;
+    const Type* base() const;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
     bool coerces_to(const Type* other) const override;
@@ -186,6 +201,7 @@ namespace basil {
     const Type* base() const;
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
     void format(stream& io) const override;
   };
 
@@ -203,6 +219,7 @@ namespace basil {
 		const Type* concretify() const override;
 		TypeKind kind() const override;
 		bool operator==(const Type& other) const override;
+    bool coerces_to(const Type* other) const override;
 		void format(stream& io) const override;
 	};
 

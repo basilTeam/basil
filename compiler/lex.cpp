@@ -3,6 +3,7 @@
 #include "errors.h"
 #include "ctype.h"
 #include "stdlib.h"
+#include "driver.h"
 
 namespace basil {
   Token::Token(TokenType type_in, const const_slice<u8>& value_in, u32 line_in, u32 column_in):
@@ -13,8 +14,8 @@ namespace basil {
   }
 
   static const char* TOKEN_NAMES[NUM_TOKEN_TYPES] = {
-    "none", "int", "symbol", "string", "coeff", "left paren", "right paren",
-    "left bracket", "right bracket", "left brace", "right brace",
+    "none", "int", "symbol", "string", "coeff", "float", "left paren", "right paren",
+    "access bracket", "left bracket", "right bracket", "left brace", "right brace",
     "semicolon", "dot", "comma", "colon", "pipe", "plus", "minus", "quote",
     "newline"
   };
@@ -59,7 +60,7 @@ namespace basil {
     return issymbolstart(ch) && !isalpha(ch);
   }
 
-  Token scan(Source::View& view) {
+  Token scan(Source::View& view, bool follows_space) {
     const u8* start = view.pos();
     u32 start_col = view.col(), line = view.line();
     u8 ch = view.peek();
@@ -99,7 +100,9 @@ namespace basil {
     }
     else if (isdelimiter(ch)) {
       view.read();
-      return Token(DELIMITERS[ch], { 1, start }, line, start_col);
+      TokenType type = DELIMITERS[ch];
+      if (DELIMITERS[ch] == T_LBRACK && !follows_space) type = T_ACCESS;
+      return Token(type, { 1, start }, line, start_col);
     }
     else if (issymbolstart(ch)) {
       view.read();
@@ -125,7 +128,7 @@ namespace basil {
     }
     else if (isspace(ch)) {
       view.read();
-      return scan(view);
+      return scan(view, true);
     }
     else err({ line, u16(view.col()) }, "Unexpected character in input '", view.read(), "'.");
     return NONE;
@@ -163,8 +166,6 @@ namespace basil {
 
     while (view.peek())
       _tokens->push(scan(view));
-    if (error_count())
-      print_errors(_stdout, *_source), clear_errors();
   }
 }
 

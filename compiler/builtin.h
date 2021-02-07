@@ -33,13 +33,13 @@ namespace basil {
     extern void define_builtins(ref<Env> env);
 
     extern Builtin
-        ADD, SUB, MUL, DIV, REM,
+        ADD_INT, ADD_SYMBOL, SUB, MUL, DIV, REM,
         AND, OR, XOR, NOT,
         EQUALS, NOT_EQUALS, LESS, GREATER, LESS_EQUAL, GREATER_EQUAL,
         IS_EMPTY, HEAD, TAIL, CONS,
         DISPLAY, READ_LINE, READ_WORD, READ_INT,
         LENGTH, AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, STRCAT, SUBSTR,
-        ANNOTATE, TYPEOF, LIST_TYPE,
+        ANNOTATE, TYPEOF, LIST_TYPE, OF_TYPE_MACRO, OF_TYPE,
         ASSIGN, IF;
 }
 

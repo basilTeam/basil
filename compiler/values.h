@@ -26,6 +26,7 @@ namespace basil {
   class FunctionValue;
   class AliasValue;
   class MacroValue;
+  class NamedValue;
 
   class Value {
     const Type* _type;
@@ -55,6 +56,7 @@ namespace basil {
     Value(FunctionValue* f, const Type* ftype);
     Value(AliasValue* f);
     Value(MacroValue* f);
+    Value(NamedValue* n, const Type* t);
 		Value(ASTNode* n);
     ~Value();
     Value(const Value& other);
@@ -124,6 +126,10 @@ namespace basil {
 		ASTNode* get_runtime() const;
 		ASTNode*& get_runtime();
 
+    bool is_named() const;
+    const NamedValue& get_named() const;
+    NamedValue& get_named();
+
     const Type* type() const;
     void format(stream& io) const;
     u64 hash() const;
@@ -143,6 +149,15 @@ namespace basil {
 		string& value();
 		const string& value() const;
 	};
+
+  class NamedValue : public RC {
+    Value _inner;
+  public:
+    NamedValue(const Value& inner);
+
+    Value& get();
+    const Value& get() const;
+  };
 
   class ListValue : public RC {
     Value _head, _tail;

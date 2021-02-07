@@ -151,7 +151,7 @@ namespace basil {
 		Location add(Insn* insn);
 		u32 label() const;
 		void allocate();
-		void emit(Object& obj);
+		void emit(Object& obj, bool exit = false);
 		void format(stream& io) const;
 		u32 end_label() const;
 		const Location& ret_loc() const;

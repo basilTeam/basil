@@ -93,6 +93,10 @@ namespace basil {
         _data.rc = m;
     }
 
+    Value::Value(NamedValue* n, const Type* t) : _type(t) {
+        _data.rc = n;
+    }
+
     Value::Value(ASTNode* n) : 
         _type(n->type()->kind() == KIND_RUNTIME ? n->type() : find<RuntimeType>(n->type())) {
         _data.rc = n;
@@ -290,6 +294,18 @@ namespace basil {
 
     ASTNode*& Value::get_runtime() {
         return (ASTNode*&)_data.rc;
+    }    
+    
+    bool Value::is_named() const {
+        return _type->kind() == KIND_NAMED;
+    }
+
+    const NamedValue& Value::get_named() const {
+        return *(const NamedValue*)_data.rc;
+    }
+
+    NamedValue& Value::get_named() {
+        return *(NamedValue*)_data.rc;
     }
 
     const Type* Value::type() const {
@@ -310,6 +326,8 @@ namespace basil {
             write(io, get_type());
         else if (is_bool())
             write(io, get_bool());
+        else if (is_named())
+            write(io, ((const NamedType*)type())->name(), "(", get_named().get(), ")");
         else if (is_list()) {
             bool first = true;
             write(io, "(");
@@ -370,6 +388,8 @@ namespace basil {
             return get_type()->hash();
         else if (is_bool())
             return get_bool() ? 9269586835432337327ul : 18442604092978916717ul;
+        else if (is_named())
+            return get_named().get().hash() ^ (5789283014586986071ul * ::hash(((const NamedType*)type())->name()));
         else if (is_list()) {
             u64 h = 9572917161082946201ul;
             Value ptr = *this;
@@ -428,6 +448,8 @@ namespace basil {
             return get_bool() == other.get_bool();
         else if (is_string())
             return get_string() == other.get_string();
+        else if (is_named())
+            return get_named().get() == other.get_named().get();
         else if (is_sum())
             return get_sum().value() == other.get_sum().value();
         else if (is_intersect()) {
@@ -480,11 +502,20 @@ namespace basil {
     }
 
     Value Value::clone() const {
-        if (is_list()) return Value(new ListValue(get_list().head().clone(), get_list().tail().clone()));
+        if (is_list()) {
+            ListValue* l = nullptr;
+            const ListValue* i = &get_list();
+            vector<const Value*> vals;
+            while (i) vals.push(&i->head()), i = i->tail().is_void() ? nullptr : &i->tail().get_list();
+            for (i64 i = i64(vals.size()) - 1; i >= 0; i --) l = new ListValue(vals[i]->clone(), l ? l : empty());
+            return Value(l);
+        }
         else if (is_string())
             return Value(get_string(), STRING);
+        else if (is_named())
+            return Value(new NamedValue(get_named().get().clone()), type());
         else if (is_sum())
-            return Value(new SumValue(get_sum().value()), type());
+            return Value(new SumValue(get_sum().value().clone()), type());
         else if (is_intersect()) {
             map<const Type*, Value> values;
             for (const auto& p : get_intersect()) values.put(p.first, p.second.clone());
@@ -542,6 +573,17 @@ namespace basil {
 
     const string& StringValue::value() const {
         return _value;
+    }
+
+    NamedValue::NamedValue(const Value& inner):
+        _inner(inner) {}
+
+    Value& NamedValue::get() {
+        return _inner;
+    }
+
+    const Value& NamedValue::get() const {
+        return _inner;
     }
 
     ListValue::ListValue(const Value& head, const Value& tail) : _head(head), _tail(tail) {}
@@ -1203,6 +1245,13 @@ namespace basil {
             return ((const RuntimeType*)type)->base() == ANY ? val : lower(val);
         }
 
+        if (type->kind() == KIND_NAMED) {
+            return Value(new NamedValue(val), type);
+        }
+        else if (val.type()->kind() == KIND_NAMED && type == ((const NamedType*)val.type())->base()) {
+            return val.get_named().get();
+        }
+
         if (val.is_product()) {
             if (type == TYPE) {
                 vector<const Type*> ts;
@@ -1382,7 +1431,13 @@ namespace basil {
             function = function.get_intersect().values()[ftypes.begin()->first];
         }
 
-        if (!function.is_function()) {
+        if (function.is_runtime()) {
+            if (((const RuntimeType*)function.type())->base()->kind() != KIND_FUNCTION) {
+                err(function.loc(), "Cannot call non-function value '", function, "'.");
+                return error();
+            }
+        }
+        else if (!function.is_function()) {
             err(function.loc(), "Cannot call non-function value '", function, "'.");
             return error();
         }
@@ -1391,7 +1446,9 @@ namespace basil {
             return error();
         }
 
-        const FunctionType* ft = (const FunctionType*)function.type();
+        const FunctionType* ft = function.is_runtime() ? 
+            ((const FunctionType*)((const RuntimeType*)function.type())->base()) 
+            : (const FunctionType*)function.type();
         const ProductType* argst = (const ProductType*)ft->arg();
 
         if (args.get_product().size() != argst->count()) {
@@ -1407,16 +1464,21 @@ namespace basil {
                 break;
             }
         }
-        FunctionValue& fn = function.get_function();
-        if (fn.is_builtin()) {
-            if (fn.get_builtin().runtime_only()) has_runtime = true;
-        }
-        else {
-            if (!fn.found_calls()) {
-                set<const FunctionValue*> visited;
-                find_calls(fn, env, fn.body(), visited);
+        
+        if (function.is_runtime()) has_runtime = true;
+        if (function.is_function()) {
+            FunctionValue& fn = function.get_function();
+            if (fn.is_builtin()) {
+                if (fn.get_builtin().runtime_only()) has_runtime = true;
             }
-            if (fn.recursive()) has_runtime = true;
+            else {
+                if (ft->ret()->kind() == KIND_RUNTIME) has_runtime = true;
+                if (!fn.found_calls()) {
+                    set<const FunctionValue*> visited;
+                    find_calls(fn, env, fn.body(), visited);
+                }
+                // if (fn.recursive()) has_runtime = true;
+            }
         }
 
         const ProductType* rtargst = argst;
@@ -1441,6 +1503,18 @@ namespace basil {
             if (argt != rtargst->member(i)) args_copy.get_product()[i] = cast(args.get_product()[i], rtargst->member(i));
         }
 
+        if (function.is_runtime()) {
+            vector<ASTNode*> rtargs;
+            for (u32 i = 0; i < ft->arity(); i++) {
+                Value v = lower(args_copy.get_product()[i]);
+                ASTNode* n = v.get_runtime();
+                n->inc();
+                rtargs.push(n);
+            }
+            return new ASTCall(function.loc(), function.get_runtime(), rtargs);
+        }
+
+        FunctionValue& fn = function.get_function();
         if (fn.is_builtin()) {
             if (has_runtime && fn.get_builtin().should_lower()) 
                 for (Value& v : args_copy.get_product()) v = lower(v);
@@ -1449,6 +1523,7 @@ namespace basil {
         } else {
             vector<ASTNode*> rtargs;
             ref<Env> fnenv = fn.get_env();
+            map<string, Value> bindings;
             for (u32 i = 0; i < fn.arity(); i++) {
                 if (fn.args()[i] & KEYWORD_ARG_BIT) {
                     // keyword arg
@@ -1466,7 +1541,11 @@ namespace basil {
                         n->inc();
                         rtargs.push(n);
                     }
-                    else fnenv->find(argname)->value = args_copy.get_product()[i];
+                    else {
+                        Def* def = fnenv->find(argname);
+                        bindings[argname] = def->value;
+                        def->value = args_copy.get_product()[i];
+                    }
                 }
             }
             if (has_runtime) {
@@ -1479,9 +1558,9 @@ namespace basil {
                 return new ASTCall(callable.loc(), body, rtargs);
             }
             else {
-                Value prepped = fn.body().clone();
-                prep(fnenv, prepped);
-                return eval(fnenv, prepped);
+                Value result = eval(fnenv, fn.body());
+                for (auto& p : bindings) fnenv->find(p.first)->value = p.second;
+                return result;
             }
         }
     }

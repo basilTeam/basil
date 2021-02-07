@@ -1,0 +1,4 @@
+def (puts s?: string): void extern
+
+puts "hello world!"
+

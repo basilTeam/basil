@@ -18,6 +18,10 @@ namespace basil {
 		return _type->concretify();
 	}
 
+	bool ASTNode::is_extern() const {
+		return false;
+	}
+
 	ASTSingleton::ASTSingleton(const Type* type):
 		ASTNode(NO_LOCATION), _type(type) {}
 
@@ -159,11 +163,11 @@ namespace basil {
 		write(io, symbol_for(_name));
 	}
 
-	ASTExtern::ASTExtern(SourceLocation loc):
-		ASTNode(loc) {}
+	ASTExtern::ASTExtern(SourceLocation loc, const Type* type):
+		ASTNode(loc), _type(type) {}
 
 	const Type* ASTExtern::lazy_type() {
-		return find<TypeVariable>();
+		return _type;
 	}
 
 	ref<SSANode> ASTExtern::emit(ref<BasicBlock>& parent) {
@@ -176,6 +180,10 @@ namespace basil {
 
 	void ASTExtern::format(stream& io) const {
 		write(io, "extern");
+	}
+
+	bool ASTExtern::is_extern() const {
+		return true;
 	}
 
 	ASTUnary::ASTUnary(SourceLocation loc, ASTNode* child):
@@ -582,7 +590,15 @@ namespace basil {
 	}
 
 	Location ASTFunction::emit(Function& func) {
-		if (!_emitted) {
+		if (_body->is_extern()) {
+			_emitted = true;
+			_label = add_label(symbol_for(_name));
+			Location loc;
+			loc.type = LOC_LABEL;
+			loc.label_index = _label;
+			return func.add(new AddressInsn(loc, type()));
+		}
+		else if (!_emitted) {
 			_emitted = true;
 			Function& fn = _name == -1 ? func.create_function() 
 				: func.create_function(symbol_for(_name));

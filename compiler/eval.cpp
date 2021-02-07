@@ -202,12 +202,12 @@ namespace basil {
 
         root->def("true", Value(true, BOOL));
         root->def("false", Value(false, BOOL));
-        root->def("extern", Value(new ASTExtern({})));
         root->def("int", Value(INT, TYPE));
         root->def("symbol", Value(SYMBOL, TYPE));
         root->def("string", Value(STRING, TYPE));
         root->def("type", Value(TYPE, TYPE));
         root->def("bool", Value(BOOL, TYPE));
+        root->def("void", Value(VOID, TYPE));
         return root;
     }
 
@@ -215,7 +215,7 @@ namespace basil {
 
     Value eval_list(ref<Env> env, const Value& list);
     Value eval(ref<Env> env, Value term);
-    Value define(ref<Env> env, const Value& term, bool is_macro);
+    Value define(ref<Env> env, const Value& term, bool is_macro, bool only_vars = false, bool only_procs = false);
 
     // utilities
 
@@ -404,6 +404,22 @@ namespace basil {
         return symbol_for(head(tail(term)).get_symbol());
     }
 
+    u64 get_keyword(const Value& v) {
+        if (v.is_symbol()) return v.get_symbol();
+        else if (v.is_list() && head(v).is_symbol() && head(v).get_symbol() == symbol_value("quote") &&
+                 tail(v).is_list() && head(tail(v)).is_symbol())
+            return head(tail(v)).get_symbol();
+        return 0;
+    }
+
+    bool is_keyword(const Value& v, const string& word) {
+        if (v.is_symbol()) return v.get_symbol() == symbol_value(word);
+        else if (v.is_list() && head(v).is_symbol() && head(v).get_symbol() == symbol_value("quote") &&
+                 tail(v).is_list() && head(tail(v)).is_symbol())
+            return head(tail(v)).get_symbol() == symbol_value(word);
+        return false;
+    }
+
     void visit_defs(ref<Env> env, const Value& item) {
         if (!item.is_list()) return;
         Value h = head(item);
@@ -473,6 +489,15 @@ namespace basil {
         } 
         else traverse_list(env, item, visit_defs);
     }
+    
+    void define_procedures(ref<Env> env, const Value& item) {
+        if (!item.is_list()) return;
+        Value h = head(item);
+        if (symbol_matches(h, "def")) {
+            define(env, item, false, false, true);
+        }
+        else traverse_list(env, item, define_procedures);
+    }
 
     void handle_macro(ref<Env> env, Value& item);
 
@@ -489,7 +514,7 @@ namespace basil {
 
         const MacroValue& fn = macro.get_macro();
         if (fn.is_builtin()) {
-            return error(); // fn.get_builtin()(env, arg);
+            return fn.get_builtin().eval(env, arg);
         } else {
             ref<Env> env = fn.get_env();
             u32 argc = arg.get_product().size(), arity = fn.args().size();
@@ -500,10 +525,9 @@ namespace basil {
             for (u32 i = 0; i < arity; i++) {
                 if (fn.args()[i] & KEYWORD_ARG_BIT) {
                     // keyword arg
-                    Value argument = eval(env, arg.get_product()[i]);
-                    if (!argument.is_symbol() || argument.get_symbol() != (fn.args()[i] & ARG_NAME_MASK)) {
+                    if (get_keyword(arg.get_product()[i]) != (fn.args()[i] & ARG_NAME_MASK)) {
                         err(arg.get_product()[i].loc(), "Expected keyword '", symbol_for(fn.args()[i] & ARG_NAME_MASK),
-                            "', got '", argument, "'.");
+                            "', got '", arg.get_product()[i], "'.");
                         return error();
                     }
                 } else {
@@ -666,17 +690,17 @@ namespace basil {
     }
 
     void apply_infix(ref<Env> env, Value& item) {
-        Value orig = item.clone();
         if (!item.is_list()) return;
         Value h = head(item);
         if (h.is_symbol()) {
             const string& name = symbol_for(h.get_symbol());
-            if (name == "macro" || name == "infix" || name == "infix-macro" || name == "lambda" || name == "quote" ||
+            if (name == "macro" || name == "lambda" || name == "quote" ||
                 name == "splice")
                 return;
-            else if (name == "def") {
-                if (tail(item).is_list() && head(tail(item)).is_symbol()) apply_infix_at(env, item, 2);
-            } else if (name == "if" || name == "do" || name == "list-of")
+            // else if (name == "def") {
+            //     if (tail(item).is_list() && head(tail(item)).is_symbol()) apply_infix_at(env, item, 2);
+            // } 
+            else if (name == "if" || name == "do" || name == "list-of")
                 apply_infix_at(env, item, 1);
             else {
                 silence_errors();
@@ -694,11 +718,12 @@ namespace basil {
         handle_splice(env, term);
         handle_use(env, term);
         visit_macro_defs(env, term);
-        handle_macro(env, term);
         visit_defs(env, term);
         apply_infix(env, term);
         handle_macro(env, term);
         visit_defs(env, term);
+        apply_infix(env, term);
+        define_procedures(env, term);
     }
 
     Value overload(ref<Env> env, Def* existing, const Value& func, const string& name) {
@@ -742,7 +767,7 @@ namespace basil {
     }
 
     // definition stuff
-    Value define(ref<Env> env, const Value& term, bool is_macro) {
+    Value define(ref<Env> env, const Value& term, bool is_macro, bool only_vars, bool only_procs) {
         vector<Value> values = to_vector(term);
 
         // visit_defs already does some error-checking, so we
@@ -757,6 +782,7 @@ namespace basil {
         }
 
         if (is_valid_variable(values[i])) { // variable
+            if (only_procs) return Value(VOID);
             string name = get_variable_name(values[i]);
 
             if (is_macro) {
@@ -776,6 +802,7 @@ namespace basil {
                 return Value(VOID);
             }
         } else if (values[i].is_list()) { // procedure
+            if (only_vars) return Value(VOID);
             bool infix = !is_valid_def(values[i]);
             string name = infix ? get_infix_name(values[i]) : get_def_name(values[i]);
 
@@ -842,16 +869,31 @@ namespace basil {
                     }
                     returntype = tval.get_type();
                 }
+
+                bool external = false;
+                if (body.size() == 1 && symbol_matches(body[0], "extern")) {
+                    if (!returntype->concrete()) {
+                        err(body[0].loc(), "Explicit return type required in extern function definition.");
+                        return error();
+                    }
+                    external = true;
+                }
+
                 const Type* argst = find<ProductType>(argts);
-                Value func(new FunctionValue(function_env, argnames, body_term, symbol_value(name)),
-                           find<FunctionType>(argst, returntype));
+                const FunctionType* ft = (const FunctionType*)find<FunctionType>(argst, returntype);
+                u64 fname = symbol_value(name);
+                Value func = external ? Value(new ASTFunction(term.loc(), function_env, argst, argnames,
+                        new ASTExtern(term.loc(), returntype), fname))
+                    : Value(new FunctionValue(function_env, argnames, body_term, fname), ft);
                 Def* existing = env->find(name);
                 if (existing && !existing->value.is_void()) {
                     return overload(env, existing, func, name);
                 } else if (infix) {
                     env->infix(name, func, argnames.size(), precedence);
                 } else env->def(name, func, argnames.size());
-                if (argst->concrete()) {
+                if (func.is_runtime())
+                    return new ASTDefine(values[0].loc(), env, fname, func.get_runtime());
+                if (argst->concrete() && !external) {
                     func.get_function().instantiate(argst, 
                         new ASTIncompleteFn(func.loc(), argst, symbol_value(name)));
                     instantiate(func.loc(), func.get_function(), find<ProductType>(argts));
@@ -1058,22 +1100,6 @@ namespace basil {
         return values.back();
     }
 
-    u64 get_keyword(const Value& v) {
-        if (v.is_symbol()) return v.get_symbol();
-        else if (v.is_list() && head(v).is_symbol() && head(v).get_symbol() == symbol_value("quote") &&
-                 tail(v).is_list() && head(tail(v)).is_symbol())
-            return head(tail(v)).get_symbol();
-        return 0;
-    }
-
-    bool is_keyword(const Value& v, const string& word) {
-        if (v.is_symbol()) return v.get_symbol() == symbol_value(word);
-        else if (v.is_list() && head(v).is_symbol() && head(v).get_symbol() == symbol_value("quote") &&
-                 tail(v).is_list() && head(tail(v)).is_symbol())
-            return head(tail(v)).get_symbol() == symbol_value(word);
-        return false;
-    }
-
     Value if_expr(ref<Env> env, const Value& term) {
         Value params = tail(term);
         prep(env, params);
@@ -1251,13 +1277,9 @@ namespace basil {
             const string& name = symbol_for(h.get_symbol());
             if (name == "quote") return head(tail(term)).clone();
             else if (name == "def")
-                return define(env, term, false);
-            // else if (name == "infix")
-            //     return infix(env, term, false);
+                return define(env, term, false, true);
             else if (name == "macro")
                 return define(env, term, true);
-            // else if (name == "infix-macro")
-            //     return infix(env, term, true);
             else if (name == "lambda")
                 return lambda(env, term);
             else if (name == "do")
@@ -1288,11 +1310,7 @@ namespace basil {
             const Value* v = &term.get_list().tail();
             u32 i = 0;
             while (v->is_list()) {
-                if (i < first.get_macro().arity() && first.get_macro().args()[i] & KEYWORD_ARG_BIT &&
-                    v->get_list().head().is_symbol())
-                    args.push(list_of(Value("quote"), v->get_list().head()));
-                else
-                    args.push(v->get_list().head());
+                args.push(v->get_list().head());
                 v = &v->get_list().tail();
                 i++;
             }

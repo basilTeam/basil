@@ -1,0 +1,8 @@
+def Rational Rational of (int, int)
+def (display r?: Rational)
+    display r.0
+    display "/"
+    display r.1
+
+def x: Rational (1, 2)
+display x

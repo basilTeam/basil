@@ -460,6 +460,16 @@ namespace basil {
         }
     }
 
+    void call(const Location& func) {
+        switch (_arch) {
+            case X86_64:
+                x64::call(x64_arg(func));
+                return;
+            default:
+                return;
+        }
+    }
+
     void call(const Location& dest, const Location& func) {
         switch (_arch) {
             case X86_64:

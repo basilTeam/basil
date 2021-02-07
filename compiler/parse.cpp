@@ -59,6 +59,7 @@ namespace basil {
         while (view.peek().type != terminator) {
             while (view.peek().type == T_NEWLINE) view.read();
             if (!view.peek() && out_of_input(view)) return;
+            if (view.peek().type == terminator) break;
             terms.push(parse(view, indent));
             if (view.peek().type == T_COMMA) {
                 if (terminator != T_RPAREN && !errored) { // not enclosed by parens

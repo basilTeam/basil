@@ -52,6 +52,10 @@ namespace x64 {
         return type >= REGISTER8 && type <= REGISTER64;
     }
 
+    bool is_register_offset(ArgType type) {
+        return (type >= REGISTER_OFFSET8 && type <= REGISTER_OFFSET64) || type == REGISTER_OFFSET_AUTO;
+    }
+
     bool is_immediate(ArgType type) {
         return (type >= IMM8 && type <= IMM64) || type == IMM_AUTO;
     }
@@ -708,8 +712,7 @@ namespace x64 {
         }
         else modrm |= 0b11000000; // register-register mod
 
-        if (disp && !is_displacement_only(src.type) && 
-			!is_displacement_only(dest.type)) {
+        if (is_register_offset(src.type) || is_register_offset(dest.type)) {
             if (disp > -129 && disp < 128) modrm |= 0b01000000; // 8-bit offset
             else if (disp < -0x80000000l || disp > 0x7fffffffl) {
                 fprintf(stderr, "[ERROR] Cannot represent memory offset %lx "
@@ -729,7 +732,7 @@ namespace x64 {
         else if (is_scaled_addressing(src.type) || is_absolute(src.type))
             modrm |= RSP;
         else if (is_rip_relative(src.type))
-            modrm |= RBP;
+            modrm |= RBP, modrm |= (base_register(dest) & 7) << 3;
         else modrm |= (base_register(dest) & 7); // destination register in r/m byte
 
         target->code().write(modrm);
@@ -738,7 +741,7 @@ namespace x64 {
         if (is_displacement_only(src.type) || is_displacement_only(dest.type)) {
             target->code().write(little_endian((i32)disp));
         }
-        else if (disp) {
+        else if (is_register_offset(src.type) || is_register_offset(dest.type)) {
             if (disp > -129 && disp < 128) target->code().write((i8)disp);
             else target->code().write(little_endian((i32)disp));
         }
@@ -880,9 +883,15 @@ namespace x64 {
             if (actual_size != BYTE) opcode ++; // set bottom bit for non-8-bit mode
             if (is_memory(src.type)) opcode += 2; // set next lowest bit for memory source
             target->code().write(opcode);
+            
+            Arg realsrc = src;
+            if (is_label(src.type)) realsrc = riprel64(0);
 
-			if (is_memory(src.type)) emitargs(src, dest, actual_size);
-            else emitargs(dest, src, actual_size);
+			if (is_memory(src.type)) emitargs(realsrc, dest, actual_size);
+            else emitargs(dest, realsrc, actual_size);
+
+            if (is_label(src.type))
+                target->reference(src.data.label, relative(DWORD), -4);
         }
     }
 

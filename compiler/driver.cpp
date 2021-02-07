@@ -153,15 +153,15 @@ namespace basil {
     	print("? ");
 		auto view = src.expand(_stdin);
 		auto tokens = lex(view);
-		if (error_count()) return print_errors(_stdout), error();
+		if (error_count()) return print_errors(_stdout, src), error();
 
 		TokenView tview(tokens, src, true);
 		Value program = parse(tview);
-		if (error_count()) return print_errors(_stdout), error();
+		if (error_count()) return print_errors(_stdout, src), error();
 
 		prep(global, program);
 		Value result = eval(global, program);
-		if (error_count()) return print_errors(_stdout), error();
+		if (error_count()) return print_errors(_stdout, src), error();
 
 		if (!result.is_runtime()) {
 			if (!result.is_void()) 
@@ -176,7 +176,7 @@ namespace basil {
 		compile(result, object, mainfn);
 		add_native_functions(object);
 		object.load();
-		if (error_count()) return print_errors(_stdout), error();
+		if (error_count()) return print_errors(_stdout, src), error();
 
 		print(BOLDBLUE);
 		jit_print(result, object);
@@ -187,17 +187,17 @@ namespace basil {
 	ref<Env> load(Source& src) {
 		auto view = src.begin();
 		auto tokens = lex(view);
-		if (error_count()) return print_errors(_stdout), nullptr;
+		if (error_count()) return print_errors(_stdout, src), nullptr;
 
 		TokenView tview(tokens, src);
 		Value program = parse(tview);
-		if (error_count()) return print_errors(_stdout), nullptr;
+		if (error_count()) return print_errors(_stdout, src), nullptr;
 
 		ref<Env> global = create_global_env();
 
 		prep(global, program);
 		Value result = eval(global, program);
-		if (error_count()) return print_errors(_stdout), nullptr;
+		if (error_count()) return print_errors(_stdout, src), nullptr;
 
 		return global;
 	}
@@ -205,17 +205,17 @@ namespace basil {
 	int run(Source& src) {
 		auto view = src.begin();
 		auto tokens = lex(view);
-		if (error_count()) return print_errors(_stdout), 1;
+		if (error_count()) return print_errors(_stdout, src), 1;
 
 		TokenView tview(tokens, src);
 		Value program = parse(tview);
-		if (error_count()) return print_errors(_stdout), 1;
+		if (error_count()) return print_errors(_stdout, src), 1;
 
 		ref<Env> global = create_global_env();
 
 		prep(global, program);
 		Value result = eval(global, program);
-		if (error_count()) return print_errors(_stdout), 1;
+		if (error_count()) return print_errors(_stdout, src), 1;
 
 		if (!result.is_runtime()) return 0;
 		if (_print_ast) 
@@ -223,12 +223,9 @@ namespace basil {
 
 		jasmine::Object object;
 		compile(result, object);
-		auto code = object.code();
-		while (code.size()) printf("%02x ", code.read());
-		printf("\n");
 		add_native_functions(object);
 		object.load();
-		if (error_count()) return print_errors(_stdout), 1;
+		if (error_count()) return print_errors(_stdout, src), 1;
 
 		return execute(result, object);
 	}
@@ -258,17 +255,17 @@ namespace basil {
 		string dest = change_ending(filename, ".o");
 		auto view = src.begin();
 		auto tokens = lex(view);
-		if (error_count()) return print_errors(_stdout), 1;
+		if (error_count()) return print_errors(_stdout, src), 1;
 
 		TokenView tview(tokens, src);
 		Value program = parse(tview);
-		if (error_count()) return print_errors(_stdout), 1;
+		if (error_count()) return print_errors(_stdout, src), 1;
 
 		ref<Env> global = create_global_env();
 
 		prep(global, program);
 		Value result = eval(global, program);
-		if (error_count()) return print_errors(_stdout), 1;
+		if (error_count()) return print_errors(_stdout, src), 1;
 
 		auto insts = instantiations(global);
 		if (result.is_runtime()) {
@@ -277,7 +274,7 @@ namespace basil {
 
 			jasmine::Object object;
 			compile(result, object);
-			if (error_count()) return print_errors(_stdout), 1;
+			if (error_count()) return print_errors(_stdout, src), 1;
 			object.writeELF((const char*)dest.raw());
 		}
 		else if (insts.size() > 0) {
@@ -290,9 +287,9 @@ namespace basil {
 				println(RESET, "\n");
 			}
 			container.allocate();
-			container.emit(object);
+			container.emit(object, true);
 			emit_constants(object);
-			if (error_count()) return print_errors(_stdout), 1;
+			if (error_count()) return print_errors(_stdout, src), 1;
 			object.writeELF((const char*)dest.raw());
 		}
 

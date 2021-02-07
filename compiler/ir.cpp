@@ -259,6 +259,11 @@ namespace basil {
 					reg_stack.push(all_locals[k].reg);
 			}
 		}
+
+		for (u32 i = 0; i < all_locals.size(); i ++) {
+			if (all_locals[i].reg == -1 && all_locals[i].offset == 0)
+				all_locals[i].reg = RAX; // clobber RAX for dead code (for now)
+		}
 	}
 
 	Function::Function(u32 label):
@@ -323,7 +328,7 @@ namespace basil {
 		to_registers();
 	}
 
-	void Function::emit(Object& obj) {
+	void Function::emit(Object& obj, bool exit) {
 		for (Function* fn : _fns) fn->emit(obj);
 
 		writeto(obj);
@@ -331,7 +336,7 @@ namespace basil {
 		open_frame(_stack);
 		for (Insn* i : _insns) i->emit();
 		local_label(all_labels[_end]);
-		if (_fns.size() > 0) { // hack
+		if (exit && all_labels[_label] == "_start") {
 			mov(x64::r64(x64::RAX), x64::imm64(60));
 			mov(x64::r64(x64::RDI), x64::imm64(0));
 			syscall();

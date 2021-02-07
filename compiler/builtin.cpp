@@ -33,16 +33,24 @@ namespace basil {
 
 #define ARG(n) args.get_product()[n]
 
-    Builtin ADD, SUB, MUL, DIV, REM, AND, OR, XOR, NOT, EQUALS, NOT_EQUALS, LESS, GREATER, LESS_EQUAL, GREATER_EQUAL,
+    Builtin ADD_INT, ADD_SYMBOL, SUB, MUL, DIV, REM, 
+        AND, OR, XOR, NOT, 
+        EQUALS, NOT_EQUALS, LESS, GREATER, LESS_EQUAL, GREATER_EQUAL,
         IS_EMPTY, HEAD, TAIL, CONS, DISPLAY, READ_LINE, READ_WORD, READ_INT, LENGTH, 
-        AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, STRCAT, SUBSTR, ANNOTATE, TYPEOF, LIST_TYPE, ASSIGN, IF;
+        AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, STRCAT, SUBSTR, ANNOTATE, TYPEOF, LIST_TYPE, OF_TYPE_MACRO,
+        OF_TYPE, ASSIGN, IF;
 
     static void init_builtins() {
-        ADD = {find<FunctionType>(find<ProductType>(INT, INT), INT),
+        ADD_INT = {find<FunctionType>(find<ProductType>(INT, INT), INT),
                [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() + ARG(1).get_int()); },
                [](ref<Env> env, const Value& args) -> Value {
                    return Value(new ASTBinaryMath(ARG(0).loc(), AST_ADD, ARG(0).get_runtime(), ARG(1).get_runtime()));
                }};
+        ADD_SYMBOL = {find<FunctionType>(find<ProductType>(SYMBOL, SYMBOL), SYMBOL),
+                [](ref<Env> env, const Value& args) -> Value { 
+                    return Value(symbol_for(ARG(0).get_symbol()) + symbol_for(ARG(1).get_symbol()), SYMBOL); 
+                },
+                nullptr};
         SUB = {find<FunctionType>(find<ProductType>(INT, INT), INT),
                [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() - ARG(1).get_int()); },
                [](ref<Env> env, const Value& args) -> Value {
@@ -197,13 +205,41 @@ namespace basil {
             },
             nullptr
         };
+        ANNOTATE = {
+            find<FunctionType>(find<ProductType>(ANY, TYPE), ANY),
+            [](ref<Env> env, const Value& args) -> Value {
+                if (!ARG(0).type()->coerces_to(ARG(1).get_type())) {
+                    err(ARG(0).loc(), "Could not unify value of type '", ARG(0).type(), "' with type '", 
+                        ARG(1).get_type(), "'.");
+                    return error();
+                }
+                return cast(ARG(0), ARG(1).get_type());
+            },
+            [](ref<Env> env, const Value& args) -> Value {
+                return new ASTAnnotate(ARG(0).loc(), lower(ARG(0)).get_runtime(), ARG(1).get_type());
+            },
+            NO_AUTO_LOWER
+        };
         TYPEOF = {find<FunctionType>(find<ProductType>(ANY), TYPE),
                   [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).type(), TYPE); }, nullptr};
         LIST_TYPE = {
             find<FunctionType>(find<ProductType>(TYPE), TYPE),
             [](ref<Env> env, const Value& args) -> Value { return Value(find<ListType>(ARG(0).get_type()), TYPE); },
             nullptr};
-        
+        OF_TYPE_MACRO = {
+            find<MacroType>(2),
+            [](ref<Env> env, const Value& args) -> Value { 
+                return list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1)); 
+            },
+            nullptr
+        };
+        OF_TYPE = {
+            find<FunctionType>(find<ProductType>(SYMBOL, TYPE), TYPE),
+            [](ref<Env> env, const Value& args) -> Value { 
+                return Value(find<NamedType>(symbol_for(ARG(0).get_symbol()), ARG(1).get_type()), TYPE); 
+            },
+            nullptr
+        };
         IF = {
             find<FunctionType>(find<ProductType>(BOOL, ANY, ANY), ANY),
             [](ref<Env> env, const Value& args) -> Value { return eval(env, ARG(ARG(0).get_bool() ? 1 : 2)); },
@@ -231,7 +267,7 @@ namespace basil {
 
     void define_builtins(ref<Env> env) {
         if (!inited) inited = true, init_builtins();
-        env->infix("+", Value(env, ADD), 2, 20);
+        env->infix("+", cases(env, &ADD_INT, &ADD_SYMBOL), 2, 20);
         env->infix("-", Value(env, SUB), 2, 20);
         env->infix("*", Value(env, MUL), 2, 40);
         env->infix("/", Value(env, DIV), 2, 40);
@@ -248,7 +284,10 @@ namespace basil {
         env->infix(">=", Value(env, GREATER_EQUAL), 2, 10);
         env->def("display", Value(env, DISPLAY), 1);
         env->infix("at", cases(env, &AT_INT, &AT_LIST, &AT_ARRAY_TYPE, &AT_DYNARRAY_TYPE), 2, 120);
+        env->def("annotate", Value(env, ANNOTATE), 2);
         env->def("typeof", Value(env, TYPEOF), 1);
+        env->infix_macro("of", Value(env, OF_TYPE_MACRO), 2, 20);
+        env->def("#of", Value(env, OF_TYPE), 2);
         env->infix("list", Value(env, LIST_TYPE), 1, 80);
         env->infix("#?", Value(env, IF), 3, 2);
     }

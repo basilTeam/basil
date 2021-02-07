@@ -21,6 +21,7 @@ namespace basil {
       || other == ANY 
       || other->kind() == KIND_RUNTIME && this->coerces_to(((const RuntimeType*)other)->base())
       || this == VOID && other->kind() == KIND_LIST
+      || other->kind() == KIND_NAMED && ((const NamedType*)other)->base() == this
       || other->kind() == KIND_SUM && ((const SumType*)other)->has(this);
   }
 

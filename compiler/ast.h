@@ -26,6 +26,7 @@ namespace basil {
 
 		SourceLocation loc() const;
 		const Type* type();
+		virtual bool is_extern() const;
 		virtual ref<SSANode> emit(ref<BasicBlock>& parent) = 0;
 		virtual Location emit(Function& function) = 0;
 		virtual void format(stream& io) const = 0;
@@ -116,11 +117,13 @@ namespace basil {
 	};
 
 	class ASTExtern : public ASTNode {
+		const Type* _type;
 	protected:
 		const Type* lazy_type() override;
 	public:
-		ASTExtern(SourceLocation loc);
+		ASTExtern(SourceLocation loc, const Type* type);
 
+		bool is_extern() const override;
 		ref<SSANode> emit(ref<BasicBlock>& parent) override;
 		Location emit(Function& function) override;
 		void format(stream& io) const override;

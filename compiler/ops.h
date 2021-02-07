@@ -38,6 +38,7 @@ namespace basil {
     void jump_if_zero(const Location& dest, const Location& cond);
     void set_arg(u32 i, const Location& src);
     void get_arg(const Location& dest, u32 i);
+    void call(const Location& func);
     void call(const Location& dest, const Location& func);
     void global_label(const string& name);
     void local_label(const string& name);

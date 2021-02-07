@@ -1,0 +1,27 @@
+# = 6
+display 1 + 2 + 3
+
+# = 5
+display 1 * 2 + 3
+# = 7
+display 1 + 2 * 3
+# = 9
+display (1 + 2) * 3
+# = 7
+display 1 + (2 * 3)
+# = 10
+display 2(2) + 2(-2 + 5)
+
+# = 3
+display 5 - 1 - 1
+# = 5
+display 5 - (1 - 1)
+# = 7
+display 5 - -1 - -1
+
+# = 5
+display 80 / 8 / 2
+# = -20
+display 80 / (-8 / 2)
+# = 0
+display 20 / 21

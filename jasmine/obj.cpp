@@ -293,7 +293,7 @@ namespace jasmine {
         }
     }
 
-    u8 elf_reloc_for(Architecture arch, RefType type) {
+    u8 elf_reloc_for(Architecture arch, RefType type, SymbolLinkage linkage) {
         switch (arch) {
             case X86_64: switch(type) {
                 case REL8:
@@ -303,7 +303,7 @@ namespace jasmine {
                     return 13;
                 case REL32_BE:
                 case REL32_LE:
-                    return 2;
+                    return linkage == GLOBAL_SYMBOL ? 4 : 2;
                 case REL64_BE:
                 case REL64_LE:
                     return 24;
@@ -441,7 +441,7 @@ namespace jasmine {
             rel.write<u64>(sym + entry.second.field_offset);
             u64 info = 0;
             info |= sym_indices[entry.second.symbol] << 32l;
-            info |= elf_reloc_for(arch, entry.second.type);
+            info |= elf_reloc_for(arch, entry.second.type, entry.second.symbol.type);
             rel.write<u64>(info);
         }
 

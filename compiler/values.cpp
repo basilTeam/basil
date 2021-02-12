@@ -97,6 +97,10 @@ namespace basil {
         _data.rc = n;
     }
 
+    Value::Value(ModuleValue* m) : _type(MODULE) {
+        _data.rc = m;
+    }
+
     Value::Value(ASTNode* n) : 
         _type(n->type()->kind() == KIND_RUNTIME ? n->type() : find<RuntimeType>(n->type())) {
         _data.rc = n;
@@ -308,6 +312,18 @@ namespace basil {
         return *(NamedValue*)_data.rc;
     }
 
+    bool Value::is_module() const {
+        return _type == MODULE;
+    }
+
+    const ModuleValue& Value::get_module() const {
+        return *(const ModuleValue*)_data.rc;
+    }
+
+    ModuleValue& Value::get_module() {
+        return *(ModuleValue*)_data.rc;
+    }
+
     const Type* Value::type() const {
         return _type;
     }
@@ -372,6 +388,8 @@ namespace basil {
             write(io, "<#macro>");
         else if (is_runtime())
             write(io, "<#runtime ", ((const RuntimeType*)_type)->base(), ">");
+        else if (is_module())
+            write(io, "<#module>");
     }
 
     u64 Value::hash() const {
@@ -432,6 +450,12 @@ namespace basil {
             return h;
         } else if (is_runtime()) {
             return _type->hash() ^ ::hash(_data.rc);
+        } else if (is_module()) {
+            u64 h = 6343561091602366673ul;
+            for (auto& p : get_module().entries()) {
+                h ^= 12407217216741519607ul * ::hash(p.first);
+                h ^= p.second.hash();
+            }
         }
         return 0;
     }
@@ -497,6 +521,15 @@ namespace basil {
             }
         } else if (is_runtime()) {
             return _data.rc == other._data.rc;
+        } else if (is_module()) {
+            if (get_module().entries().size() != other.get_module().entries().size())
+                return false;
+            for (auto& p : get_module().entries()) {
+                auto it = other.get_module().entries().find(p.first);
+                if (it == other.get_module().entries().end()) return false;
+                if (it->second != p.second) return false;
+            }
+            return true;
         }
         return type() == other.type();
     }
@@ -549,6 +582,10 @@ namespace basil {
             }
         } else if (is_runtime()) {
             // todo: ast cloning
+        } else if (is_module()) {
+            map<u64, Value> members;
+            for (auto& p : get_module().entries()) members[p.first] = p.second.clone();
+            return new ModuleValue(members);
         }
         return *this;
     }
@@ -855,6 +892,21 @@ namespace basil {
 
     const Value& MacroValue::body() const {
         return _code;
+    }
+
+    ModuleValue::ModuleValue(const map<u64, Value>& entries):
+        _entries(entries) {}
+
+    const map<u64, Value>& ModuleValue::entries() const {
+        return _entries;
+    }
+
+    bool ModuleValue::has(u64 name) const {
+        return _entries.find(name) != _entries.end();
+    }
+
+    const Value& ModuleValue::entry(u64 name) const {
+        return _entries[name];
     }
 
     vector<Value> to_vector(const Value& list) {

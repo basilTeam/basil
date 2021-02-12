@@ -27,6 +27,7 @@ namespace basil {
   class AliasValue;
   class MacroValue;
   class NamedValue;
+  class ModuleValue;
 
   class Value {
     const Type* _type;
@@ -57,6 +58,7 @@ namespace basil {
     Value(AliasValue* f);
     Value(MacroValue* f);
     Value(NamedValue* n, const Type* t);
+    Value(ModuleValue* m);
 		Value(ASTNode* n);
     ~Value();
     Value(const Value& other);
@@ -129,6 +131,10 @@ namespace basil {
     bool is_named() const;
     const NamedValue& get_named() const;
     NamedValue& get_named();
+
+    bool is_module() const;
+    const ModuleValue& get_module() const;
+    ModuleValue& get_module();
 
     const Type* type() const;
     void format(stream& io) const;
@@ -279,6 +285,16 @@ namespace basil {
     const Builtin& get_builtin() const;
     ref<Env> get_env();
     const ref<Env> get_env() const;
+  };
+
+  class ModuleValue : public RC {
+    map<u64, Value> _entries;
+  public:
+    ModuleValue(const map<u64, Value>& entries);
+
+    const map<u64, Value>& entries() const;
+    bool has(u64 name) const;
+    const Value& entry(u64 name) const;
   };
 
 	Value lower(const Value& v);

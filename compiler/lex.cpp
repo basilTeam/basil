@@ -101,7 +101,7 @@ namespace basil {
     else if (isdelimiter(ch)) {
       view.read();
       TokenType type = DELIMITERS[ch];
-      if (DELIMITERS[ch] == T_LBRACK && !follows_space) type = T_ACCESS;
+      if (DELIMITERS[ch] == T_LBRACK && !follows_space && start_col > 0) type = T_ACCESS;
       return Token(type, { 1, start }, line, start_col);
     }
     else if (issymbolstart(ch)) {

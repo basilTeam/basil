@@ -236,7 +236,7 @@ namespace basil {
   }
 
   extern const Type *INT, *FLOAT, *SYMBOL, *VOID, *ERROR, *TYPE, 
-                    *ALIAS, *BOOL, *ANY, *STRING;
+                    *ALIAS, *BOOL, *ANY, *STRING, *MODULE;
 	
 	const Type* unify(const Type* a, const Type* b, bool coercing = false, bool converting = false);
 }

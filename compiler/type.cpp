@@ -562,7 +562,8 @@ namespace basil {
              *ALIAS = find<AliasType>(),
              *BOOL = find<SingletonType>("bool"),
 						 *ANY = find<SingletonType>("any"),
-						 *STRING = find<SingletonType>("string");
+						 *STRING = find<SingletonType>("string"),
+             *MODULE = find<SingletonType>("module");
 
 	const Type* unify(const Type* a, const Type* b, bool coercing, bool converting) {
 		if (!a || !b) return nullptr; 

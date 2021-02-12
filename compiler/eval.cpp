@@ -578,21 +578,26 @@ namespace basil {
         return cons(op, cons(lhs, l));
     }
 
-    pair<Value, Value> unary_helper(ref<Env> env, const Value& lhs, const Value& term);
-    pair<Value, Value> infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& rhs,
-                                    const Value& term, const vector<Value>& internals);
-    pair<Value, Value> infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& term);
-    pair<Value, Value> infix_transform(ref<Env> env, const Value& term);
+    struct InfixResult {
+        Value first, second;
+        bool changed;
+    };
 
-    pair<Value, Value> infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& rhs,
+    InfixResult unary_helper(ref<Env> env, const Value& lhs, const Value& term);
+    InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& rhs,
+                                    const Value& term, const vector<Value>& internals);
+    InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& term);
+    InfixResult infix_transform(ref<Env> env, const Value& term);
+
+    InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& rhs,
                                     const Value& term, const vector<Value>& internals) {
         Value iter = term;
 
-        if (iter.is_void()) return {apply_op(op, lhs, internals, rhs), iter};
+        if (iter.is_void()) return {apply_op(op, lhs, internals, rhs), iter, true};
         Value next_op = head(iter);
-        if (!next_op.is_symbol()) return {apply_op(op, lhs, internals, rhs), iter};
+        if (!next_op.is_symbol()) return {apply_op(op, lhs, internals, rhs), iter, true};
         const Def* next_def = env->find(symbol_for(next_op.get_symbol()));
-        if (!next_def || !next_def->is_infix) return {apply_op(op, lhs, internals, rhs), iter};
+        if (!next_def || !next_def->is_infix) return {apply_op(op, lhs, internals, rhs), iter, true};
         iter = tail(iter); // consume op
 
         if (next_def->precedence > def->precedence) {
@@ -600,7 +605,7 @@ namespace basil {
                 return infix_helper(env, lhs, op, def, apply_op(next_op, rhs), iter, internals);
             }
             auto p = infix_helper(env, rhs, next_op, next_def, iter);
-            return {apply_op(op, lhs, internals, p.first), p.second};
+            return {apply_op(op, lhs, internals, p.first), p.second, true};
         } else {
             Value result = apply_op(op, lhs, rhs);
             if (next_def->arity == 1) { return unary_helper(env, apply_op(next_op, result), iter); }
@@ -608,7 +613,7 @@ namespace basil {
         }
     }
 
-    pair<Value, Value> infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def,
+    InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def,
                                     const Value& term) {
         Value iter = term;
 
@@ -622,7 +627,7 @@ namespace basil {
 
         if (iter.is_void()) {
             err(term.loc(), "Expected term in binary expression.");
-            return {error(), term};
+            return {error(), term, false};
         }
         Value rhs = head(iter);
         iter = tail(iter); // consume second term
@@ -630,21 +635,21 @@ namespace basil {
         return infix_helper(env, lhs, op, def, rhs, iter, internals);
     }
 
-    pair<Value, Value> unary_helper(ref<Env> env, const Value& lhs, const Value& term) {
+    InfixResult unary_helper(ref<Env> env, const Value& lhs, const Value& term) {
         Value iter = term;
 
-        if (iter.is_void()) return {lhs, iter};
+        if (iter.is_void()) return {lhs, iter, false};
         Value op = head(iter);
-        if (!op.is_symbol()) return {lhs, iter};
+        if (!op.is_symbol()) return {lhs, iter, false};
         const Def* def = env->find(symbol_for(op.get_symbol()));
-        if (!def || !def->is_infix) return {lhs, iter};
+        if (!def || !def->is_infix) return {lhs, iter, false};
         iter = tail(iter); // consume op
 
         if (def->arity == 1) return unary_helper(env, apply_op(op, lhs), iter);
         return infix_helper(env, lhs, op, def, iter);
     }
 
-    pair<Value, Value> infix_transform(ref<Env> env, const Value& term) {
+    InfixResult infix_transform(ref<Env> env, const Value& term) {
         Value iter = term;
 
         if (iter.is_void()) {
@@ -654,11 +659,11 @@ namespace basil {
         Value lhs = head(iter); // 1 + 2 -> 1
         iter = tail(iter);      // consume first term
 
-        if (iter.is_void()) return {lhs, iter};
+        if (iter.is_void()) return {lhs, iter, false};
         Value op = head(iter);
-        if (!op.is_symbol()) return {lhs, iter};
+        if (!op.is_symbol()) return {lhs, iter, false};
         const Def* def = env->find(symbol_for(op.get_symbol()));
-        if (!def || !def->is_infix) return {lhs, iter};
+        if (!def || !def->is_infix) return {lhs, iter, false};
         iter = tail(iter); // consume op
 
         if (def->arity == 1) return unary_helper(env, apply_op(op, lhs), iter);
@@ -668,12 +673,14 @@ namespace basil {
     Value handle_infix(ref<Env> env, const Value& term) {
         vector<Value> infix_exprs;
         Value iter = term;
+        bool changed = false;
         while (iter.is_list()) {
             auto p = infix_transform(env, iter);
             infix_exprs.push(p.first); // next s-expr
             iter = p.second;           // move past it in source list
+            changed = changed || p.changed;
         }
-        Value result = list_of(infix_exprs);
+        Value result = infix_exprs.size() == 1 && changed ? infix_exprs[0] : list_of(infix_exprs);
         return result;
     }
 
@@ -694,7 +701,7 @@ namespace basil {
         Value h = head(item);
         if (h.is_symbol()) {
             const string& name = symbol_for(h.get_symbol());
-            if (name == "macro" || name == "lambda" || name == "quote" ||
+            if (name == "macro" || name == "lambda" ||
                 name == "splice")
                 return;
             // else if (name == "def") {
@@ -723,7 +730,7 @@ namespace basil {
         handle_macro(env, term);
         visit_defs(env, term);
         apply_infix(env, term);
-        define_procedures(env, term);
+        // define_procedures(env, term);
     }
 
     Value overload(ref<Env> env, Def* existing, const Value& func, const string& name) {
@@ -1235,12 +1242,41 @@ namespace basil {
     static map<string, CompilationUnit> modules;
 
     Value use(ref<Env> env, const Value& term) {
-        if (!tail(term).is_list() || !head(tail(term)).is_symbol()) {
-            err(tail(term).loc(), "Expected symbol in use expression, given '", tail(term), "'.");
+        if (!tail(term).is_list() || is_empty(tail(term))) {
+            err(tail(term).loc(), "Expected body in use expression.");
             return error();
         }
+        
+        string path;
         Value h = head(tail(term));
-        string path = symbol_for(h.get_symbol());
+        // use <module>
+        // use <module> as <name>
+        if (head(tail(term)).is_symbol()) {
+            path = symbol_for(h.get_symbol());
+        } else { // use <module>[ ... ]
+            if (!h.is_symbol() || symbol_for(h.get_symbol()) != "at") {
+                err(h.loc(), "");
+                return error();
+            }
+            if (!tail(h).is_list() || is_empty(tail(h)) || !head(tail(h)).is_symbol()) {
+                err(tail(h).loc(), "");
+                return error();
+            }
+            Value names = head(tail(tail(h)));
+            if (!names.is_list() || is_empty(names)) {
+                err(names.loc(), "");
+                return error();
+            }
+
+            for (const Value &name : to_vector(names)) {
+                if (!name.is_symbol()) {
+                    err(name.loc(), "Expected symbol in use, given'", name, "'");
+                    return error();
+                }
+                // todo: finish
+            }
+        }
+
         path += ".bl";
 
         ref<Env> module;
@@ -1277,7 +1313,7 @@ namespace basil {
             const string& name = symbol_for(h.get_symbol());
             if (name == "quote") return head(tail(term)).clone();
             else if (name == "def")
-                return define(env, term, false, true);
+                return define(env, term, false);
             else if (name == "macro")
                 return define(env, term, true);
             else if (name == "lambda")

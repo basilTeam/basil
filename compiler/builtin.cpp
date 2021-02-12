@@ -205,6 +205,18 @@ namespace basil {
             },
             nullptr
         };
+        AT_MODULE = {
+            find<FunctionType>(find<ProductType>(MODULE, SYMBOL), ANY),
+            [](ref<Env> env, const Value& args) -> Value {
+                if (!ARG(0).get_module().has(ARG(1).get_symbol())) {
+                    err(ARG(1).loc(), "Module does not contain member '", 
+                        symbol_for(ARG(1).get_symbol()), "'.");
+                    return error();
+                }
+                return ARG(0).get_module().entry(ARG(1).get_symbol());
+            },
+            nullptr
+        };
         ANNOTATE = {
             find<FunctionType>(find<ProductType>(ANY, TYPE), ANY),
             [](ref<Env> env, const Value& args) -> Value {
@@ -283,7 +295,7 @@ namespace basil {
         env->infix("<=", Value(env, LESS_EQUAL), 2, 10);
         env->infix(">=", Value(env, GREATER_EQUAL), 2, 10);
         env->def("display", Value(env, DISPLAY), 1);
-        env->infix("at", cases(env, &AT_INT, &AT_LIST, &AT_ARRAY_TYPE, &AT_DYNARRAY_TYPE), 2, 120);
+        env->infix("at", cases(env, &AT_INT, &AT_LIST, &AT_ARRAY_TYPE, &AT_DYNARRAY_TYPE, &AT_MODULE), 2, 120);
         env->def("annotate", Value(env, ANNOTATE), 2);
         env->def("typeof", Value(env, TYPEOF), 1);
         env->infix_macro("of", Value(env, OF_TYPE_MACRO), 2, 20);

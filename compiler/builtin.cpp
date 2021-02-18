@@ -33,11 +33,11 @@ namespace basil {
 
 #define ARG(n) args.get_product()[n]
 
-    Builtin ADD_INT, ADD_SYMBOL, SUB, MUL, DIV, REM, 
-        AND, OR, XOR, NOT, 
+    Builtin ADD_INT, ADD_SYMBOL, SUB, MUL, DIV, REM,
+        AND, OR, XOR, NOT,
         EQUALS, NOT_EQUALS, LESS, GREATER, LESS_EQUAL, GREATER_EQUAL,
-        IS_EMPTY, HEAD, TAIL, CONS, DISPLAY, READ_LINE, READ_WORD, READ_INT, LENGTH, 
-        AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, STRCAT, SUBSTR, ANNOTATE, TYPEOF, LIST_TYPE, OF_TYPE_MACRO,
+        IS_EMPTY, HEAD, TAIL, CONS, DISPLAY, READ_LINE, READ_WORD, READ_INT, LENGTH,
+        AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, AT_MODULE, STRCAT, SUBSTR, ANNOTATE, TYPEOF, LIST_TYPE, OF_TYPE_MACRO,
         OF_TYPE, ASSIGN, IF;
 
     static void init_builtins() {
@@ -47,8 +47,8 @@ namespace basil {
                    return Value(new ASTBinaryMath(ARG(0).loc(), AST_ADD, ARG(0).get_runtime(), ARG(1).get_runtime()));
                }};
         ADD_SYMBOL = {find<FunctionType>(find<ProductType>(SYMBOL, SYMBOL), SYMBOL),
-                [](ref<Env> env, const Value& args) -> Value { 
-                    return Value(symbol_for(ARG(0).get_symbol()) + symbol_for(ARG(1).get_symbol()), SYMBOL); 
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(symbol_for(ARG(0).get_symbol()) + symbol_for(ARG(1).get_symbol()), SYMBOL);
                 },
                 nullptr};
         SUB = {find<FunctionType>(find<ProductType>(INT, INT), INT),
@@ -139,7 +139,7 @@ namespace basil {
             }
         };
         DISPLAY = {
-            find<FunctionType>(find<ProductType>(ANY), VOID), 
+            find<FunctionType>(find<ProductType>(ANY), VOID),
             nullptr,
             [](ref<Env> env, const Value& args) -> Value {
                 return Value(new ASTDisplay(ARG(0).loc(), ARG(0).get_runtime()));
@@ -209,7 +209,7 @@ namespace basil {
             find<FunctionType>(find<ProductType>(MODULE, SYMBOL), ANY),
             [](ref<Env> env, const Value& args) -> Value {
                 if (!ARG(0).get_module().has(ARG(1).get_symbol())) {
-                    err(ARG(1).loc(), "Module does not contain member '", 
+                    err(ARG(1).loc(), "Module does not contain member '",
                         symbol_for(ARG(1).get_symbol()), "'.");
                     return error();
                 }
@@ -221,7 +221,7 @@ namespace basil {
             find<FunctionType>(find<ProductType>(ANY, TYPE), ANY),
             [](ref<Env> env, const Value& args) -> Value {
                 if (!ARG(0).type()->coerces_to(ARG(1).get_type())) {
-                    err(ARG(0).loc(), "Could not unify value of type '", ARG(0).type(), "' with type '", 
+                    err(ARG(0).loc(), "Could not unify value of type '", ARG(0).type(), "' with type '",
                         ARG(1).get_type(), "'.");
                     return error();
                 }
@@ -240,15 +240,15 @@ namespace basil {
             nullptr};
         OF_TYPE_MACRO = {
             find<MacroType>(2),
-            [](ref<Env> env, const Value& args) -> Value { 
-                return list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1)); 
+            [](ref<Env> env, const Value& args) -> Value {
+                return list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1));
             },
             nullptr
         };
         OF_TYPE = {
             find<FunctionType>(find<ProductType>(SYMBOL, TYPE), TYPE),
-            [](ref<Env> env, const Value& args) -> Value { 
-                return Value(find<NamedType>(symbol_for(ARG(0).get_symbol()), ARG(1).get_type()), TYPE); 
+            [](ref<Env> env, const Value& args) -> Value {
+                return Value(find<NamedType>(symbol_for(ARG(0).get_symbol()), ARG(1).get_type()), TYPE);
             },
             nullptr
         };

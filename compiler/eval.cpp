@@ -1242,10 +1242,10 @@ namespace basil {
     static map<string, CompilationUnit> modules;
 
     Value use(ref<Env> env, const Value& term) {
-        if (!tail(term).is_list() || is_empty(tail(term))) {
-            err(tail(term).loc(), "Expected body in use expression.");
-            return error();
-        }
+        // if (!tail(term).is_list() || is_empty(tail(term))) {
+        //     err(tail(term).loc(), "Expected body in use expression.");
+        //     return error();
+        // }
         
         string path;
         Value h = head(tail(term));
@@ -1258,23 +1258,23 @@ namespace basil {
                 err(h.loc(), "");
                 return error();
             }
-            if (!tail(h).is_list() || is_empty(tail(h)) || !head(tail(h)).is_symbol()) {
-                err(tail(h).loc(), "");
-                return error();
-            }
-            Value names = head(tail(tail(h)));
-            if (!names.is_list() || is_empty(names)) {
-                err(names.loc(), "");
-                return error();
-            }
+            // if (!tail(h).is_list() || is_empty(tail(h)) || !head(tail(h)).is_symbol()) {
+            //     err(tail(h).loc(), "");
+            //     return error();
+            // }
+            // Value names = head(tail(tail(h)));
+            // if (!names.is_list() || is_empty(names)) {
+            //     err(names.loc(), "");
+            //     return error();
+            // }
 
-            for (const Value &name : to_vector(names)) {
-                if (!name.is_symbol()) {
-                    err(name.loc(), "Expected symbol in use, given'", name, "'");
-                    return error();
-                }
-                // todo: finish
-            }
+            // for (const Value &name : to_vector(names)) {
+            //     if (!name.is_symbol()) {
+            //         err(name.loc(), "Expected symbol in use, given'", name, "'");
+            //         return error();
+            //     }
+            //     // todo: finish
+            // }
         }
 
         path += ".bl";

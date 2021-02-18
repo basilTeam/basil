@@ -57,6 +57,7 @@ namespace basil {
 		map<string, Def>::const_iterator begin() const;
 		map<string, Def>::const_iterator end() const;
 		void import(ref<Env> env);
+    void import_single(const string &name, const Def &d);
 		void make_runtime();
 		bool is_runtime() const;
   };

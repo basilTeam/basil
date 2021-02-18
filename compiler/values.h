@@ -28,6 +28,7 @@ namespace basil {
   class MacroValue;
   class NamedValue;
   class ModuleValue;
+  class DictValue;
 
   class Value {
     const Type* _type;
@@ -53,6 +54,7 @@ namespace basil {
     Value(ProductValue* p);
     Value(ArrayValue* a);
     Value(ArrayValue* a, const Type* type);
+    Value(DictValue* d);
     Value(ref<Env> env, const Builtin& b);
     Value(FunctionValue* f, const Type* ftype);
     Value(AliasValue* f);
@@ -111,6 +113,10 @@ namespace basil {
     bool is_product() const;
     const ProductValue& get_product() const;
     ProductValue& get_product();
+
+    bool is_dict() const;
+    const DictValue& get_dict() const;
+    DictValue& get_dict();
 
     bool is_function() const;
     const FunctionValue& get_function() const;
@@ -218,6 +224,21 @@ namespace basil {
   class ArrayValue : public ProductValue {
   public:
     ArrayValue(const vector<Value>& values);
+  };
+
+  class DictValue : public RC {
+    map<Value, Value> _entries;
+  public:
+    DictValue(const map<Value, Value>& entries);
+
+    u32 size() const;
+    Value* operator[](const Value& key);
+    const Value* operator[](const Value& key) const;
+    const map<Value, Value>::const_iterator begin() const;
+    const map<Value, Value>::const_iterator end() const;
+    map<Value, Value>::iterator begin();
+    map<Value, Value>::iterator end();  
+    const map<Value, Value>& entries() const;
   };
 
   using BuiltinFn = Value (*)(ref<Env>, const Value& params);
@@ -343,6 +364,9 @@ namespace basil {
     return array_of(vector_of(args...));
   }
   Value array_of(const vector<Value>& elements);
+
+  Value dict_of(const map<Value, Value> &elements);
+
 
   Value error();
 

@@ -122,6 +122,10 @@ namespace basil {
 		for (auto& p : env->_defs) _defs.put(p.first, p.second);
 	}
 
+  void Env::import_single(const string &name, const Def &d) {
+    _defs.put(name, d);
+  }
+
 	void Env::make_runtime() {
 		_runtime = true;
 	}

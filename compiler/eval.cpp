@@ -370,8 +370,9 @@ namespace basil {
     }
 
     bool is_valid_infix_def(const Value& term) {
-        return term.is_list() && tail(term).is_list() && is_valid_argument(head(term)) && is_keyword(head(tail(term))) 
-            || is_annotation(term) && tail(term).is_list() && is_valid_infix_def(head(tail(term)));
+        return term.is_list() && tail(term).is_list() && is_valid_argument(head(term)) &&
+                   is_keyword(head(tail(term))) ||
+               is_annotation(term) && tail(term).is_list() && is_valid_infix_def(head(tail(term)));
     }
 
     string get_variable_name(const Value& term) {
@@ -444,8 +445,7 @@ namespace basil {
                 // 	return;
                 // }
                 if (!env->find(name)) env->def(name);
-            } 
-            else if (is_valid_def(values[i])) { // procedure
+            } else if (is_valid_def(values[i])) { // procedure
                 const string& name = get_def_name(values[i]);
                 if (name.endswith('?')) {
                     err(values[i].loc(), "Invalid name for procedure: cannot end in '?'.");
@@ -464,8 +464,7 @@ namespace basil {
                 // 	return;
                 // }
                 if (!env->find(name)) env->def(name, to_vector(tail(values[i])).size());
-            } 
-            else if (is_valid_infix_def(values[i])) { // infix procedure
+            } else if (is_valid_infix_def(values[i])) { // infix procedure
                 Value rest = tail(values[i]);
                 if (!rest.is_list()) {
                     err(rest.loc(), "Infix procedure must take at least one ", "argument.");
@@ -481,22 +480,21 @@ namespace basil {
                     return;
                 }
                 if (!env->find(name)) env->infix(name, to_vector(tail(rest)).size() + 1, precedence);
-            }
-            else {
+            } else {
                 err(item.loc(), "Invalid definition.");
                 return;
             }
-        } 
-        else traverse_list(env, item, visit_defs);
+        } else
+            traverse_list(env, item, visit_defs);
     }
-    
+
     void define_procedures(ref<Env> env, const Value& item) {
         if (!item.is_list()) return;
         Value h = head(item);
         if (symbol_matches(h, "def")) {
             define(env, item, false, false, true);
-        }
-        else traverse_list(env, item, define_procedures);
+        } else
+            traverse_list(env, item, define_procedures);
     }
 
     void handle_macro(ref<Env> env, Value& item);
@@ -585,12 +583,12 @@ namespace basil {
 
     InfixResult unary_helper(ref<Env> env, const Value& lhs, const Value& term);
     InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& rhs,
-                                    const Value& term, const vector<Value>& internals);
+                             const Value& term, const vector<Value>& internals);
     InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& term);
     InfixResult infix_transform(ref<Env> env, const Value& term);
 
     InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& rhs,
-                                    const Value& term, const vector<Value>& internals) {
+                             const Value& term, const vector<Value>& internals) {
         Value iter = term;
 
         if (iter.is_void()) return {apply_op(op, lhs, internals, rhs), iter, true};
@@ -613,8 +611,7 @@ namespace basil {
         }
     }
 
-    InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def,
-                                    const Value& term) {
+    InfixResult infix_helper(ref<Env> env, const Value& lhs, const Value& op, const Def* def, const Value& term) {
         Value iter = term;
 
         vector<Value> internals;
@@ -701,12 +698,10 @@ namespace basil {
         Value h = head(item);
         if (h.is_symbol()) {
             const string& name = symbol_for(h.get_symbol());
-            if (name == "macro" || name == "lambda" ||
-                name == "splice")
-                return;
+            if (name == "macro" || name == "lambda" || name == "splice") return;
             // else if (name == "def") {
             //     if (tail(item).is_list() && head(tail(item)).is_symbol()) apply_infix_at(env, item, 2);
-            // } 
+            // }
             else if (name == "if" || name == "do" || name == "list-of")
                 apply_infix_at(env, item, 1);
             else {
@@ -767,8 +762,7 @@ namespace basil {
                 Value(new IntersectValue(values), find<IntersectType>(existing->value.type(), func.type()));
             return Value(VOID);
         } else {
-            err(func.loc(), "Cannot redefine symbol '", name, "' of type '", existing->value.type(),
-                "' as function.");
+            err(func.loc(), "Cannot redefine symbol '", name, "' of type '", existing->value.type(), "' as function.");
             return error();
         }
     }
@@ -816,7 +810,8 @@ namespace basil {
             ref<Env> function_env = newref<Env>(env);
             vector<Value> args;
             vector<Value> elts = to_vector(get_def_info(values[i]));
-            for (u32 i = 0; i < elts.size(); i ++) if (i != infix ? 1 : 0) args.push(elts[i]);
+            for (u32 i = 0; i < elts.size(); i++)
+                if (i != infix ? 1 : 0) args.push(elts[i]);
             vector<u64> argnames;
             vector<Value> body;
             vector<const Type*> argts;
@@ -853,7 +848,7 @@ namespace basil {
                 } else if (!is_keyword(v))
                     argts.push(ANY);
             }
-            for (u32 j = i + 1; j < values.size(); j ++) body.push(values[j]);
+            for (u32 j = i + 1; j < values.size(); j++) body.push(values[j]);
             Value body_term = cons(Value("do"), list_of(body));
             if (is_macro) {
                 if (is_annotation(values[i])) {
@@ -862,7 +857,8 @@ namespace basil {
                 }
                 Value mac(new MacroValue(function_env, argnames, body_term));
                 if (infix) env->infix_macro(name, mac, argnames.size(), precedence);
-                else env->def_macro(name, mac, argnames.size());
+                else
+                    env->def_macro(name, mac, argnames.size());
             } else {
                 const Type* returntype = ANY;
                 if (is_annotation(values[i])) {
@@ -890,19 +886,18 @@ namespace basil {
                 const FunctionType* ft = (const FunctionType*)find<FunctionType>(argst, returntype);
                 u64 fname = symbol_value(name);
                 Value func = external ? Value(new ASTFunction(term.loc(), function_env, argst, argnames,
-                        new ASTExtern(term.loc(), returntype), fname))
-                    : Value(new FunctionValue(function_env, argnames, body_term, fname), ft);
+                                                              new ASTExtern(term.loc(), returntype), fname))
+                                      : Value(new FunctionValue(function_env, argnames, body_term, fname), ft);
                 Def* existing = env->find(name);
                 if (existing && !existing->value.is_void()) {
                     return overload(env, existing, func, name);
                 } else if (infix) {
                     env->infix(name, func, argnames.size(), precedence);
-                } else env->def(name, func, argnames.size());
-                if (func.is_runtime())
-                    return new ASTDefine(values[0].loc(), env, fname, func.get_runtime());
+                } else
+                    env->def(name, func, argnames.size());
+                if (func.is_runtime()) return new ASTDefine(values[0].loc(), env, fname, func.get_runtime());
                 if (argst->concrete() && !external) {
-                    func.get_function().instantiate(argst, 
-                        new ASTIncompleteFn(func.loc(), argst, symbol_value(name)));
+                    func.get_function().instantiate(argst, new ASTIncompleteFn(func.loc(), argst, symbol_value(name)));
                     instantiate(func.loc(), func.get_function(), find<ProductType>(argts));
                 }
             }
@@ -1012,7 +1007,8 @@ namespace basil {
                     return error();
                 }
                 return overload(env, existing, func, name);
-            } else env->infix(name, func, argnames.size(), precedence);
+            } else
+                env->infix(name, func, argnames.size(), precedence);
             // if (argst->concrete()) instantiate(func.loc(), func.get_function(), find<ProductType>(argts));
         }
         return Value(VOID);
@@ -1234,6 +1230,38 @@ namespace basil {
         return array_of(vals);
     }
 
+    Value set_of(ref<Env> env, const Value& term) {
+        Value items = tail(term);
+
+        map<Value, Value> pairs;
+        const Value* v = &items;
+        // dict
+        if (is_annotation(head(items))) {
+            while (v->is_list()) {
+                const Value* term = &v->get_list().head();
+                if (!is_annotation(*term)) {
+                    err(term->loc(), "Found set-style initializer in dictionary literal expression");
+                    return error();
+                }
+                pairs.put(term->get_list().tail().get_list().head(),
+                          term->get_list().tail().get_list().tail().get_list().head());
+                v = &v->get_list().tail();
+            }
+        } else { // set
+            while (v->is_list()) {
+                const Value* term = &v->get_list().head();
+                if (is_annotation(*term)) {
+                    err(term->loc(), "Found dictionary-style initializer pair in set literal expression");
+                    return error();
+                }
+                pairs.put(*term, empty());
+                v = &v->get_list().tail();
+            }
+        }
+
+        return dict_of(pairs);
+    }
+
     struct CompilationUnit {
         Source source;
         ref<Env> env;
@@ -1242,39 +1270,67 @@ namespace basil {
     static map<string, CompilationUnit> modules;
 
     Value use(ref<Env> env, const Value& term) {
-        // if (!tail(term).is_list() || is_empty(tail(term))) {
-        //     err(tail(term).loc(), "Expected body in use expression.");
-        //     return error();
-        // }
-        
-        string path;
+        if (!tail(term).is_list() || tail(term).is_void()) {
+            err(tail(term).loc(), "Expected body in use expression.");
+            return error();
+        }
+
+        string path, module_name;
+        set<string> names;
         Value h = head(tail(term));
-        // use <module>
-        // use <module> as <name>
+        // use <module> -> introduce a modulevalue with name <module> into the env
+        // use <module> as <name> -> introduce a modulevalue with name <name> into the env
         if (head(tail(term)).is_symbol()) {
-            path = symbol_for(h.get_symbol());
-        } else { // use <module>[ ... ]
-            if (!h.is_symbol() || symbol_for(h.get_symbol()) != "at") {
-                err(h.loc(), "");
+            if (!h.is_symbol()) {
+                err(h.loc(), "Expected module name in use expression, got '", h, "'");
                 return error();
             }
-            // if (!tail(h).is_list() || is_empty(tail(h)) || !head(tail(h)).is_symbol()) {
-            //     err(tail(h).loc(), "");
-            //     return error();
-            // }
-            // Value names = head(tail(tail(h)));
-            // if (!names.is_list() || is_empty(names)) {
-            //     err(names.loc(), "");
-            //     return error();
-            // }
 
-            // for (const Value &name : to_vector(names)) {
-            //     if (!name.is_symbol()) {
-            //         err(name.loc(), "Expected symbol in use, given'", name, "'");
-            //         return error();
-            //     }
-            //     // todo: finish
-            // }
+            path = symbol_for(h.get_symbol());
+
+            if (!tail(tail(term)).is_void() && tail(tail(term)).is_list()) { // use <module> as <name>
+                Value as_exp = tail(tail(term));
+                if (!head(as_exp).is_symbol() || symbol_for(head(as_exp).get_symbol()) != "as") {
+                    err(head(as_exp).loc(), "Expected 'as' after module name in use expression, got '", head(as_exp),
+                        "'");
+                    return error();
+                }
+
+                if (tail(as_exp).is_void() || !head(tail(as_exp)).is_symbol()) {
+                    err(tail(as_exp).loc(), "Expected symbol after 'as' in use expression");
+                    return error();
+                }
+                module_name = symbol_for(head(tail(as_exp)).get_symbol());
+            } else {
+                module_name = path;
+            }
+        } else { // use <module>[ ... ] -> introduce names from [ ... ] into the env
+            if (!head(h).is_symbol() || symbol_for(head(h).get_symbol()) != "at") {
+                err(h.loc(), "Expected at-expression in use, got '", head(h), "'");
+                return error();
+            }
+            if (!tail(h).is_list() || tail(h).is_void() || !head(tail(h)).is_symbol()) {
+                err(tail(h).loc(), "Expected body in at-expression in use");
+                return error();
+            }
+            Value nameslist = head(tail(tail(h))); // May be either a list of names or just a single symbol
+            if (!nameslist.is_list()) {
+                if (!nameslist.is_symbol()) {
+                    err(term.loc(), "Expected name(s) inside of brackets in bracketed use expression");
+                    return error();
+                }
+                names.insert(symbol_for(nameslist.get_symbol()));
+            } else {
+                nameslist = tail(nameslist);
+                for (const Value& name : to_vector(nameslist)) {
+                    if (!name.is_symbol()) {
+                        err(name.loc(), "Expected symbol in use expression, given'", name, "'");
+                        return error();
+                    }
+                    names.insert(symbol_for(name.get_symbol()));
+                }
+            }
+            path = symbol_for(head(tail(h)).get_symbol());
         }
 
         path += ".bl";
@@ -1292,18 +1348,26 @@ namespace basil {
             module = unit.env = load(unit.source);
             if (error_count()) return error();
 
-            for (const auto& p : *module) {
-                if (env->find(p.first)) {
-                    err(term.loc(), "Module '", symbol_for(h.get_symbol()), "' redefines '", p.first,
-                        "' in the current environment.");
-                    return error();
+            if (names.size()) { // use <module>[names...]
+                for (const auto& p : *module) {
+                    if (names.find(p.first) != names.end()) {
+                        if (env->find(p.first)) {
+                            err(term.loc(), "Module '", symbol_for(h.get_symbol()), "' redefines '", p.first,
+                                "' in the current environment.");
+                            return error();
+                        }
+                        env->import_single(p.first, p.second);
+                    }
                 }
+            } else { // use <module> | use <module> as <name>
+                map<u64, Value> values;
+                for (const auto& p : *module) values.put(symbol_value(p.first), p.second.value);
+                env->def(module_name, Value(new ModuleValue(values)));
             }
 
             modules.put(path, unit);
         }
 
-        env->import(module);
         return Value(VOID);
     }
 
@@ -1328,6 +1392,8 @@ namespace basil {
                 return tuple_of(env, term);
             else if (name == "array-of")
                 return array_of(env, term);
+            else if (name == "set-of")
+                return set_of(env, term);
             else if (name == "use")
                 return use(env, term);
             else if (name == "while")

@@ -94,7 +94,7 @@ int main(int argc, char** argv) {
 		ref<Env> global = newref<Env>(root);
 		Function main_fn("main");
 
-		while (!repl_done) repl(global, src, main_fn);
+		while (!repl_done) repl(global, src, main_fn), clear_errors();
 		return 0;
 	}
 	else if (string(argv[1]) == "intro") {

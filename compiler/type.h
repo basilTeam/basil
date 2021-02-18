@@ -23,7 +23,8 @@ namespace basil {
     KIND_ALIAS = GC_KIND_FLAG | 6,
     KIND_MACRO = GC_KIND_FLAG | 7,
 		KIND_RUNTIME = GC_KIND_FLAG | 8,
-    KIND_NAMED = GC_KIND_FLAG | 9
+    KIND_NAMED = GC_KIND_FLAG | 9,
+    KIND_DICT = GC_KIND_FLAG | 10
   };
 
   class Type {
@@ -154,6 +155,21 @@ namespace basil {
     TypeKind kind() const override;
     bool operator==(const Type& other) const override;
     bool coerces_to(const Type* other) const override;
+    void format(stream& io) const override;
+  };
+
+  class DictType : public Type {
+    const Type* _key, *_value;
+  public:
+    DictType(const Type* key, const Type* value);
+
+    const Type* key() const;
+    const Type* value() const;
+		bool concrete() const override;
+		const Type* concretify() const override;
+    bool coerces_to(const Type* other) const override;
+    TypeKind kind() const override;
+    bool operator==(const Type& other) const override;
     void format(stream& io) const override;
   };
 

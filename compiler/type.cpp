@@ -103,7 +103,7 @@ namespace basil {
   }
 
   bool NamedType::coerces_to(const Type* other) const {
-    return Type::coerces_to(other) || other == _base;
+    return Type::coerces_to(other) || other->coerces_to(_base);
   }
 
   void NamedType::format(stream& io) const {
@@ -137,7 +137,9 @@ namespace basil {
   }
 
   bool ListType::coerces_to(const Type* other) const {
-    return Type::coerces_to(other) || other == TYPE && _element == TYPE;
+    return Type::coerces_to(other) 
+      || other == TYPE && _element == TYPE
+      || other->kind() == KIND_LIST && concrete() && !other->concrete();
   }
 
   void ListType::format(stream& io) const {
@@ -189,9 +191,14 @@ namespace basil {
   bool ArrayType::coerces_to(const Type* other) const {
     if (Type::coerces_to(other)) return true;
     
-    if (other->kind() == KIND_ARRAY 
-        && ((const ArrayType*)other)->element() == element() 
-        && !((const ArrayType*)other)->fixed()) return true;
+    if (other->kind() == KIND_ARRAY) {
+      if (((const ArrayType*)other)->element()->concrete() && !element()->concrete())
+        return false;
+      if (((const ArrayType*)other)->fixed() && !fixed()) 
+        return false;
+      return ((const ArrayType*)other)->element() == element()
+        || !((const ArrayType*)other)->element()->concrete() && concrete();
+    }
 
     if (fixed() && other->kind() == KIND_PRODUCT 
         && ((const ProductType*)other)->count() == count()) {
@@ -372,6 +379,51 @@ namespace basil {
       first = false;
     }
     write(io, ")");
+  }
+
+  DictType::DictType(const Type* key, const Type* value):
+    Type(key->hash() * 3403329778754487247ul ^ value->hash()), _key(key), _value(value) {}
+
+  const Type* DictType::key() const {
+    return _key;
+  }
+
+  const Type* DictType::value() const {
+    return _value;
+  }
+
+  bool DictType::concrete() const {
+    return _key->concrete() && _value->concrete();
+  }
+
+  const Type* DictType::concretify() const {
+    return find<DictType>(_key->concretify(), _value->concretify());
+  }
+
+  bool DictType::coerces_to(const Type* other) const {
+    if (Type::coerces_to(other)) return true;
+    if (other->kind() != KIND_DICT) return false;
+
+    bool k = !((const DictType*)other)->_key->concrete(),
+      v = !((const DictType*)other)->_value->concrete();
+
+    return k && v
+          || k && _value->coerces_to(((const DictType*)other)->_value)
+          || v && _key->coerces_to(((const DictType*)other)->_key);
+  }
+
+  TypeKind DictType::kind() const {
+    return KIND_DICT;
+  }
+
+  bool DictType::operator==(const Type& other) const {
+    return other.kind() == KIND_DICT
+      && ((const DictType&)other)._key == _key
+      && ((const DictType&)other)._value == _value;
+  }
+
+  void DictType::format(stream& io) const {
+    write(io, _value, "[", _key, "]");
   }
 
   FunctionType::FunctionType(const Type* arg, const Type* ret):

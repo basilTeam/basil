@@ -75,6 +75,12 @@ namespace basil {
         _data.rc = a;
     }
 
+    Value::Value(DictValue* d) {
+        const auto& pair = *d->begin();
+        _type = find<DictType>(pair.first.type(), pair.second.type());
+        _data.rc = d;
+    }
+
     Value::Value(ref<Env> env, const Builtin& b) : _type(b.type()) {
         if (b.type()->kind() == KIND_FUNCTION) _data.rc = new FunctionValue(env, b);
         else
@@ -252,6 +258,18 @@ namespace basil {
         return *(ProductValue*)_data.rc;
     }
 
+    bool Value::is_dict() const {
+        return _type->kind() == KIND_DICT;
+    }
+
+    const DictValue& Value::get_dict() const {
+        return *(const DictValue*)_data.rc;
+    }
+
+    DictValue& Value::get_dict() {
+        return *(DictValue*)_data.rc;
+    }
+
     bool Value::is_function() const {
         return _type->kind() == KIND_FUNCTION;
     }
@@ -380,6 +398,16 @@ namespace basil {
                 first = false;
             }
             write(io, ")");
+        } else if (is_dict()) {
+            const DictType* dt = (const DictType*)type();
+            bool first = true;
+            write(io, "{");
+            for (const auto& pair : get_dict()) {
+                write(io, first ? "" : " ", pair.first);
+                if (dt->value() != VOID) write(io, ": ", pair.second);
+                first = false;
+            }  
+            write(io, "}");
         } else if (is_function())
             write(io, "<#", get_function().name() < 0 ? "procedure" : symbol_for(get_function().name()), ">");
         else if (is_alias())
@@ -429,6 +457,10 @@ namespace basil {
         } else if (is_array()) {
             u64 h = 7135911592309895053ul;
             for (const Value& v : get_array()) h ^= v.hash();
+            return h;
+        } else if (is_dict()) {
+            u64 h = 13974436514101026401ul;  
+            for (const auto& p : get_dict()) h ^= 14259444292234844953ul * p.first.hash() ^ p.second.hash();
             return h;
         } else if (is_function()) {
             u64 h = 10916307465547805281ul;
@@ -500,6 +532,14 @@ namespace basil {
                 l = &l->get_list().tail(), o = &o->get_list().tail();
             }
             return l->is_void() && o->is_void();
+        } else if (is_dict()) {
+            if (get_dict().size() != other.get_dict().size()) return false;
+            for (const auto& p : get_dict()) {
+                auto it = other.get_dict().entries().find(p.first);
+                if (it == other.get_dict().entries().end()) return false;
+                if (it->second != p.second) return false;
+            }
+            return true;
         } else if (is_function()) {
             if (get_function().is_builtin())
                 return &get_function().get_builtin() == &other.get_function().get_builtin();
@@ -561,6 +601,10 @@ namespace basil {
             vector<Value> values;
             for (const Value& v : get_array()) values.push(v.clone());
             return Value(new ProductValue(values));
+        } else if (is_dict()) {
+            map<Value, Value> entries;
+            for (const auto& p : get_dict()) entries.put(p.first.clone(), p.second.clone());
+            return Value(new DictValue(entries));
         } else if (is_function()) {
             if (get_function().is_builtin()) {
                 return Value(new FunctionValue(get_function().get_env()->clone(), get_function().get_builtin(),
@@ -721,6 +765,45 @@ namespace basil {
 
     ArrayValue::ArrayValue(const vector<Value>& values) : ProductValue(values) {}
 
+    DictValue::DictValue(const map<Value, Value>& entries):
+        _entries(entries) {}
+
+    u32 DictValue::size() const {
+        return _entries.size();
+    }
+
+    Value* DictValue::operator[](const Value& key) {
+        auto it = _entries.find(key);
+        if (it == _entries.end()) return nullptr;
+        else return &it->second;
+    }
+
+    const Value* DictValue::operator[](const Value& key) const {
+        auto it = _entries.find(key);
+        if (it == _entries.end()) return nullptr;
+        else return &it->second;
+    }
+
+    const map<Value, Value>::const_iterator DictValue::begin() const {
+        return _entries.begin();
+    }
+
+    const map<Value, Value>::const_iterator DictValue::end() const {
+        return _entries.end();
+    }
+
+    map<Value, Value>::iterator DictValue::begin() {
+        return _entries.begin();
+    }
+
+    map<Value, Value>::iterator DictValue::end() {
+        return _entries.end();
+    }  
+
+    const map<Value, Value>& DictValue::entries() const {
+        return _entries;
+    }
+
     const u64 KEYWORD_ARG_BIT = 1ul << 63;
     const u64 ARG_NAME_MASK = ~KEYWORD_ARG_BIT;
 
@@ -728,7 +811,7 @@ namespace basil {
         : _name(name), _code(code), _builtin(nullptr), _env(env), _args(args), _insts(nullptr), _calls(nullptr) {}
 
     FunctionValue::FunctionValue(ref<Env> env, const Builtin& builtin, i64 name)
-        : _name(name), _builtin(&builtin), _env(env), _insts(nullptr), _calls(nullptr) {}
+        : _name(name), _builtin(&builtin), _env(env), _args(builtin.args()), _insts(nullptr), _calls(nullptr) {}
 
     FunctionValue::~FunctionValue() {
         if (_insts) {
@@ -1204,6 +1287,16 @@ namespace basil {
         return Value(new ArrayValue(elements));
     }
 
+    Value dict_of(const map<Value, Value> &elements) {
+        for (const auto &p : elements) {
+            if (p.first.is_runtime() || p.second.is_runtime()) {
+                err(p.first.loc(), "Cannot compile arrays yet.");
+                return error();
+            }
+        }
+        return Value(new DictValue(elements));
+    }
+
     Value at(const Value& val, const Value& idx) {
         if (val.is_error() || idx.is_error()) return error();
         if (val.is_runtime() || idx.is_runtime()) {
@@ -1284,6 +1377,7 @@ namespace basil {
         return Value(v.type(), TYPE);
     }
 
+    // Assuming cast is possible, converts val to the right representation for the new type.
     Value cast(const Value& val, const Type* type) {
         if (val.type() == type || type == ANY) return val;
 
@@ -1295,6 +1389,10 @@ namespace basil {
         if (type->kind() == KIND_RUNTIME) {
             // we don't lower for ANY, so that generic builtins can do custom things
             return ((const RuntimeType*)type)->base() == ANY ? val : lower(val);
+        }
+
+        if (val.type()->kind() == type->kind() && !type->concrete()) {
+            return val;
         }
 
         if (type->kind() == KIND_NAMED) {
@@ -1427,10 +1525,6 @@ namespace basil {
         }
     }
 
-    Value cast_args(ref<Env> env, Value& args, const Type* argst) {
-        
-    }
-
     Value call(ref<Env> env, Value& callable, const Value& args) {
         if (!args.is_product()) {
             err(args.loc(), "Expected product value for arguments.");
@@ -1444,6 +1538,12 @@ namespace basil {
             map<const FunctionType*, i64> ftypes;
             i64 coerced_priority = args.get_product().size() + 1,
                 exact_priority = coerced_priority * coerced_priority;
+            // println("args = ", args.type());
+            // for (const auto& p : function.get_intersect()) {
+            //     if (p.first->kind() != KIND_FUNCTION) continue;
+            //     println(p.first);
+            // }
+            // println("---");
             for (const auto& p : function.get_intersect()) {
                 if (p.first->kind() != KIND_FUNCTION) continue;
                 const ProductType* fnargst = (const ProductType*)((const FunctionType*)p.first)->arg();
@@ -1553,6 +1653,9 @@ namespace basil {
                 return error();
             }
             if (argt != rtargst->member(i)) args_copy.get_product()[i] = cast(args.get_product()[i], rtargst->member(i));
+        }
+        for (u32 i = 0; i < args_copy.get_product().size(); i ++) {
+            if (args_copy.get_product()[i].is_error()) return error();
         }
 
         if (function.is_runtime()) {

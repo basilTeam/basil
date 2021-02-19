@@ -46,7 +46,7 @@ namespace basil {
         IS_EMPTY, HEAD, TAIL, CONS, DICT_IN, DICT_NOT_IN,  
         DISPLAY, READ_LINE, READ_WORD, READ_INT, LENGTH,
         AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, AT_MODULE, AT_DICT, AT_DICT_TYPE, AT_DICT_LIST,
-        STRCAT, SUBSTR, ANNOTATE, TYPEOF, LIST_TYPE, OF_TYPE_MACRO,
+        STRCAT, SUBSTR, ANNOTATE, TYPEOF, TYPEDEF, LIST_TYPE, OF_TYPE_MACRO,
         OF_TYPE, ASSIGN, IF;
 
     static void init_builtins() {
@@ -281,6 +281,13 @@ namespace basil {
         };
         TYPEOF = {find<FunctionType>(find<ProductType>(ANY), TYPE),
                   [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).type(), TYPE); }, nullptr};
+        TYPEDEF = {
+            find<MacroType>(2),
+            [](ref<Env> env, const Value &args) -> Value {
+                return list_of(Value("def", SYMBOL), ARG(0), list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1)));
+            },
+            nullptr
+        };
         LIST_TYPE = {
             find<FunctionType>(find<ProductType>(TYPE), TYPE),
             [](ref<Env> env, const Value& args) -> Value { return Value(find<ListType>(ARG(0).get_type()), TYPE); },
@@ -348,6 +355,7 @@ namespace basil {
             &AT_MODULE, &AT_DICT, &AT_DICT_TYPE, &AT_DICT_LIST), 2, 120);
         env->def("annotate", Value(env, ANNOTATE), 2);
         env->def("typeof", Value(env, TYPEOF), 1);
+        env->def_macro("typedef", Value(env, TYPEDEF), 2);
         env->infix_macro("of", Value(env, OF_TYPE_MACRO), 2, 20);
         env->def("#of", Value(env, OF_TYPE), 2);
         env->infix("list", Value(env, LIST_TYPE), 1, 80);

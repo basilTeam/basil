@@ -46,114 +46,119 @@ namespace basil {
         STRCAT, SUBSTR, ANNOTATE, TYPEOF, TYPEDEF, LIST_TYPE, OF_TYPE_MACRO, OF_TYPE, ASSIGN, IF;
 
     static void init_builtins() {
-        ADD_INT = {find<FunctionType>(find<ProductType>(INT, INT), INT),
-                   [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() + ARG(1).get_int()); },
-                   [](ref<Env> env, const Value& args) -> Value {
-                       return Value(
-                           new ASTBinaryMath(ARG(0).loc(), AST_ADD, ARG(0).get_runtime(), ARG(1).get_runtime()));
-                   }};
-        ADD_SYMBOL = {find<FunctionType>(find<ProductType>(SYMBOL, SYMBOL), SYMBOL),
-                      [](ref<Env> env, const Value& args) -> Value {
-                          return Value(symbol_for(ARG(0).get_symbol()) + symbol_for(ARG(1).get_symbol()), SYMBOL);
-                      },
-                      nullptr};
-        SUB = {find<FunctionType>(find<ProductType>(INT, INT), INT),
-               [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() - ARG(1).get_int()); },
+        ADD_INT = { find<FunctionType>(find<ProductType>(INT, INT), INT),
+                    [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() + ARG(1).get_int()); },
+                    [](ref<Env> env, const Value& args) -> Value {
+                        return Value(
+                            new ASTBinaryMath(ARG(0).loc(), AST_ADD, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                    } };
+        ADD_SYMBOL = { find<FunctionType>(find<ProductType>(SYMBOL, SYMBOL), SYMBOL),
+                       [](ref<Env> env, const Value& args) -> Value {
+                           return Value(symbol_for(ARG(0).get_symbol()) + symbol_for(ARG(1).get_symbol()), SYMBOL);
+                       },
+                       nullptr };
+        SUB = { find<FunctionType>(find<ProductType>(INT, INT), INT),
+                [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() - ARG(1).get_int()); },
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(new ASTBinaryMath(ARG(0).loc(), AST_SUB, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                } };
+        MUL = { find<FunctionType>(find<ProductType>(INT, INT), INT),
+                [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() * ARG(1).get_int()); },
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(new ASTBinaryMath(ARG(0).loc(), AST_MUL, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                } };
+        DIV = { find<FunctionType>(find<ProductType>(INT, INT), INT),
+                [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() / ARG(1).get_int()); },
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(new ASTBinaryMath(ARG(0).loc(), AST_DIV, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                } };
+        REM = { find<FunctionType>(find<ProductType>(INT, INT), INT),
+                [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() % ARG(1).get_int()); },
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(new ASTBinaryMath(ARG(0).loc(), AST_REM, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                } };
+        AND = { find<FunctionType>(find<ProductType>(BOOL, BOOL), BOOL),
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(ARG(0).get_bool() && ARG(1).get_bool(), BOOL);
+                },
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(new ASTBinaryLogic(ARG(0).loc(), AST_AND, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                } };
+        OR = { find<FunctionType>(find<ProductType>(BOOL, BOOL), BOOL),
                [](ref<Env> env, const Value& args) -> Value {
-                   return Value(new ASTBinaryMath(ARG(0).loc(), AST_SUB, ARG(0).get_runtime(), ARG(1).get_runtime()));
-               }};
-        MUL = {find<FunctionType>(find<ProductType>(INT, INT), INT),
-               [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() * ARG(1).get_int()); },
-               [](ref<Env> env, const Value& args) -> Value {
-                   return Value(new ASTBinaryMath(ARG(0).loc(), AST_MUL, ARG(0).get_runtime(), ARG(1).get_runtime()));
-               }};
-        DIV = {find<FunctionType>(find<ProductType>(INT, INT), INT),
-               [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() / ARG(1).get_int()); },
-               [](ref<Env> env, const Value& args) -> Value {
-                   return Value(new ASTBinaryMath(ARG(0).loc(), AST_DIV, ARG(0).get_runtime(), ARG(1).get_runtime()));
-               }};
-        REM = {find<FunctionType>(find<ProductType>(INT, INT), INT),
-               [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() % ARG(1).get_int()); },
-               [](ref<Env> env, const Value& args) -> Value {
-                   return Value(new ASTBinaryMath(ARG(0).loc(), AST_REM, ARG(0).get_runtime(), ARG(1).get_runtime()));
-               }};
-        AND = {find<FunctionType>(find<ProductType>(BOOL, BOOL), BOOL),
-               [](ref<Env> env, const Value& args) -> Value {
-                   return Value(ARG(0).get_bool() && ARG(1).get_bool(), BOOL);
+                   return Value(ARG(0).get_bool() || ARG(1).get_bool(), BOOL);
                },
                [](ref<Env> env, const Value& args) -> Value {
-                   return Value(new ASTBinaryLogic(ARG(0).loc(), AST_AND, ARG(0).get_runtime(), ARG(1).get_runtime()));
-               }};
-        OR = {find<FunctionType>(find<ProductType>(BOOL, BOOL), BOOL),
-              [](ref<Env> env, const Value& args) -> Value {
-                  return Value(ARG(0).get_bool() || ARG(1).get_bool(), BOOL);
-              },
-              [](ref<Env> env, const Value& args) -> Value {
-                  return Value(new ASTBinaryLogic(ARG(0).loc(), AST_OR, ARG(0).get_runtime(), ARG(1).get_runtime()));
-              }};
-        XOR = {
-            find<FunctionType>(find<ProductType>(BOOL, BOOL), BOOL),
-            [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_bool() ^ ARG(1).get_bool(), BOOL); },
-            [](ref<Env> env, const Value& args) -> Value {
-                return Value(new ASTBinaryLogic(ARG(0).loc(), AST_XOR, ARG(0).get_runtime(), ARG(1).get_runtime()));
-            }};
-        NOT = {find<FunctionType>(find<ProductType>(BOOL), BOOL),
-               [](ref<Env> env, const Value& args) -> Value { return Value(!ARG(0).get_bool(), BOOL); },
-               [](ref<Env> env, const Value& args) -> Value {
-                   return Value(new ASTNot(ARG(0).loc(), ARG(0).get_runtime()));
-               }};
-        EQUALS = {find<FunctionType>(find<ProductType>(ANY, ANY), BOOL),
-                  [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0) == ARG(1), BOOL); },
-                  [](ref<Env> env, const Value& args) -> Value {
-                      return Value(
-                          new ASTBinaryEqual(ARG(0).loc(), AST_EQUAL, ARG(0).get_runtime(), ARG(1).get_runtime()));
-                  }};
-        NOT_EQUALS = {
-            find<FunctionType>(find<ProductType>(ANY, ANY), BOOL),
-            [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0) != ARG(1), BOOL); },
-            [](ref<Env> env, const Value& args) -> Value {
-                return Value(new ASTBinaryEqual(ARG(0).loc(), AST_INEQUAL, ARG(0).get_runtime(), ARG(1).get_runtime()));
-            }};
-        LESS = {
-            find<FunctionType>(find<ProductType>(INT, INT), BOOL),
-            [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() < ARG(1).get_int(), BOOL); },
-            [](ref<Env> env, const Value& args) -> Value {
-                return Value(new ASTBinaryRel(ARG(0).loc(), AST_LESS, ARG(0).get_runtime(), ARG(1).get_runtime()));
-            }};
-        LESS_EQUAL = {
-            find<FunctionType>(find<ProductType>(INT, INT), BOOL),
-            [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() <= ARG(1).get_int(), BOOL); },
-            [](ref<Env> env, const Value& args) -> Value {
-                return Value(
-                    new ASTBinaryRel(ARG(0).loc(), AST_LESS_EQUAL, ARG(0).get_runtime(), ARG(1).get_runtime()));
-            }};
+                   return Value(new ASTBinaryLogic(ARG(0).loc(), AST_OR, ARG(0).get_runtime(), ARG(1).get_runtime()));
+               } };
+        XOR = { find<FunctionType>(find<ProductType>(BOOL, BOOL), BOOL),
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(ARG(0).get_bool() ^ ARG(1).get_bool(), BOOL);
+                },
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(new ASTBinaryLogic(ARG(0).loc(), AST_XOR, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                } };
+        NOT = { find<FunctionType>(find<ProductType>(BOOL), BOOL),
+                [](ref<Env> env, const Value& args) -> Value { return Value(!ARG(0).get_bool(), BOOL); },
+                [](ref<Env> env, const Value& args) -> Value {
+                    return Value(new ASTNot(ARG(0).loc(), ARG(0).get_runtime()));
+                } };
+        EQUALS = { find<FunctionType>(find<ProductType>(ANY, ANY), BOOL),
+                   [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0) == ARG(1), BOOL); },
+                   [](ref<Env> env, const Value& args) -> Value {
+                       return Value(
+                           new ASTBinaryEqual(ARG(0).loc(), AST_EQUAL, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                   } };
+        NOT_EQUALS = { find<FunctionType>(find<ProductType>(ANY, ANY), BOOL),
+                       [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0) != ARG(1), BOOL); },
+                       [](ref<Env> env, const Value& args) -> Value {
+                           return Value(new ASTBinaryEqual(ARG(0).loc(), AST_INEQUAL, ARG(0).get_runtime(),
+                                                           ARG(1).get_runtime()));
+                       } };
+        LESS = { find<FunctionType>(find<ProductType>(INT, INT), BOOL),
+                 [](ref<Env> env, const Value& args) -> Value {
+                     return Value(ARG(0).get_int() < ARG(1).get_int(), BOOL);
+                 },
+                 [](ref<Env> env, const Value& args) -> Value {
+                     return Value(new ASTBinaryRel(ARG(0).loc(), AST_LESS, ARG(0).get_runtime(), ARG(1).get_runtime()));
+                 } };
+        LESS_EQUAL = { find<FunctionType>(find<ProductType>(INT, INT), BOOL),
+                       [](ref<Env> env, const Value& args) -> Value {
+                           return Value(ARG(0).get_int() <= ARG(1).get_int(), BOOL);
+                       },
+                       [](ref<Env> env, const Value& args) -> Value {
+                           return Value(new ASTBinaryRel(ARG(0).loc(), AST_LESS_EQUAL, ARG(0).get_runtime(),
+                                                         ARG(1).get_runtime()));
+                       } };
         GREATER = {
             find<FunctionType>(find<ProductType>(INT, INT), BOOL),
             [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() > ARG(1).get_int(), BOOL); },
             [](ref<Env> env, const Value& args) -> Value {
                 return Value(new ASTBinaryRel(ARG(0).loc(), AST_GREATER, ARG(0).get_runtime(), ARG(1).get_runtime()));
-            }};
-        GREATER_EQUAL = {
-            find<FunctionType>(find<ProductType>(INT, INT), BOOL),
-            [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).get_int() >= ARG(1).get_int(), BOOL); },
-            [](ref<Env> env, const Value& args) -> Value {
-                return Value(
-                    new ASTBinaryRel(ARG(0).loc(), AST_GREATER_EQUAL, ARG(0).get_runtime(), ARG(1).get_runtime()));
-            }};
-        DICT_IN = {find<FunctionType>(find<ProductType>(ANY, find<DictType>(ANY, ANY)), BOOL),
-                   [](ref<Env> env, const Value& args) -> Value {
-                       return Value(ARG(1).get_dict()[ARG(0)] ? true : false, BOOL);
-                   },
-                   nullptr};
-        DICT_NOT_IN = {find<FunctionType>(find<ProductType>(ANY, find<DictType>(ANY, ANY)), BOOL),
-                       [](ref<Env> env, const Value& args) -> Value {
-                           return Value(ARG(1).get_dict()[ARG(0)] ? false : true, BOOL);
-                       },
-                       nullptr};
-        DISPLAY = {find<FunctionType>(find<ProductType>(ANY), VOID), nullptr,
-                   [](ref<Env> env, const Value& args) -> Value {
-                       return Value(new ASTDisplay(ARG(0).loc(), ARG(0).get_runtime()));
-                   }};
+            }
+        };
+        GREATER_EQUAL = { find<FunctionType>(find<ProductType>(INT, INT), BOOL),
+                          [](ref<Env> env, const Value& args) -> Value {
+                              return Value(ARG(0).get_int() >= ARG(1).get_int(), BOOL);
+                          },
+                          [](ref<Env> env, const Value& args) -> Value {
+                              return Value(new ASTBinaryRel(ARG(0).loc(), AST_GREATER_EQUAL, ARG(0).get_runtime(),
+                                                            ARG(1).get_runtime()));
+                          } };
+        DICT_IN = { find<FunctionType>(find<ProductType>(ANY, find<DictType>(ANY, ANY)), BOOL),
+                    [](ref<Env> env, const Value& args) -> Value {
+                        return Value(ARG(1).get_dict()[ARG(0)] ? true : false, BOOL);
+                    },
+                    nullptr };
+        DICT_NOT_IN = { find<FunctionType>(find<ProductType>(ANY, find<DictType>(ANY, ANY)), BOOL),
+                        [](ref<Env> env, const Value& args) -> Value {
+                            return Value(ARG(1).get_dict()[ARG(0)] ? false : true, BOOL);
+                        },
+                        nullptr };
+        DISPLAY = { find<FunctionType>(find<ProductType>(ANY), VOID), nullptr,
+                    [](ref<Env> env, const Value& args) -> Value {
+                        return Value(new ASTDisplay(ARG(0).loc(), ARG(0).get_runtime()));
+                    } };
         AT_INT = {
             find<FunctionType>(find<ProductType>(ANY, INT), ANY),
             [](ref<Env> env, const Value& args) -> Value {
@@ -200,84 +205,86 @@ namespace basil {
             },
             nullptr // todo: runtime indexing
         };
-        AT_ARRAY_TYPE = {find<FunctionType>(find<ProductType>(TYPE, INT), TYPE),
+        AT_ARRAY_TYPE = { find<FunctionType>(find<ProductType>(TYPE, INT), TYPE),
+                          [](ref<Env> env, const Value& args) -> Value {
+                              return Value(find<ArrayType>(ARG(0).get_type(), ARG(1).get_int()), TYPE);
+                          },
+                          nullptr };
+        AT_DYNARRAY_TYPE = { find<FunctionType>(find<ProductType>(TYPE, VOID), TYPE),
+                             [](ref<Env> env, const Value& args) -> Value {
+                                 return Value(find<ArrayType>(ARG(0).get_type()), TYPE);
+                             },
+                             nullptr };
+        AT_DICT = { find<FunctionType>(find<ProductType>(find<DictType>(ANY, ANY), ANY), ANY),
+                    [](ref<Env> env, const Value& args) -> Value { return *(ARG(0).get_dict())[ARG(1)]; }, nullptr };
+        AT_DICT_LIST = { find<FunctionType>(find<ProductType>(find<DictType>(ANY, ANY), find<ListType>(ANY)), ANY),
                          [](ref<Env> env, const Value& args) -> Value {
-                             return Value(find<ArrayType>(ARG(0).get_type(), ARG(1).get_int()), TYPE);
+                             vector<Value> vals;
+                             for (const Value& key : to_vector(ARG(1))) vals.push(*ARG(0).get_dict()[key]);
+                             return Value(new ArrayValue(vals));
                          },
-                         nullptr};
-        AT_DYNARRAY_TYPE = {
-            find<FunctionType>(find<ProductType>(TYPE, VOID), TYPE),
-            [](ref<Env> env, const Value& args) -> Value { return Value(find<ArrayType>(ARG(0).get_type()), TYPE); },
-            nullptr};
-        AT_DICT = {find<FunctionType>(find<ProductType>(find<DictType>(ANY, ANY), ANY), ANY),
-                   [](ref<Env> env, const Value& args) -> Value { return *(ARG(0).get_dict())[ARG(1)]; }, nullptr};
-        AT_DICT_LIST = {find<FunctionType>(find<ProductType>(find<DictType>(ANY, ANY), find<ListType>(ANY)), ANY),
-                        [](ref<Env> env, const Value& args) -> Value {
-                            vector<Value> vals;
-                            for (const Value& key : to_vector(ARG(1))) vals.push(*ARG(0).get_dict()[key]);
-                            return Value(new ArrayValue(vals));
-                        },
-                        nullptr};
-        AT_DICT_TYPE = {find<FunctionType>(find<ProductType>(TYPE, TYPE), TYPE),
-                        [](ref<Env> env, const Value& args) -> Value {
-                            return Value(find<DictType>(ARG(1).get_type(), ARG(0).get_type()), TYPE);
-                        },
-                        nullptr};
-        AT_MODULE = {find<FunctionType>(find<ProductType>(MODULE, SYMBOL), ANY),
+                         nullptr };
+        AT_DICT_TYPE = { find<FunctionType>(find<ProductType>(TYPE, TYPE), TYPE),
+                         [](ref<Env> env, const Value& args) -> Value {
+                             return Value(find<DictType>(ARG(1).get_type(), ARG(0).get_type()), TYPE);
+                         },
+                         nullptr };
+        AT_MODULE = { find<FunctionType>(find<ProductType>(MODULE, SYMBOL), ANY),
+                      [](ref<Env> env, const Value& args) -> Value {
+                          if (!ARG(0).get_module().has(ARG(1).get_symbol())) {
+                              err(ARG(1).loc(), "Module does not contain member '", symbol_for(ARG(1).get_symbol()),
+                                  "'.");
+                              return error();
+                          }
+                          return ARG(0).get_module().entry(ARG(1).get_symbol());
+                      },
+                      nullptr };
+        ANNOTATE = { find<FunctionType>(find<ProductType>(ANY, TYPE), ANY),
                      [](ref<Env> env, const Value& args) -> Value {
-                         if (!ARG(0).get_module().has(ARG(1).get_symbol())) {
-                             err(ARG(1).loc(), "Module does not contain member '", symbol_for(ARG(1).get_symbol()),
-                                 "'.");
+                         if (!ARG(0).type()->coerces_to(ARG(1).get_type())) {
+                             err(ARG(0).loc(), "Could not unify value of type '", ARG(0).type(), "' with type '",
+                                 ARG(1).get_type(), "'.");
                              return error();
                          }
-                         return ARG(0).get_module().entry(ARG(1).get_symbol());
+                         return cast(ARG(0), ARG(1).get_type());
                      },
-                     nullptr};
-        ANNOTATE = {find<FunctionType>(find<ProductType>(ANY, TYPE), ANY),
+                     [](ref<Env> env, const Value& args) -> Value {
+                         return new ASTAnnotate(ARG(0).loc(), lower(ARG(0)).get_runtime(), ARG(1).get_type());
+                     },
+                     NO_AUTO_LOWER };
+        TYPEOF = { find<FunctionType>(find<ProductType>(ANY), TYPE),
+                   [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).type(), TYPE); }, nullptr };
+        TYPEDEF = { find<MacroType>(2),
                     [](ref<Env> env, const Value& args) -> Value {
-                        if (!ARG(0).type()->coerces_to(ARG(1).get_type())) {
-                            err(ARG(0).loc(), "Could not unify value of type '", ARG(0).type(), "' with type '",
-                                ARG(1).get_type(), "'.");
-                            return error();
-                        }
-                        return cast(ARG(0), ARG(1).get_type());
+                        return list_of(Value("def", SYMBOL), ARG(0),
+                                       list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1)));
                     },
+                    nullptr };
+        LIST_TYPE = { find<FunctionType>(find<ProductType>(TYPE), TYPE),
+                      [](ref<Env> env, const Value& args) -> Value {
+                          return Value(find<ListType>(ARG(0).get_type()), TYPE);
+                      },
+                      nullptr };
+        OF_TYPE_MACRO = { find<MacroType>(2),
+                          [](ref<Env> env, const Value& args) -> Value {
+                              return list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1));
+                          },
+                          nullptr };
+        OF_TYPE = { find<FunctionType>(find<ProductType>(SYMBOL, TYPE), TYPE),
                     [](ref<Env> env, const Value& args) -> Value {
-                        return new ASTAnnotate(ARG(0).loc(), lower(ARG(0)).get_runtime(), ARG(1).get_type());
+                        return Value(find<NamedType>(symbol_for(ARG(0).get_symbol()), ARG(1).get_type()), TYPE);
                     },
-                    NO_AUTO_LOWER};
-        TYPEOF = {find<FunctionType>(find<ProductType>(ANY), TYPE),
-                  [](ref<Env> env, const Value& args) -> Value { return Value(ARG(0).type(), TYPE); }, nullptr};
-        TYPEDEF = {find<MacroType>(2),
-                   [](ref<Env> env, const Value& args) -> Value {
-                       return list_of(Value("def", SYMBOL), ARG(0),
-                                      list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1)));
-                   },
-                   nullptr};
-        LIST_TYPE = {
-            find<FunctionType>(find<ProductType>(TYPE), TYPE),
-            [](ref<Env> env, const Value& args) -> Value { return Value(find<ListType>(ARG(0).get_type()), TYPE); },
-            nullptr};
-        OF_TYPE_MACRO = {find<MacroType>(2),
-                         [](ref<Env> env, const Value& args) -> Value {
-                             return list_of(Value("#of", SYMBOL), list_of(Value("quote", SYMBOL), ARG(0)), ARG(1));
-                         },
-                         nullptr};
-        OF_TYPE = {find<FunctionType>(find<ProductType>(SYMBOL, TYPE), TYPE),
-                   [](ref<Env> env, const Value& args) -> Value {
-                       return Value(find<NamedType>(symbol_for(ARG(0).get_symbol()), ARG(1).get_type()), TYPE);
-                   },
-                   nullptr};
-        IF = {find<FunctionType>(find<ProductType>(BOOL, ANY, ANY), ANY),
-              [](ref<Env> env, const Value& args) -> Value { return eval(env, ARG(ARG(0).get_bool() ? 1 : 2)); },
-              [](ref<Env> env, const Value& args) -> Value {
-                  Value left = eval(env, ARG(1)), right = eval(env, ARG(2));
-                  if (left.is_error() || right.is_error()) return error();
-                  if (!left.is_runtime()) left = lower(left);
-                  if (!right.is_runtime()) right = lower(right);
-                  return new ASTIf(ARG(0).loc(), ARG(0).get_runtime(), left.get_runtime(), right.get_runtime());
-              },
-              NO_AUTO_LOWER};
+                    nullptr };
+        IF = { find<FunctionType>(find<ProductType>(BOOL, ANY, ANY), ANY),
+               [](ref<Env> env, const Value& args) -> Value { return eval(env, ARG(ARG(0).get_bool() ? 1 : 2)); },
+               [](ref<Env> env, const Value& args) -> Value {
+                   Value left = eval(env, ARG(1)), right = eval(env, ARG(2));
+                   if (left.is_error() || right.is_error()) return error();
+                   if (!left.is_runtime()) left = lower(left);
+                   if (!right.is_runtime()) right = lower(right);
+                   return new ASTIf(ARG(0).loc(), ARG(0).get_runtime(), left.get_runtime(), right.get_runtime());
+               },
+               NO_AUTO_LOWER };
     }
 
     static bool inited = false;

@@ -14,19 +14,18 @@ namespace basil {
             id_names.push(name);
             id_counts.push(0);
             // start new ident chain for name
-            return { id_names.size() - 1, id_counts.back() };
-        }
-        else {
+            return {id_names.size() - 1, id_counts.back()};
+        } else {
             // find next ident in chain, incrementing count
-            return { it->second, ++ id_counts[it->second] };
+            return {it->second, ++id_counts[it->second]};
         }
     }
 
     const u8 MAJOR_MASK = 0b11100000;
     const u8 MINOR_MASK = 0b00011000;
 
-    SSANode::SSANode(ref<BasicBlock> parent, const Type* type, SSAKind kind, const string& name): 
-        _parent(parent), _type(type), _kind(kind), _id(next_ident(name)) {}
+    SSANode::SSANode(ref<BasicBlock> parent, const Type* type, SSAKind kind, const string& name)
+        : _parent(parent), _type(type), _kind(kind), _id(next_ident(name)) {}
 
     bool SSANode::is(SSAKind kind) const {
         return _kind == kind;
@@ -54,10 +53,10 @@ namespace basil {
 
     static u64 bb_count = 0;
     string next_bb() {
-        return format<string>(".BB", bb_count ++);
+        return format<string>(".BB", bb_count++);
     }
-    
-    BasicBlock::BasicBlock(const string& label): _label(label) {
+
+    BasicBlock::BasicBlock(const string& label) : _label(label) {
         if (!_label.size()) _label = next_bb();
     }
 
@@ -105,12 +104,10 @@ namespace basil {
 
     void BasicBlock::format(stream& io) const {
         writeln(io, label(), ":");
-        for (auto& member : _members)
-            writeln(io, "    ", member);
+        for (auto& member : _members) writeln(io, "    ", member);
     }
 
-    SSAInt::SSAInt(ref<BasicBlock> parent, i64 value): 
-        SSANode(parent, INT, SSA_INT), _value(value) {}
+    SSAInt::SSAInt(ref<BasicBlock> parent, i64 value) : SSANode(parent, INT, SSA_INT), _value(value) {}
 
     i64 SSAInt::value() const {
         return _value;
@@ -128,8 +125,7 @@ namespace basil {
         write(io, id(), " = ", _value);
     }
 
-    SSABool::SSABool(ref<BasicBlock> parent, bool value): 
-        SSANode(parent, BOOL, SSA_BOOL), _value(value) {}
+    SSABool::SSABool(ref<BasicBlock> parent, bool value) : SSANode(parent, BOOL, SSA_BOOL), _value(value) {}
 
     bool SSABool::value() const {
         return _value;
@@ -147,8 +143,8 @@ namespace basil {
         write(io, id(), " = ", _value);
     }
 
-    SSAString::SSAString(ref<BasicBlock> parent, const string& value): 
-        SSANode(parent, STRING, SSA_STRING), _value(value) {}
+    SSAString::SSAString(ref<BasicBlock> parent, const string& value)
+        : SSANode(parent, STRING, SSA_STRING), _value(value) {}
 
     const string& SSAString::value() const {
         return _value;
@@ -166,7 +162,7 @@ namespace basil {
         write(io, id(), " = \"", _value, "\"");
     }
 
-    SSAVoid::SSAVoid(ref<BasicBlock> parent): SSANode(parent, VOID, SSA_VOID) {}
+    SSAVoid::SSAVoid(ref<BasicBlock> parent) : SSANode(parent, VOID, SSA_VOID) {}
 
     Location SSAVoid::emit(Function& fn) {
         return loc_immediate(0);
@@ -176,8 +172,7 @@ namespace basil {
         write(io, id(), " = []");
     }
 
-    SSASymbol::SSASymbol(ref<BasicBlock> parent, u64 value):
-        SSANode(parent, SYMBOL, SSA_SYMBOL), _value(value) {}
+    SSASymbol::SSASymbol(ref<BasicBlock> parent, u64 value) : SSANode(parent, SYMBOL, SSA_SYMBOL), _value(value) {}
 
     u64 SSASymbol::value() const {
         return _value;
@@ -193,10 +188,10 @@ namespace basil {
 
     void SSASymbol::format(stream& io) const {
         write(io, id(), " = ", symbol_for(_value));
-    }        
-    
-    SSAFunction::SSAFunction(ref<BasicBlock> parent, const Type* type, u64 name):
-        SSANode(parent, type, SSA_FUNCTION, symbol_for(name)), _name(name) {}
+    }
+
+    SSAFunction::SSAFunction(ref<BasicBlock> parent, const Type* type, u64 name)
+        : SSANode(parent, type, SSA_FUNCTION, symbol_for(name)), _name(name) {}
 
     Location SSAFunction::emit(Function& fn) {
         return loc_label(symbol_for(_name));
@@ -206,8 +201,8 @@ namespace basil {
         write(io, id(), " = &", symbol_for(_name));
     }
 
-    SSALoadLabel::SSALoadLabel(ref<BasicBlock> parent, const Type* type, u64 name):
-        SSANode(parent, type, SSA_LOAD_LABEL, symbol_for(name)), _name(name) {}
+    SSALoadLabel::SSALoadLabel(ref<BasicBlock> parent, const Type* type, u64 name)
+        : SSANode(parent, type, SSA_LOAD_LABEL, symbol_for(name)), _name(name) {}
 
     Location SSALoadLabel::emit(Function& fn) {
         return loc_label(symbol_for(_name));
@@ -217,15 +212,15 @@ namespace basil {
         write(io, id(), " = &", symbol_for(_name));
     }
 
-    SSAStore::SSAStore(ref<BasicBlock> parent, ref<Env> env, u64 name, ref<SSANode> value):
-        SSANode(parent, value->type(), SSA_STORE, symbol_for(name)), _env(env), _value(value) {}
+    SSAStore::SSAStore(ref<BasicBlock> parent, ref<Env> env, u64 name, ref<SSANode> value)
+        : SSANode(parent, value->type(), SSA_STORE, symbol_for(name)), _env(env), _value(value) {}
 
     Location SSAStore::emit(Function& fn) {
         const string& name = id_names[id().base];
         auto def = _env->find(name);
         if (!def) return loc_none();
-        if (def->location.type == LOC_NONE) return fn.add(new StoreInsn(def->location = 
-            fn.create_local(name, basil::INT), _value->emit(fn)));
+        if (def->location.type == LOC_NONE)
+            return fn.add(new StoreInsn(def->location = fn.create_local(name, basil::INT), _value->emit(fn)));
         return fn.add(new StoreInsn(def->location, _value->emit(fn)));
     }
 
@@ -233,8 +228,8 @@ namespace basil {
         write(io, id(), " = ", _value->id());
     }
 
-    SSABinary::SSABinary(ref<BasicBlock> parent, const Type* type, SSAKind kind, ref<SSANode> left, ref<SSANode> right):
-        SSANode(parent, type, kind), _left(left), _right(right) {}
+    SSABinary::SSABinary(ref<BasicBlock> parent, const Type* type, SSAKind kind, ref<SSANode> left, ref<SSANode> right)
+        : SSANode(parent, type, kind), _left(left), _right(right) {}
 
     ref<SSANode> SSABinary::left() const {
         return _left;
@@ -254,42 +249,27 @@ namespace basil {
 
     Location SSABinary::emit(Function& fn) {
         switch (kind()) {
-            case SSA_ADD:
-                return fn.add(new AddInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_SUB:
-                return fn.add(new SubInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_MUL:
-                return fn.add(new MulInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_DIV:
-                return fn.add(new DivInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_REM:
-                return fn.add(new RemInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_AND:
-                return fn.add(new AndInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_OR:
-                return fn.add(new OrInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_XOR:
-                return fn.add(new XorInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_EQ:
-                return fn.add(new EqualInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_NOT_EQ:
-                return fn.add(new InequalInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_GREATER:
-                return fn.add(new GreaterInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_GREATER_EQ:
-                return fn.add(new GreaterEqualInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_LESS:
-                return fn.add(new LessInsn(_left->emit(fn), _right->emit(fn)));
-            case SSA_LESS_EQ:
-                return fn.add(new LessEqualInsn(_left->emit(fn), _right->emit(fn)));
-            default:
-                return loc_none();
+            case SSA_ADD: return fn.add(new AddInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_SUB: return fn.add(new SubInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_MUL: return fn.add(new MulInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_DIV: return fn.add(new DivInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_REM: return fn.add(new RemInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_AND: return fn.add(new AndInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_OR: return fn.add(new OrInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_XOR: return fn.add(new XorInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_EQ: return fn.add(new EqualInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_NOT_EQ: return fn.add(new InequalInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_GREATER: return fn.add(new GreaterInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_GREATER_EQ: return fn.add(new GreaterEqualInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_LESS: return fn.add(new LessInsn(_left->emit(fn), _right->emit(fn)));
+            case SSA_LESS_EQ: return fn.add(new LessEqualInsn(_left->emit(fn), _right->emit(fn)));
+            default: return loc_none();
         }
     }
 
     void SSABinary::format(stream& io) const {
         const char* op;
-        switch(kind()) {
+        switch (kind()) {
             case SSA_ADD: op = "+"; break;
             case SSA_SUB: op = "-"; break;
             case SSA_MUL: op = "*"; break;
@@ -309,8 +289,8 @@ namespace basil {
         write(io, id(), " = ", _left->id(), " ", op, " ", _right->id());
     }
 
-    SSAUnary::SSAUnary(ref<BasicBlock> parent, const Type* type, SSAKind kind, ref<SSANode> child):
-        SSANode(parent, type, kind), _child(child) {}
+    SSAUnary::SSAUnary(ref<BasicBlock> parent, const Type* type, SSAKind kind, ref<SSANode> child)
+        : SSANode(parent, type, kind), _child(child) {}
 
     ref<SSANode> SSAUnary::child() const {
         return _child;
@@ -322,24 +302,22 @@ namespace basil {
 
     Location SSAUnary::emit(Function& fn) {
         switch (kind()) {
-            case SSA_NOT:
-                return fn.add(new NotInsn(_child->emit(fn)));
-            default:
-                return loc_none();
+            case SSA_NOT: return fn.add(new NotInsn(_child->emit(fn)));
+            default: return loc_none();
         }
     }
 
     void SSAUnary::format(stream& io) const {
         const char* op;
-        switch(kind()) {
+        switch (kind()) {
             case SSA_NOT: op = "not"; break;
             default: op = "?"; break;
         }
         write(io, id(), " = ", op, " ", _child->id());
     }
 
-    SSACall::SSACall(ref<BasicBlock> parent, const Type* type, ref<SSANode> fn, const vector<ref<SSANode>>& args):
-        SSANode(parent, type, SSA_CALL), _fn(fn), _args(args) {}
+    SSACall::SSACall(ref<BasicBlock> parent, const Type* type, ref<SSANode> fn, const vector<ref<SSANode>>& args)
+        : SSANode(parent, type, SSA_CALL), _fn(fn), _args(args) {}
 
     ref<SSANode> SSACall::fn() const {
         return _fn;
@@ -361,10 +339,8 @@ namespace basil {
         Location func = _fn->emit(fn);
         vector<Location> arglocs;
         for (auto node : _args) arglocs.push(node->emit(fn));
-        for (u32 i = 0; i < _args.size(); i ++) {
-            if (arglocs[i].type == LOC_LABEL) {
-                arglocs[i] = fn.add(new AddressInsn(arglocs[i], _args[i]->type()));
-            }
+        for (u32 i = 0; i < _args.size(); i++) {
+            if (arglocs[i].type == LOC_LABEL) { arglocs[i] = fn.add(new AddressInsn(arglocs[i], _args[i]->type())); }
         }
         return fn.add(new CallInsn(func, arglocs, type()));
     }
@@ -379,8 +355,7 @@ namespace basil {
         write(io, ")");
     }
 
-    SSARet::SSARet(ref<BasicBlock> parent, ref<SSANode> value):
-        SSANode(parent, VOID, SSA_RET), _value(value) {}
+    SSARet::SSARet(ref<BasicBlock> parent, ref<SSANode> value) : SSANode(parent, VOID, SSA_RET), _value(value) {}
 
     ref<SSANode> SSARet::value() const {
         return _value;
@@ -388,7 +363,7 @@ namespace basil {
 
     ref<SSANode>& SSARet::value() {
         return _value;
-    }  
+    }
 
     Location SSARet::emit(Function& fn) {
         return fn.add(new RetInsn(_value->emit(fn)));
@@ -398,8 +373,8 @@ namespace basil {
         write(io, "return ", _value->id());
     }
 
-    SSAGoto::SSAGoto(ref<BasicBlock> parent, ref<BasicBlock> target):
-        SSANode(parent, VOID, SSA_GOTO), _target(target) {}
+    SSAGoto::SSAGoto(ref<BasicBlock> parent, ref<BasicBlock> target)
+        : SSANode(parent, VOID, SSA_GOTO), _target(target) {}
 
     ref<BasicBlock> SSAGoto::target() const {
         return _target;
@@ -417,8 +392,8 @@ namespace basil {
         write(io, "goto ", _target->label());
     }
 
-    SSAIf::SSAIf(ref<BasicBlock> parent, ref<SSANode> cond, ref<BasicBlock> if_true, ref<BasicBlock> if_false):
-        SSANode(parent, VOID, SSA_IF), _cond(cond), _if_true(if_true), _if_false(if_false) {}
+    SSAIf::SSAIf(ref<BasicBlock> parent, ref<SSANode> cond, ref<BasicBlock> if_true, ref<BasicBlock> if_false)
+        : SSANode(parent, VOID, SSA_IF), _cond(cond), _if_true(if_true), _if_false(if_false) {}
 
     ref<SSANode> SSAIf::cond() const {
         return _cond;
@@ -453,9 +428,9 @@ namespace basil {
     }
 
     SSAPhi::SSAPhi(ref<BasicBlock> parent, const Type* type, ref<SSANode> left, ref<SSANode> right,
-        ref<BasicBlock> left_block, ref<BasicBlock> right_block):
-        SSANode(parent, type, SSA_PHI), _left(left), _right(right), 
-        _left_block(left_block), _right_block(right_block) {}
+                   ref<BasicBlock> left_block, ref<BasicBlock> right_block)
+        : SSANode(parent, type, SSA_PHI), _left(left), _right(right), _left_block(left_block),
+          _right_block(right_block) {}
 
     ref<SSANode> SSAPhi::left() const {
         return _left;
@@ -472,7 +447,7 @@ namespace basil {
     ref<SSANode>& SSAPhi::right() {
         return _right;
     }
-    
+
     ref<BasicBlock> SSAPhi::left_block() const {
         return _left_block;
     }
@@ -495,8 +470,8 @@ namespace basil {
 
     void SSAPhi::format(stream& io) const {
         write(io, id(), " = phi ", _left, "(", _left_block->label(), ") ", _right, "(", _right_block->label(), ")");
-    }   
-}
+    }
+} // namespace basil
 
 void write(stream& io, const basil::SSAIdent& id) {
     write(io, basil::id_names[id.base], '#', id.count);

@@ -2,265 +2,279 @@
 #define BASIL_TYPE_H
 
 #include "util/defs.h"
-#include "util/str.h"
 #include "util/hash.h"
 #include "util/io.h"
+#include "util/str.h"
 #include "util/vec.h"
 
 namespace basil {
-  const u8 GC_KIND_FLAG = 128;
+    const u8 GC_KIND_FLAG = 128;
 
-  enum TypeKind : u8 {
-    KIND_SINGLETON = 0,
-		KIND_TYPEVAR = 1,
-    KIND_NUMERIC = 2,
-    KIND_LIST = GC_KIND_FLAG | 0,
-    KIND_SUM = GC_KIND_FLAG | 1,
-    KIND_INTERSECT = GC_KIND_FLAG | 2,
-    KIND_PRODUCT = GC_KIND_FLAG | 3,
-    KIND_ARRAY = GC_KIND_FLAG | 4,
-    KIND_FUNCTION = GC_KIND_FLAG | 5,
-    KIND_ALIAS = GC_KIND_FLAG | 6,
-    KIND_MACRO = GC_KIND_FLAG | 7,
-		KIND_RUNTIME = GC_KIND_FLAG | 8,
-    KIND_NAMED = GC_KIND_FLAG | 9,
-    KIND_DICT = GC_KIND_FLAG | 10
-  };
+    enum TypeKind : u8 {
+        KIND_SINGLETON = 0,
+        KIND_TYPEVAR = 1,
+        KIND_NUMERIC = 2,
+        KIND_LIST = GC_KIND_FLAG | 0,
+        KIND_SUM = GC_KIND_FLAG | 1,
+        KIND_INTERSECT = GC_KIND_FLAG | 2,
+        KIND_PRODUCT = GC_KIND_FLAG | 3,
+        KIND_ARRAY = GC_KIND_FLAG | 4,
+        KIND_FUNCTION = GC_KIND_FLAG | 5,
+        KIND_ALIAS = GC_KIND_FLAG | 6,
+        KIND_MACRO = GC_KIND_FLAG | 7,
+        KIND_RUNTIME = GC_KIND_FLAG | 8,
+        KIND_NAMED = GC_KIND_FLAG | 9,
+        KIND_DICT = GC_KIND_FLAG | 10
+    };
 
-  class Type {
-    u64 _hash;
-  protected:
-    Type(u64 hash);
-  
-  public:
-    virtual TypeKind kind() const = 0;
-    u64 hash() const;
-		virtual bool concrete() const;
-		virtual const Type* concretify() const;
-    virtual bool operator==(const Type& other) const = 0;
-    virtual bool coerces_to(const Type* other) const;
-    virtual void format(stream& io) const = 0;
-  };
+    class Type {
+        u64 _hash;
 
-  class SingletonType : public Type {
-    string _repr;
-  public:
-    SingletonType(const string& repr);
+      protected:
+        Type(u64 hash);
 
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    void format(stream& io) const override;
-  };
+      public:
+        virtual TypeKind kind() const = 0;
+        u64 hash() const;
+        virtual bool concrete() const;
+        virtual const Type* concretify() const;
+        virtual bool operator==(const Type& other) const = 0;
+        virtual bool coerces_to(const Type* other) const;
+        virtual void format(stream& io) const = 0;
+    };
 
-  class NumericType : public Type {
-    u32 _size;
-    bool _floating;
-  public:
-    NumericType(u32 size, bool floating);
-    
-    bool floating() const;
-    u32 size() const;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+    class SingletonType : public Type {
+        string _repr;
 
-  class NamedType : public Type {
-    string _name;
-    const Type* _base;
-  public:
-    NamedType(const string& name, const Type* base);
+      public:
+        SingletonType(const string& repr);
 
-    const string& name() const;
-    const Type* base() const;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        void format(stream& io) const override;
+    };
 
-  class ListType : public Type {
-    const Type* _element;
-  public:
-    ListType(const Type* element);
+    class NumericType : public Type {
+        u32 _size;
+        bool _floating;
 
-    const Type* element() const;
-		bool concrete() const override;
-		const Type* concretify() const override;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+      public:
+        NumericType(u32 size, bool floating);
 
-  class ArrayType : public Type {
-    const Type* _element;
-    u32 _size;
-    bool _fixed;
-  public:
-    ArrayType(const Type* element);
-    ArrayType(const Type* element, u32 size);
+        bool floating() const;
+        u32 size() const;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
 
-    const Type* element() const;
-    u32 count() const;
-    bool fixed() const;
-		bool concrete() const override;
-		const Type* concretify() const override;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+    class NamedType : public Type {
+        string _name;
+        const Type* _base;
 
-  class SumType : public Type {
-    set<const Type*> _members;
-  public:
-    SumType(const set<const Type*>& members);
+      public:
+        NamedType(const string& name, const Type* base);
 
-    bool has(const Type* member) const;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+        const string& name() const;
+        const Type* base() const;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
 
-  class IntersectType : public Type {
-    set<const Type*> _members;
-    bool _has_function;
-  public:
-    template<typename ...Args>
-    IntersectType(const Args&... args): IntersectType(set_of<const Type*>(args...)) {}
-    IntersectType(const set<const Type*>& members);
+    class ListType : public Type {
+        const Type* _element;
 
-    bool has(const Type* member) const;
-    bool has_function() const;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+      public:
+        ListType(const Type* element);
 
-  class ProductType : public Type {
-    vector<const Type*> _members;
-  public:
-    template<typename ...Args>
-    ProductType(const Args&... args): ProductType(vector_of<const Type*>(args...)) {}
-    ProductType(const vector<const Type*>& members);
+        const Type* element() const;
+        bool concrete() const override;
+        const Type* concretify() const override;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
 
-    u32 count() const;
-    const Type* member(u32 i) const;
-		bool concrete() const override;
-		const Type* concretify() const override;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+    class ArrayType : public Type {
+        const Type* _element;
+        u32 _size;
+        bool _fixed;
 
-  class DictType : public Type {
-    const Type* _key, *_value;
-  public:
-    DictType(const Type* key, const Type* value);
+      public:
+        ArrayType(const Type* element);
+        ArrayType(const Type* element, u32 size);
 
-    const Type* key() const;
-    const Type* value() const;
-		bool concrete() const override;
-		const Type* concretify() const override;
-    bool coerces_to(const Type* other) const override;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    void format(stream& io) const override;
-  };
+        const Type* element() const;
+        u32 count() const;
+        bool fixed() const;
+        bool concrete() const override;
+        const Type* concretify() const override;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
 
-  class FunctionType : public Type {
-    const Type *_arg, *_ret;
-  public:
-    FunctionType(const Type* arg, const Type* ret);
+    class SumType : public Type {
+        set<const Type*> _members;
 
-    const Type* arg() const;
-    const Type* ret() const;
-    u32 arity() const;
-		bool concrete() const override;
-		const Type* concretify() const override;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    void format(stream& io) const override;
-  };
+      public:
+        SumType(const set<const Type*>& members);
 
-  class AliasType : public Type {
-  public:
-    AliasType();
-    
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    void format(stream& io) const override;
-  };
+        bool has(const Type* member) const;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
 
-  class MacroType : public Type {
-    u32 _arity;
-  public:
-    MacroType(u32 arity);
-  
-    u32 arity() const;
+    class IntersectType : public Type {
+        set<const Type*> _members;
+        bool _has_function;
 
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    void format(stream& io) const override;
-  };
+      public:
+        template <typename... Args>
+        IntersectType(const Args&... args) : IntersectType(set_of<const Type*>(args...)) {}
+        IntersectType(const set<const Type*>& members);
 
-  class RuntimeType : public Type {
-    const Type* _base;
-  public:
-    RuntimeType(const Type* base);
+        bool has(const Type* member) const;
+        bool has_function() const;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
 
-    const Type* base() const;
-    TypeKind kind() const override;
-    bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-    void format(stream& io) const override;
-  };
+    class ProductType : public Type {
+        vector<const Type*> _members;
 
-	class TypeVariable : public Type {
-		u32 _id;
-		friend void bind(const Type* a, const Type* b);
-	protected:
-		TypeVariable(u32 id);
-	public:
-		TypeVariable();
+      public:
+        template <typename... Args>
+        ProductType(const Args&... args) : ProductType(vector_of<const Type*>(args...)) {}
+        ProductType(const vector<const Type*>& members);
 
-		const Type* actual() const;
-		void bind(const Type* concrete) const;
-		bool concrete() const override;
-		const Type* concretify() const override;
-		TypeKind kind() const override;
-		bool operator==(const Type& other) const override;
-    bool coerces_to(const Type* other) const override;
-		void format(stream& io) const override;
-	};
+        u32 count() const;
+        const Type* member(u32 i) const;
+        bool concrete() const override;
+        const Type* concretify() const override;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
 
-  const Type* find_existing_type(const Type* t);
-  const Type* create_type(const Type* t);
+    class DictType : public Type {
+        const Type *_key, *_value;
 
-  template<typename T, typename ...Args>
-  const Type* find(Args... args) {
-    T t(args...);
-    const Type* e = find_existing_type(&t);
+      public:
+        DictType(const Type* key, const Type* value);
 
-    if (e) return e;
-    return create_type(new T(t));
-  }
+        const Type* key() const;
+        const Type* value() const;
+        bool concrete() const override;
+        const Type* concretify() const override;
+        bool coerces_to(const Type* other) const override;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        void format(stream& io) const override;
+    };
 
-  extern const Type *INT, *FLOAT, *SYMBOL, *VOID, *ERROR, *TYPE, 
-                    *ALIAS, *BOOL, *ANY, *STRING, *MODULE;
-	
-	const Type* unify(const Type* a, const Type* b, bool coercing = false, bool converting = false);
-}
+    class FunctionType : public Type {
+        const Type *_arg, *_ret;
 
-template<>
+      public:
+        FunctionType(const Type* arg, const Type* ret);
+
+        const Type* arg() const;
+        const Type* ret() const;
+        u32 arity() const;
+        bool concrete() const override;
+        const Type* concretify() const override;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        void format(stream& io) const override;
+    };
+
+    class AliasType : public Type {
+      public:
+        AliasType();
+
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        void format(stream& io) const override;
+    };
+
+    class MacroType : public Type {
+        u32 _arity;
+
+      public:
+        MacroType(u32 arity);
+
+        u32 arity() const;
+
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        void format(stream& io) const override;
+    };
+
+    class RuntimeType : public Type {
+        const Type* _base;
+
+      public:
+        RuntimeType(const Type* base);
+
+        const Type* base() const;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
+
+    class TypeVariable : public Type {
+        u32 _id;
+        friend void bind(const Type* a, const Type* b);
+
+      protected:
+        TypeVariable(u32 id);
+
+      public:
+        TypeVariable();
+
+        const Type* actual() const;
+        void bind(const Type* concrete) const;
+        bool concrete() const override;
+        const Type* concretify() const override;
+        TypeKind kind() const override;
+        bool operator==(const Type& other) const override;
+        bool coerces_to(const Type* other) const override;
+        void format(stream& io) const override;
+    };
+
+    const Type* find_existing_type(const Type* t);
+    const Type* create_type(const Type* t);
+
+    template <typename T, typename... Args>
+    const Type* find(Args... args) {
+        T t(args...);
+        const Type* e = find_existing_type(&t);
+
+        if (e) return e;
+        return create_type(new T(t));
+    }
+
+    extern const Type *INT, *FLOAT, *SYMBOL, *VOID, *ERROR, *TYPE, *ALIAS, *BOOL, *ANY, *STRING, *MODULE;
+
+    const Type* unify(const Type* a, const Type* b, bool coercing = false, bool converting = false);
+} // namespace basil
+
+template <>
 u64 hash(const basil::Type& t);
 
-template<>
+template <>
 u64 hash(const basil::Type* const& t);
 
 void write(stream& io, const basil::Type* t);

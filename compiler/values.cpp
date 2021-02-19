@@ -107,8 +107,7 @@ namespace basil {
         _data.rc = m;
     }
 
-    Value::Value(ASTNode* n) : 
-        _type(n->type()->kind() == KIND_RUNTIME ? n->type() : find<RuntimeType>(n->type())) {
+    Value::Value(ASTNode* n) : _type(n->type()->kind() == KIND_RUNTIME ? n->type() : find<RuntimeType>(n->type())) {
         _data.rc = n;
     }
 
@@ -316,8 +315,8 @@ namespace basil {
 
     ASTNode*& Value::get_runtime() {
         return (ASTNode*&)_data.rc;
-    }    
-    
+    }
+
     bool Value::is_named() const {
         return _type->kind() == KIND_NAMED;
     }
@@ -406,7 +405,7 @@ namespace basil {
                 write(io, first ? "" : " ", pair.first);
                 if (dt->value() != VOID) write(io, ": ", pair.second);
                 first = false;
-            }  
+            }
             write(io, "}");
         } else if (is_function())
             write(io, "<#", get_function().name() < 0 ? "procedure" : symbol_for(get_function().name()), ">");
@@ -459,7 +458,7 @@ namespace basil {
             for (const Value& v : get_array()) h ^= v.hash();
             return h;
         } else if (is_dict()) {
-            u64 h = 13974436514101026401ul;  
+            u64 h = 13974436514101026401ul;
             for (const auto& p : get_dict()) h ^= 14259444292234844953ul * p.first.hash() ^ p.second.hash();
             return h;
         } else if (is_function()) {
@@ -562,8 +561,7 @@ namespace basil {
         } else if (is_runtime()) {
             return _data.rc == other._data.rc;
         } else if (is_module()) {
-            if (get_module().entries().size() != other.get_module().entries().size())
-                return false;
+            if (get_module().entries().size() != other.get_module().entries().size()) return false;
             for (auto& p : get_module().entries()) {
                 auto it = other.get_module().entries().find(p.first);
                 if (it == other.get_module().entries().end()) return false;
@@ -580,10 +578,9 @@ namespace basil {
             const ListValue* i = &get_list();
             vector<const Value*> vals;
             while (i) vals.push(&i->head()), i = i->tail().is_void() ? nullptr : &i->tail().get_list();
-            for (i64 i = i64(vals.size()) - 1; i >= 0; i --) l = new ListValue(vals[i]->clone(), l ? l : empty());
+            for (i64 i = i64(vals.size()) - 1; i >= 0; i--) l = new ListValue(vals[i]->clone(), l ? l : empty());
             return Value(l);
-        }
-        else if (is_string())
+        } else if (is_string())
             return Value(get_string(), STRING);
         else if (is_named())
             return Value(new NamedValue(get_named().get().clone()), type());
@@ -656,8 +653,7 @@ namespace basil {
         return _value;
     }
 
-    NamedValue::NamedValue(const Value& inner):
-        _inner(inner) {}
+    NamedValue::NamedValue(const Value& inner) : _inner(inner) {}
 
     Value& NamedValue::get() {
         return _inner;
@@ -765,8 +761,7 @@ namespace basil {
 
     ArrayValue::ArrayValue(const vector<Value>& values) : ProductValue(values) {}
 
-    DictValue::DictValue(const map<Value, Value>& entries):
-        _entries(entries) {}
+    DictValue::DictValue(const map<Value, Value>& entries) : _entries(entries) {}
 
     u32 DictValue::size() const {
         return _entries.size();
@@ -775,13 +770,15 @@ namespace basil {
     Value* DictValue::operator[](const Value& key) {
         auto it = _entries.find(key);
         if (it == _entries.end()) return nullptr;
-        else return &it->second;
+        else
+            return &it->second;
     }
 
     const Value* DictValue::operator[](const Value& key) const {
         auto it = _entries.find(key);
         if (it == _entries.end()) return nullptr;
-        else return &it->second;
+        else
+            return &it->second;
     }
 
     const map<Value, Value>::const_iterator DictValue::begin() const {
@@ -798,7 +795,7 @@ namespace basil {
 
     map<Value, Value>::iterator DictValue::end() {
         return _entries.end();
-    }  
+    }
 
     const map<Value, Value>& DictValue::entries() const {
         return _entries;
@@ -977,8 +974,7 @@ namespace basil {
         return _code;
     }
 
-    ModuleValue::ModuleValue(const map<u64, Value>& entries):
-        _entries(entries) {}
+    ModuleValue::ModuleValue(const map<u64, Value>& entries) : _entries(entries) {}
 
     const map<u64, Value>& ModuleValue::entries() const {
         return _entries;
@@ -1287,8 +1283,8 @@ namespace basil {
         return Value(new ArrayValue(elements));
     }
 
-    Value dict_of(const map<Value, Value> &elements) {
-        for (const auto &p : elements) {
+    Value dict_of(const map<Value, Value>& elements) {
+        for (const auto& p : elements) {
             if (p.first.is_runtime() || p.second.is_runtime()) {
                 err(p.first.loc(), "Cannot compile arrays yet.");
                 return error();
@@ -1381,7 +1377,7 @@ namespace basil {
     Value cast(const Value& val, const Type* type) {
         if (val.type() == type || type == ANY) return val;
 
-        if (val.type()->kind() == KIND_TYPEVAR) { 
+        if (val.type()->kind() == KIND_TYPEVAR) {
             unify(val.type(), type);
             return val;
         }
@@ -1391,14 +1387,11 @@ namespace basil {
             return ((const RuntimeType*)type)->base() == ANY ? val : lower(val);
         }
 
-        if (val.type()->kind() == type->kind() && !type->concrete()) {
-            return val;
-        }
+        if (val.type()->kind() == type->kind() && !type->concrete()) { return val; }
 
         if (type->kind() == KIND_NAMED) {
             return Value(new NamedValue(val), type);
-        }
-        else if (val.type()->kind() == KIND_NAMED && type == ((const NamedType*)val.type())->base()) {
+        } else if (val.type()->kind() == KIND_NAMED && type == ((const NamedType*)val.type())->base()) {
             return val.get_named().get();
         }
 
@@ -1410,8 +1403,8 @@ namespace basil {
             }
         }
 
-        if (val.type()->kind() == KIND_ARRAY && type->kind() == KIND_ARRAY
-            && ((const ArrayType*)val.type())->fixed() && !((const ArrayType*)type)->fixed()) {
+        if (val.type()->kind() == KIND_ARRAY && type->kind() == KIND_ARRAY && ((const ArrayType*)val.type())->fixed() &&
+            !((const ArrayType*)type)->fixed()) {
             return Value(new ArrayValue(val.get_array()), type);
         }
 
@@ -1530,14 +1523,13 @@ namespace basil {
             err(args.loc(), "Expected product value for arguments.");
             return error();
         }
-        for (u32 i = 0; i < args.get_product().size(); i ++) {
+        for (u32 i = 0; i < args.get_product().size(); i++) {
             if (args.get_product()[i].is_error()) return error();
         }
         Value function = callable;
         if (function.is_intersect()) {
             map<const FunctionType*, i64> ftypes;
-            i64 coerced_priority = args.get_product().size() + 1,
-                exact_priority = coerced_priority * coerced_priority;
+            i64 coerced_priority = args.get_product().size() + 1, exact_priority = coerced_priority * coerced_priority;
             // println("args = ", args.type());
             // for (const auto& p : function.get_intersect()) {
             //     if (p.first->kind() != KIND_FUNCTION) continue;
@@ -1550,10 +1542,9 @@ namespace basil {
                 if (fnargst->count() != args.get_product().size()) continue;
                 i64 priority = 0;
                 const ProductType* argst = (const ProductType*)args.type();
-                for (u32 i = 0; i < argst->count(); i ++) {
-                    if (argst->member(i) == fnargst->member(i)) 
-                        priority += exact_priority;
-                    else if (fnargst->member(i) != ANY && argst->member(i)->coerces_to(fnargst->member(i))) 
+                for (u32 i = 0; i < argst->count(); i++) {
+                    if (argst->member(i) == fnargst->member(i)) priority += exact_priority;
+                    else if (fnargst->member(i) != ANY && argst->member(i)->coerces_to(fnargst->member(i)))
                         priority += coerced_priority;
                     else if (fnargst->member(i) != ANY) // implies argst[i] cannot coerce to desired type, incompatible
                         goto end;
@@ -1568,11 +1559,13 @@ namespace basil {
             }
             if (ftypes.size() > 1) {
                 i64 max = 0;
-                for (const auto& p : ftypes) if (p.second > max) max = p.second;
+                for (const auto& p : ftypes)
+                    if (p.second > max) max = p.second;
                 set<const FunctionType*> to_remove;
-                for (const auto& p : ftypes) if (p.second < max) to_remove.insert(p.first);
+                for (const auto& p : ftypes)
+                    if (p.second < max) to_remove.insert(p.first);
                 for (const FunctionType* t : to_remove) ftypes.erase(t);
-                
+
                 if (ftypes.size() > 1) {
                     err(function.loc(), "Call to '", function, "' is ambiguous; multiple overloads match arguments ",
                         args.type(), ".");
@@ -1588,8 +1581,7 @@ namespace basil {
                 err(function.loc(), "Cannot call non-function value '", function, "'.");
                 return error();
             }
-        }
-        else if (!function.is_function()) {
+        } else if (!function.is_function()) {
             err(function.loc(), "Cannot call non-function value '", function, "'.");
             return error();
         }
@@ -1598,9 +1590,9 @@ namespace basil {
             return error();
         }
 
-        const FunctionType* ft = function.is_runtime() ? 
-            ((const FunctionType*)((const RuntimeType*)function.type())->base()) 
-            : (const FunctionType*)function.type();
+        const FunctionType* ft = function.is_runtime()
+                                     ? ((const FunctionType*)((const RuntimeType*)function.type())->base())
+                                     : (const FunctionType*)function.type();
         const ProductType* argst = (const ProductType*)ft->arg();
 
         if (args.get_product().size() != argst->count()) {
@@ -1610,20 +1602,19 @@ namespace basil {
         }
 
         bool has_runtime = false;
-        for (u32 i = 0; i < argst->count(); i ++) {
+        for (u32 i = 0; i < argst->count(); i++) {
             if (args.get_product()[i].is_runtime()) {
                 has_runtime = true;
                 break;
             }
         }
-        
+
         if (function.is_runtime()) has_runtime = true;
         if (function.is_function()) {
             FunctionValue& fn = function.get_function();
             if (fn.is_builtin()) {
                 if (fn.get_builtin().runtime_only()) has_runtime = true;
-            }
-            else {
+            } else {
                 if (ft->ret()->kind() == KIND_RUNTIME) has_runtime = true;
                 if (!fn.found_calls()) {
                     set<const FunctionValue*> visited;
@@ -1636,9 +1627,10 @@ namespace basil {
         const ProductType* rtargst = argst;
         if (has_runtime) {
             vector<const Type*> argts;
-            for (u32 i = 0; i < argst->count(); i ++) {
+            for (u32 i = 0; i < argst->count(); i++) {
                 if (argst->member(i)->kind() != KIND_RUNTIME) argts.push(find<RuntimeType>(argst->member(i)));
-                else argts.push(argst->member(i));
+                else
+                    argts.push(argst->member(i));
             }
             rtargst = (const ProductType*)find<ProductType>(argts);
         }
@@ -1652,9 +1644,10 @@ namespace basil {
                     ": expected '", rtargst->member(i), "', given '", argt, "'.");
                 return error();
             }
-            if (argt != rtargst->member(i)) args_copy.get_product()[i] = cast(args.get_product()[i], rtargst->member(i));
+            if (argt != rtargst->member(i))
+                args_copy.get_product()[i] = cast(args.get_product()[i], rtargst->member(i));
         }
-        for (u32 i = 0; i < args_copy.get_product().size(); i ++) {
+        for (u32 i = 0; i < args_copy.get_product().size(); i++) {
             if (args_copy.get_product()[i].is_error()) return error();
         }
 
@@ -1671,10 +1664,9 @@ namespace basil {
 
         FunctionValue& fn = function.get_function();
         if (fn.is_builtin()) {
-            if (has_runtime && fn.get_builtin().should_lower()) 
+            if (has_runtime && fn.get_builtin().should_lower())
                 for (Value& v : args_copy.get_product()) v = lower(v);
-            return has_runtime ? fn.get_builtin().compile(env, args_copy) 
-                : fn.get_builtin().eval(env, args_copy);
+            return has_runtime ? fn.get_builtin().compile(env, args_copy) : fn.get_builtin().eval(env, args_copy);
         } else {
             vector<ASTNode*> rtargs;
             ref<Env> fnenv = fn.get_env();
@@ -1695,8 +1687,7 @@ namespace basil {
                         ASTNode* n = v.get_runtime();
                         n->inc();
                         rtargs.push(n);
-                    }
-                    else {
+                    } else {
                         Def* def = fnenv->find(argname);
                         bindings[argname] = def->value;
                         def->value = args_copy.get_product()[i];
@@ -1711,8 +1702,7 @@ namespace basil {
                 }
                 if (!body) return error();
                 return new ASTCall(callable.loc(), body, rtargs);
-            }
-            else {
+            } else {
                 Value result = eval(fnenv, fn.body());
                 for (auto& p : bindings) fnenv->find(p.first)->value = p.second;
                 return result;

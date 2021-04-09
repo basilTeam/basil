@@ -8,7 +8,7 @@
 
 namespace basil {
   Value parse(TokenView& view, u32 indent);
-  Value parse_line(TokenView& view, u32 indent, 
+  void parse_line(vector<Value>& terms, TokenView& view, u32 indent, 
     bool consume_line = true);
 }
 

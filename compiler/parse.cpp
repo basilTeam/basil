@@ -53,12 +53,12 @@ namespace basil {
         }
     }
 
-    void parse_enclosed(TokenView& view, vector<Value>& terms, TokenType terminator, u32 indent) {
+    SourceLocation parse_enclosed(TokenView& view, vector<Value>& terms, TokenType terminator, u32 indent) {
         vector<Value> tuple_elements;
         bool errored = false;
         while (view.peek().type != terminator) {
             while (view.peek().type == T_NEWLINE) view.read();
-            if (!view.peek() && out_of_input(view)) return;
+            if (!view.peek() && out_of_input(view)) return NO_LOCATION;
             if (view.peek().type == terminator) break;
             terms.push(parse(view, indent));
             if (view.peek().type == T_COMMA) {
@@ -72,6 +72,7 @@ namespace basil {
                 view.read();
             }
         }
+        SourceLocation result = view.peek();
         view.read();
         if (tuple_elements.size() > 0) {
             tuple_elements.push(list_of(terms));
@@ -79,11 +80,12 @@ namespace basil {
             terms.push(Value("tuple-of"));
             for (const Value& v : tuple_elements) terms.push(v);
         }
+        return result;
     }
 
     void parse_block(TokenView& view, vector<Value>& terms, u32 prev_indent, u32 indent) {
         while (view.peek().column > prev_indent) {
-            if (view.peek().type != T_NEWLINE) terms.push(parse_line(view, indent, false));
+            if (view.peek().type != T_NEWLINE) parse_line(terms, view, indent, false);
             if (view.peek().type == T_NEWLINE) {
                 if (view.peek().column <= prev_indent && view.repl()) {
                     view.read();
@@ -93,22 +95,18 @@ namespace basil {
             }
             if (!view.peek() && (!view.repl() || out_of_input(view))) return;
         }
-        if (view.peek().type == T_QUOTE && view.peek().column == prev_indent) { // continuation
-            u32 new_indent = view.peek().column;
-            parse_line(view, new_indent, true, terms);
-        }
     }
 
     Value apply_op(TokenView& view, Value lhs, Value rhs, TokenType op) {
         switch (op) {
             case T_COLON: {
                 Value v = list_of(Value("annotate"), lhs, rhs);
-                v.set_location(lhs.loc());
+                v.set_location(span(lhs.loc(), rhs.loc()));
                 return v;
             }
             case T_DOT: {
                 Value v = list_of(Value("at", SYMBOL), lhs, list_of(Value("quote", SYMBOL), rhs));
-                v.set_location(lhs.loc());
+                v.set_location(span(lhs.loc(), rhs.loc()));
                 return v;
             }
             default:
@@ -153,68 +151,72 @@ namespace basil {
             }
             case T_PLUS: {
                 view.read();
-                v = list_of(Value("+"), 0, parse_primary(view, indent));
-                v.set_location(first);
+                Value operand = parse_primary(view, indent);
+                v = list_of(Value("+"), 0, operand);
+                v.set_location(span(first, operand.loc()));
                 break;
             }
             case T_MINUS: {
                 view.read();
-                v = list_of(Value("-"), 0, parse_primary(view, indent));
-                v.set_location(first);
+                Value operand = parse_primary(view, indent);
+                v = list_of(Value("-"), 0, operand);
+                v.set_location(span(first, operand.loc()));
                 break;
             }
             case T_QUOTE: {
                 view.read();
-                v = list_of(Value("quote"), parse_primary(view, indent));
-                v.set_location(first);
+                Value operand = parse_primary(view, indent);
+                v = list_of(Value("quote"), operand);
+                v.set_location(span(first, operand.loc()));
                 break;
             }
             case T_COEFF: {
                 i64 i = parse_int(view.read().value);
-                v = list_of(Value("*"), i, parse_primary(view, indent));
-                v.set_location(first);
+                Value operand = parse_primary(view, indent);
+                v = list_of(Value("*"), i, operand);
+                v.set_location(span(first, operand.loc()));
                 break;
             }
             case T_LPAREN: {
                 view.read();
                 vector<Value> terms;
-                parse_enclosed(view, terms, T_RPAREN, indent);
+                auto end = parse_enclosed(view, terms, T_RPAREN, indent);
                 for (const Value& v : terms)
                     if (v.is_error()) return error();
                 v = list_of(terms);
-                v.set_location(first);
+                v.set_location(span(first, end));
                 break;
             }
             case T_LBRACK: {
                 view.read();
                 vector<Value> terms;
                 terms.push(Value("list-of"));
-                parse_enclosed(view, terms, T_RBRACK, indent);
+                auto end = parse_enclosed(view, terms, T_RBRACK, indent);
                 for (const Value& v : terms)
                     if (v.is_error()) return error();
                 v = list_of(terms);
-                v.set_location(first);
+                v.set_location(span(first, end));
                 break;
             }
             case T_LBRACE: {
                 view.read();
                 vector<Value> terms;
                 terms.push(Value("set-of"));
-                parse_enclosed(view, terms, T_RBRACE, indent);
+                auto end = parse_enclosed(view, terms, T_RBRACE, indent);
                 for (const Value& v : terms)
                     if (v.is_error()) return error();
                 v = list_of(terms);
-                v.set_location(first);
+                v.set_location(span(first, end));
                 break;
             }
             case T_PIPE: {
                 view.read();
                 vector<Value> terms;
-                parse_enclosed(view, terms, T_PIPE, indent);
+                auto end = parse_enclosed(view, terms, T_PIPE, indent);
                 for (const Value& v : terms)
                     if (v.is_error()) return error();
                 v = cons(Value("splice"), list_of(terms));
-                v.set_location(first);
+                v.set_location(span(first, end));
                 break;
             }
             default:
@@ -226,12 +228,12 @@ namespace basil {
             view.read();
             vector<Value> terms;
             terms.push(Value("list-of"));
-            parse_enclosed(view, terms, T_RBRACK, indent);
+            auto end = parse_enclosed(view, terms, T_RBRACK, indent);
             for (const Value& v : terms)
                 if (v.is_error()) return error();
             Value indices = terms.size() == 2 ? terms[1] : list_of(terms);
             v = list_of(Value("at", SYMBOL), v, indices);
-            v.set_location(first);
+            v.set_location(span(first, end));
         }
         return v;
     }
@@ -254,11 +256,12 @@ namespace basil {
             if (view.peek().type == T_NEWLINE) {
                 view.read();
                 if (!view.peek() && (!view.repl() || out_of_input(view))) return;
-                if (view.peek().column > indent) parse_block(view, terms, indent, view.peek().column);
-                else if (view.peek().type == T_QUOTE && view.peek().column == indent) { // continuation
-                    u32 new_indent = view.peek().column;
-                    parse_line(view, new_indent, true, terms);
-                } else if (!consume_line)
+                if (view.peek().column > indent) {
+                    vector<Value> body;
+                    parse_block(view, body, indent, view.peek().column);
+                    if (terms.size() > 0) terms.back() = cons(terms.back(), list_of(body));
+                }
+                else if (!consume_line)
                     view.rewind();
 
                 return;
@@ -268,17 +271,18 @@ namespace basil {
         }
     }
 
-    Value parse_line(TokenView& view, u32 indent, bool consume_line) {
+    void parse_line(vector<Value>& outer_terms, TokenView& view, u32 indent, bool consume_line) {
         SourceLocation first = view.peek();
         vector<Value> terms;
         if (view.peek().type == T_NEWLINE) {
             if (consume_line) view.read();
-            return empty();
         }
         parse_line(view, indent, consume_line, terms);
-
-        Value v = list_of(terms);
-        v.set_location(first);
-        return v;
+        // Value line = terms.size() == 1 ? terms[0] : list_of(terms);
+        // if (!line.is_void()) {
+        //     line.set_location(span(terms.front().loc(), terms.back().loc()));
+        //     outer_terms.push(line);
+        // }
+        for (const Value& v : terms) outer_terms.push(v);
     }
 } // namespace basil

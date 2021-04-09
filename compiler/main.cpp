@@ -12,8 +12,8 @@ void print_banner() {
 	println("");
 	println("┌────────────────────────────────────────┐");
 	println("│                                        │");
-	println("│          ", BOLDGREEN, R"(𝐵𝑎𝑠𝑖𝑙)",
-		RESET, " — version 0.1      │");
+	println("│          ", BOLDGREEN, R"(Basil)",
+		RESET, " — version 0.1           │");
 	println("│                                        │");
 	println("└────────────────────────────────────────┘");
 	println(RESET);
@@ -84,13 +84,20 @@ int main(int argc, char** argv) {
 		Source src;
 
 		ref<Env> root = create_root_env();
-		root->def("$help", Value(root, REPL_HELP), 0);
-		root->def("$quit", Value(root, REPL_QUIT), 0);
-		root->def("$print-tokens", Value(root, PRINT_TOKENS), 1);
-		root->def("$print-parse", Value(root, PRINT_PARSE), 1);
-		root->def("$print-ast", Value(root, PRINT_AST), 1);
-		root->def("$print-ir", Value(root, PRINT_IR), 1);
-		root->def("$print-asm", Value(root, PRINT_ASM), 1);
+		root->func("$quit", Proto::of("$quit"),
+			Value(root, REPL_QUIT), 0);
+		root->func("$help", Proto::of("$help"),
+			Value(root, REPL_HELP), 0);
+		root->func("$print-tokens", Proto::of("$print-tokens", ARG_VARIABLE),
+			Value(root, PRINT_TOKENS), 0);
+		root->func("$print-parse", Proto::of("$print-parse", ARG_VARIABLE),
+			Value(root, PRINT_PARSE), 0);
+		root->func("$print-ast", Proto::of("$print-ast", ARG_VARIABLE),
+			Value(root, PRINT_AST), 0);
+		root->func("$print-ir", Proto::of("$print-ir", ARG_VARIABLE),
+			Value(root, PRINT_IR), 0);
+		root->func("$print-asm", Proto::of("$print-asm", ARG_VARIABLE),
+			Value(root, PRINT_ASM), 0);
 		ref<Env> global = newref<Env>(root);
 		Function main_fn("main");
 
@@ -835,11 +842,16 @@ int intro() {
 		INTRO_SET_SECTION(find<FunctionType>(find<ProductType>(INT), VOID), intro_set_section, nullptr);
 
 	ref<Env> root = create_root_env();
-	root->def("$quit", Value(root, REPL_QUIT), 0);
-	root->def("$help", Value(root, INTRO_HELP), 0);
-	root->def("$contents", Value(root, INTRO_CONTENTS), 0);
-	root->def("$start", Value(root, INTRO_START), 0);
-	root->def("$section", Value(root, INTRO_SET_SECTION), 1);
+	root->func("$quit", Proto::of("$quit"), 
+		Value(root, REPL_QUIT), 0);
+	root->func("$help", Proto::of("$help"), 
+		Value(root, INTRO_HELP), 0);
+	root->func("$contents", Proto::of("$contents"), 
+		Value(root, INTRO_CONTENTS), 0);
+	root->func("$start", Proto::of("$start"), 
+		Value(root, INTRO_START), 0);
+	root->func("$section", Proto::of("$section", ARG_VARIABLE),
+		Value(root, INTRO_SET_SECTION), 0);
 
 	intro_help(root, Value(VOID));
 

@@ -1,83 +1,123 @@
 #include "env.h"
 
 namespace basil {
-  Def::Def(bool is_macro_in, bool is_procedure_in, bool is_infix_in, 
-    u8 arity_in, u8 precedence_in):
-    Def(Value(), is_macro_in, is_procedure_in, is_infix_in, 
-      arity_in, precedence_in) {}
 
-  Def::Def(Value value_in, bool is_macro_in, bool is_procedure_in,
-    bool is_infix_in, u8 arity_in, u8 precedence_in):
-    value(value_in), is_macro(is_macro_in), 
-    is_proc(is_procedure_in), is_infix(is_infix_in),
-    arity(arity_in), precedence(precedence_in) {}
+  // Arg
+
+  bool Arg::matches(const Value& term) const {
+    if (type == ARG_KEYWORD) return term.is_symbol() && term.get_symbol() == name;
+    else return true;
+  }
+
+  // Proto
+
+  const Proto Proto::VARIABLE;
+
+  Proto::Proto() {}
+
+  Proto::Proto(const vector<Arg>& args) {
+    overloads.push(args);
+  }
+
+  void Proto::add_arg(vector<Arg>& proto, const ArgType& arg) {
+    proto.push({ arg, 0 }); // name is irrelevant so we pick 0
+  }
+
+  void Proto::add_arg(vector<Arg>& proto, const string& arg) {
+    proto.push({ ARG_VARIABLE, symbol_value(arg) });
+  }
+
+  void Proto::add_args(vector<Arg>& proto) {}
+
+  bool args_equal(const vector<Arg>& a, const vector<Arg>& b) {
+    if (a.size() != b.size()) return false;
+    for (u32 i = 0; i < a.size(); i ++) {
+      if (a[i].type != b[i].type) return false;
+      if (a[i].name != b[i].name) return false;
+    }
+    return true;
+  }
+
+  void Proto::overload(const Proto& other) {
+    for (const vector<Arg>& v : other.overloads) {
+      bool duplicate = false;
+      for (const vector<Arg>& w : other.overloads) {
+        if (args_equal(v, w)) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate) overloads.push(v);
+    }
+  }
+
+  // Def
+
+  Def::Def():
+    Def(Proto(vector<Arg>()), Value(VOID), false, 0) {}
+
+  Def::Def(const Proto& proto_in, bool is_macro_in, u8 precedence_in):
+    Def(proto_in, Value(VOID), is_macro_in, precedence_in) {}
+
+  Def::Def(const Proto& proto_in, const Value& value_in, bool is_macro_in, u8 precedence_in):
+    proto(proto_in), value(value_in), is_macro(is_macro_in), precedence(precedence_in) {}
 
   bool Def::is_procedure() const {
-    return is_proc && !is_macro;
+    return !is_macro && proto.overloads.size() > 0;
   }
 
   bool Def::is_variable() const {
-    return !is_proc && !is_macro;
+    return !is_macro && proto.overloads.size() == 0;
   }
 
   bool Def::is_macro_procedure() const {
-    return is_proc && is_macro;
+    return is_macro && proto.overloads.size() > 0;
   }
   
   bool Def::is_macro_variable() const {
-    return !is_proc && is_macro;
+    return is_macro && proto.overloads.size() == 0;
+  }
+  
+  bool Def::is_infix() const {
+    if (proto.overloads.size() == 0) return false;
+    for (const vector<Arg>& v : proto.overloads)
+      if (v.size() == 0 || v[0].type == ARG_KEYWORD) return false;
+    return true;
   }
 
   Env::Env(const ref<Env>& parent):
     _parent(parent), _runtime(false) {}
 
-  void Env::def(const string& name) {
-    _defs[name] = Def(false, false, false);
+  void Env::var(const string& name) {
+    _defs[name] = Def(Proto::VARIABLE, false, 0);
   }
 
-  void Env::def_macro(const string& name) {
-    _defs[name] = Def(true, false, false);
+  void Env::func(const string& name, const Proto& proto, u8 precedence) {
+    _defs[name] = Def(proto, false, precedence);
   }
 
-  void Env::def(const string& name, u8 arity) {
-    _defs[name] = Def(false, true, false, arity);
+  void Env::var(const string& name, const Value& value) {
+    _defs[name] = Def(Proto::VARIABLE, value, false, 0);
   }
 
-  void Env::def_macro(const string& name, u8 arity) {
-    _defs[name] = Def(true, true, false, arity);
+  void Env::func(const string& name, const Proto& proto, const Value& value, u8 precedence) {
+    _defs[name] = Def(proto, value, false, precedence);
   }
 
-  void Env::def(const string& name, const Value& value) {
-    _defs[name] = Def(value, false, false, false);
+  void Env::alias(const string& name) {
+    _defs[name] = Def(Proto::VARIABLE, true, 0);
   }
 
-  void Env::def(const string& name, const Value& value, u8 arity) {
-    _defs[name] = Def(value, false, true, false, arity); 
+  void Env::macro(const string& name, const Proto& proto, u8 precedence) {
+    _defs[name] = Def(proto, true, precedence);
   }
 
-  void Env::def_macro(const string& name, const Value& value) {
-    _defs[name] = Def(value, true, false, false);
+  void Env::alias(const string& name, const Value& value) {
+    _defs[name] = Def(Proto::VARIABLE, value, true, 0);
   }
 
-  void Env::def_macro(const string& name, const Value& value, u8 arity) {
-    _defs[name] = Def(value, true, true, false, arity); 
-  }
-
-  void Env::infix(const string& name, u8 arity, u8 precedence) {
-    _defs[name] = Def(false, true, true, arity, precedence);
-  }
-
-  void Env::infix(const string& name, const Value& value, u8 arity, u8 precedence) {
-    _defs[name] = Def(value, false, true, true, arity, precedence);
-  }
-
-  void Env::infix_macro(const string& name, u8 arity, u8 precedence) {
-    _defs[name] = Def(true, true, true, arity, precedence);
-  }
-
-  void Env::infix_macro(const string& name, const Value& value, 
-    u8 arity, u8 precedence) {
-    _defs[name] = Def(value, true, true, true, arity, precedence);
+  void Env::macro(const string& name, const Proto& proto, const Value& value, u8 precedence) {
+    _defs[name] = Def(proto, value, true, precedence);
   }
 
   const Def* Env::find(const string& name) const {

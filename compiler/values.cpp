@@ -87,6 +87,10 @@ namespace basil {
             _data.rc = new MacroValue(env, b);
     }
 
+    Value::Value(ref<Env> env, const Builtin& b, const string& name) : Value(env, b) {
+        set_name(name);
+    }
+
     Value::Value(FunctionValue* f, const Type* ftype) : _type(ftype) {
         _data.rc = f;
     }
@@ -116,7 +120,7 @@ namespace basil {
         if (_type->kind() & GC_KIND_FLAG) _data.rc->dec();
     }
 
-    Value::Value(const Value& other) : _type(other._type), _loc(other._loc) {
+    Value::Value(const Value& other) : _type(other._type), _loc(other._loc), _name(other._name) {
         _data.u = other._data.u; // copy over raw data
         if (_type->kind() & GC_KIND_FLAG) _data.rc->inc();
     }
@@ -126,6 +130,7 @@ namespace basil {
         if (_type->kind() & GC_KIND_FLAG) _data.rc->dec();
         _type = other._type;
         _loc = other._loc;
+        _name = other._name;
         _data.u = other._data.u; // copy over raw data
         return *this;
     }
@@ -347,7 +352,8 @@ namespace basil {
     }
 
     void Value::format(stream& io) const {
-        if (is_void()) write(io, "()");
+        if (_name != -1) write(io, symbol_for(_name));
+        else if (is_void()) write(io, "()");
         else if (is_error())
             write(io, "error");
         else if (is_int())
@@ -581,55 +587,96 @@ namespace basil {
             vector<const Value*> vals;
             while (i) vals.push(&i->head()), i = i->tail().is_void() ? nullptr : &i->tail().get_list();
             for (i64 i = i64(vals.size()) - 1; i >= 0; i --) l = new ListValue(vals[i]->clone(), l ? l : empty());
-            return Value(l);
+            Value result = Value(l);
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
         }
-        else if (is_string())
-            return Value(get_string(), STRING);
-        else if (is_named())
-            return Value(new NamedValue(get_named().get().clone()), type());
-        else if (is_sum())
-            return Value(new SumValue(get_sum().value().clone()), type());
+        else if (is_string()) {
+            Value result =  Value(get_string(), STRING);
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
+        }
+        else if (is_named()) {
+            Value result = Value(new NamedValue(get_named().get().clone()), type());
+            result.set_location(_loc);
+            return result;
+        }
+        else if (is_sum()) {
+            Value result = Value(new SumValue(get_sum().value().clone()), type());
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
+        }
         else if (is_intersect()) {
             map<const Type*, Value> values;
             for (const auto& p : get_intersect()) values.put(p.first, p.second.clone());
-            return Value(new IntersectValue(values), type());
+            Value result = Value(new IntersectValue(values), type());
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
         } else if (is_product()) {
             vector<Value> values;
             for (const Value& v : get_product()) values.push(v.clone());
-            return Value(new ProductValue(values));
+            Value result = Value(new ProductValue(values));
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
         } else if (is_array()) {
             vector<Value> values;
             for (const Value& v : get_array()) values.push(v.clone());
-            return Value(new ProductValue(values));
+            Value result = Value(new ArrayValue(values));
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
         } else if (is_dict()) {
             map<Value, Value> entries;
             for (const auto& p : get_dict()) entries.put(p.first.clone(), p.second.clone());
-            return Value(new DictValue(entries));
+            Value result = Value(new DictValue(entries));
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
         } else if (is_function()) {
             if (get_function().is_builtin()) {
-                return Value(new FunctionValue(get_function().get_env()->clone(), get_function().get_builtin(),
+                Value result = Value(new FunctionValue(get_function().get_env()->clone(), get_function().get_builtin(),
                                                get_function().name()),
                              type());
+                result.set_location(_loc);
+                result._name = _name;
+                return result;
             } else {
-                return Value(new FunctionValue(get_function().get_env()->clone(), get_function().args(),
+                Value result = Value(new FunctionValue(get_function().get_env()->clone(), get_function().args(),
                                                get_function().body().clone()),
                              type());
+                result.set_location(_loc);
+                result._name = _name;
+                return result;
             }
         } else if (is_alias())
             return Value(new AliasValue(get_alias().value()));
         else if (is_macro()) {
             if (get_macro().is_builtin()) {
-                return Value(new MacroValue(get_macro().get_env()->clone(), get_macro().get_builtin()));
+                Value result = Value(new MacroValue(get_macro().get_env()->clone(), get_macro().get_builtin()));
+                result.set_location(_loc);
+                result._name = _name;
+                return result;
             } else {
-                return Value(
+                Value result = Value(
                     new MacroValue(get_macro().get_env()->clone(), get_macro().args(), get_macro().body().clone()));
+                result.set_location(_loc);
+                result._name = _name;
+                return result;
             }
         } else if (is_runtime()) {
             // todo: ast cloning
         } else if (is_module()) {
             map<u64, Value> members;
             for (auto& p : get_module().entries()) members[p.first] = p.second.clone();
-            return new ModuleValue(members);
+            Value result = new ModuleValue(members);
+            result.set_location(_loc);
+            result._name = _name;
+            return result;
         }
         return *this;
     }
@@ -640,6 +687,10 @@ namespace basil {
 
     void Value::set_location(SourceLocation loc) {
         _loc = loc;
+    }
+
+    void Value::set_name(const string& name) {
+        _name = symbol_value(name);
     }
 
     SourceLocation Value::loc() const {
@@ -1525,7 +1576,7 @@ namespace basil {
         }
     }
 
-    Value call(ref<Env> env, Value& callable, const Value& args) {
+    Value call(ref<Env> env, Value& callable, const Value& args, SourceLocation callsite) {
         if (!args.is_product()) {
             err(args.loc(), "Expected product value for arguments.");
             return error();
@@ -1563,7 +1614,8 @@ namespace basil {
             }
 
             if (ftypes.size() == 0) {
-                err(function.loc(), "No overload of '", function, "' matches argument types ", args.type(), ".");
+                err(function.loc(), "No overload of '", function, "' matches argument type", 
+                    args.get_product().size() == 1 ? " " : "s ", commalist(Value(args.type(), TYPE), true), ".");
                 return error();
             }
             if (ftypes.size() > 1) {
@@ -1673,8 +1725,10 @@ namespace basil {
         if (fn.is_builtin()) {
             if (has_runtime && fn.get_builtin().should_lower()) 
                 for (Value& v : args_copy.get_product()) v = lower(v);
-            return has_runtime ? fn.get_builtin().compile(env, args_copy) 
+            Value result = has_runtime ? fn.get_builtin().compile(env, args_copy) 
                 : fn.get_builtin().eval(env, args_copy);
+            result.set_location(callsite);
+            return result;
         } else {
             vector<ASTNode*> rtargs;
             ref<Env> fnenv = fn.get_env();
@@ -1710,11 +1764,12 @@ namespace basil {
                     body = instantiate(function.loc(), fn, argst);
                 }
                 if (!body) return error();
-                return new ASTCall(callable.loc(), body, rtargs);
+                return new ASTCall(callsite, body, rtargs);
             }
             else {
                 Value result = eval(fnenv, fn.body());
                 for (auto& p : bindings) fnenv->find(p.first)->value = p.second;
+                result.set_location(callsite);
                 return result;
             }
         }

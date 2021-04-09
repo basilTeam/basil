@@ -61,8 +61,7 @@ namespace basil {
 		TokenView end = view;
 		while (end) end.read();
 		while (view.peek()) {
-			Value line = parse_line(view, view.peek().column);
-			if (!line.is_void()) results.push(line);
+			parse_line(results, view, view.peek().column);
 		}
 		if (_print_tokens) {
 			print(BOLDYELLOW);
@@ -71,7 +70,7 @@ namespace basil {
 		}
 		if (_print_parsed) {
 			print(BOLDGREEN);
-			for (const Value& v : results) println(v);
+			for (const Value& v : results) print(v, " ");
 			println(RESET);
 		}
 		return cons(string("do"), list_of(results));

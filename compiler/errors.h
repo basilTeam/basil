@@ -9,16 +9,22 @@
 namespace basil {
   class Token;
   class Source;
+  class Value;
 
   struct SourceLocation {
-    u32 line;
-    u16 column, length;
+    u32 line_start, line_end;
+    u16 column_start, column_end;
 
     SourceLocation();
-    SourceLocation(u32 line_in, u16 column_in, u16 length_in = 1);
+    SourceLocation(u32 line, u16 col);
+    SourceLocation(u32 line_start_in, u16 column_start_in, u32 line_end_in, u16 column_end_in);
     SourceLocation(const Token& token);
+
     // expand later with other types of objects
+    bool empty() const;
   };
+
+  SourceLocation span(SourceLocation a, SourceLocation b);
 
   // has length of zero, indicates position not in source
   extern const SourceLocation NO_LOCATION; 
@@ -30,6 +36,8 @@ namespace basil {
   void print_errors(stream& io, const Source& src);
 	void silence_errors();
 	void unsilence_errors();
+
+  string commalist(const Value& value, bool quote);
   
   template<typename ...Args>
   void err(SourceLocation loc, Args... args) {

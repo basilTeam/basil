@@ -41,6 +41,7 @@ namespace basil {
       RC* rc;
     } _data;
     SourceLocation _loc;
+    i32 _name = -1;
   public:
     Value();
     Value(const Type* type);
@@ -56,6 +57,7 @@ namespace basil {
     Value(ArrayValue* a, const Type* type);
     Value(DictValue* d);
     Value(ref<Env> env, const Builtin& b);
+    Value(ref<Env> env, const Builtin& b, const string& name);
     Value(FunctionValue* f, const Type* ftype);
     Value(AliasValue* f);
     Value(MacroValue* f);
@@ -150,6 +152,7 @@ namespace basil {
     Value clone() const;
 
     void set_location(SourceLocation loc);
+    void set_name(const string& name);
     SourceLocation loc() const;
   };
 
@@ -383,7 +386,7 @@ namespace basil {
   Value cast(const Value& val, const Type* type);
   Value annotate(const Value& val, const Value& type);
   Value as(const Value& v, const Value& t);
-  Value call(ref<Env> env, Value& function, const Value& arg);
+  Value call(ref<Env> env, Value& function, const Value& arg, SourceLocation callsite);
 	Value display(const Value& arg);
 	Value assign(ref<Env> env, const Value& dest, const Value& src);
 }

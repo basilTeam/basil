@@ -47,7 +47,8 @@ namespace basil {
         DISPLAY, READ_LINE, READ_WORD, READ_INT, LENGTH,
         AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, AT_MODULE, AT_DICT, AT_DICT_TYPE, AT_DICT_LIST,
         STRCAT, SUBSTR, ANNOTATE, TYPEOF, LIST_TYPE, OF_TYPE_MACRO,
-        OF_TYPE, ASSIGN, IF;
+        OF_TYPE, ASSIGN, IF,
+        EVAL, FLAG;
 
     static void init_builtins() {
         ADD_INT = {find<FunctionType>(find<ProductType>(INT, INT), INT),
@@ -311,6 +312,23 @@ namespace basil {
             },
             NO_AUTO_LOWER
         };
+        EVAL = {
+            find<FunctionType>(find<ProductType>(ANY), ANY),
+            [](ref<Env> env, const Value& args) -> Value {
+                Value term = ARG(0);
+                prep(env, term);
+                return eval(env, term);
+            },
+            nullptr
+        };
+        FLAG = {
+            find<FunctionType>(find<ProductType>(ANY), VOID),
+            [](ref<Env> env, const Value& args) -> Value { 
+                err(ARG(0).loc(), "Flagged!");
+                return empty();
+            },
+            nullptr
+        };
     }
 
     static bool inited = false;
@@ -324,33 +342,76 @@ namespace basil {
         return Value(new IntersectValue(m), find<IntersectType>(ts));
     }
 
+    template <typename... Args>
+    Value cases(ref<Env> env, const char* name, const Args... args) {
+        vector<Builtin*> vals = vector_of<Builtin*>(args...);
+        set<const Type*> ts;
+        map<const Type*, Value> m;
+        for (Builtin* v : vals) ts.insert(v->type()), m.put(v->type(), Value(env, *v));
+        for (auto& e : m) e.second.set_name(name);
+        Value result = Value(new IntersectValue(m), find<IntersectType>(ts));
+        result.set_name(name);
+        return result;
+    }
+
     void define_builtins(ref<Env> env) {
         if (!inited) inited = true, init_builtins();
-        env->infix("+", cases(env, &ADD_INT, &ADD_SYMBOL), 2, 20);
-        env->infix("-", Value(env, SUB), 2, 20);
-        env->infix("*", Value(env, MUL), 2, 40);
-        env->infix("/", Value(env, DIV), 2, 40);
-        env->infix("%", Value(env, REM), 2, 40);
-        env->infix("and", Value(env, AND), 2, 5);
-        env->infix("or", Value(env, OR), 2, 5);
-        env->infix("xor", Value(env, XOR), 2, 5);
-        env->def("not", Value(env, NOT), 1);
-        env->infix("==", Value(env, EQUALS), 2, 10);
-        env->infix("!=", Value(env, NOT_EQUALS), 2, 10);
-        env->infix("<", Value(env, LESS), 2, 10);
-        env->infix(">", Value(env, GREATER), 2, 10);
-        env->infix("<=", Value(env, LESS_EQUAL), 2, 10);
-        env->infix(">=", Value(env, GREATER_EQUAL), 2, 10);
-        env->infix("in", Value(env, DICT_IN), 2, 60);
+        env->func("+", Proto::overloaded(
+                Proto::of(ARG_VARIABLE, "+", ARG_VARIABLE), 
+                Proto::of("+", ARG_VARIABLE, ARG_VARIABLE)
+            ),
+            cases(env, "+", &ADD_INT, &ADD_SYMBOL), 20);
+        env->func("*", Proto::of(ARG_VARIABLE, "*", ARG_VARIABLE), 
+            Value(env, MUL, "*"), 40);
+        env->func("-", Proto::of(ARG_VARIABLE, "-", ARG_VARIABLE), 
+            Value(env, SUB, "-"), 20);
+        env->func("/", Proto::of(ARG_VARIABLE, "/", ARG_VARIABLE), 
+            Value(env, DIV, "/"), 40);
+        env->func("%", Proto::of(ARG_VARIABLE, "%", ARG_VARIABLE), 
+            Value(env, REM, "%"), 40);
+        env->func("and", Proto::of(ARG_VARIABLE, "and", ARG_VARIABLE), 
+            Value(env, AND, "and"), 5);
+        env->func("or", Proto::of(ARG_VARIABLE, "or", ARG_VARIABLE), 
+            Value(env, OR, "or"), 5);
+        env->func("xor", Proto::of(ARG_VARIABLE, "xor", ARG_VARIABLE), 
+            Value(env, XOR, "xor"), 5);
+        env->func("not", Proto::of("not", ARG_VARIABLE), 
+            Value(env, NOT, "not"), 0);
+        env->func("==", Proto::of(ARG_VARIABLE, "==", ARG_VARIABLE), 
+            Value(env, EQUALS, "=="), 10);
+        env->func("!=", Proto::of(ARG_VARIABLE, "!=", ARG_VARIABLE), 
+            Value(env, NOT_EQUALS, "!="), 10);
+        env->func("<", Proto::of(ARG_VARIABLE, "<", ARG_VARIABLE), 
+            Value(env, LESS, "<"), 10);
+        env->func(">", Proto::of(ARG_VARIABLE, ">", ARG_VARIABLE), 
+            Value(env, GREATER, ">"), 10);
+        env->func("<=", Proto::of(ARG_VARIABLE, "<=", ARG_VARIABLE), 
+            Value(env, LESS_EQUAL, "<="), 10);
+        env->func(">=", Proto::of(ARG_VARIABLE, ">=", ARG_VARIABLE), 
+            Value(env, GREATER_EQUAL, ">="), 10);
+        env->func("in", Proto::of(ARG_VARIABLE, "in", ARG_VARIABLE), 
+            Value(env, DICT_IN, "in"), 60);
         // env->infix("not", Value(env, DICT_NOT_IN), 2, 60);
-        env->def("display", Value(env, DISPLAY), 1);
-        env->infix("at", cases(env, &AT_INT, &AT_LIST, &AT_ARRAY_TYPE, &AT_DYNARRAY_TYPE, 
-            &AT_MODULE, &AT_DICT, &AT_DICT_TYPE, &AT_DICT_LIST), 2, 120);
-        env->def("annotate", Value(env, ANNOTATE), 2);
-        env->def("typeof", Value(env, TYPEOF), 1);
-        env->infix_macro("of", Value(env, OF_TYPE_MACRO), 2, 20);
-        env->def("#of", Value(env, OF_TYPE), 2);
-        env->infix("list", Value(env, LIST_TYPE), 1, 80);
-        env->infix("#?", Value(env, IF), 3, 2);
+        env->func("display", Proto::of("display", ARG_VARIABLE), 
+            Value(env, DISPLAY, "display"), 0);
+        env->func("at", Proto::of(ARG_VARIABLE, "at", ARG_VARIABLE), 
+            cases(env, "at", &AT_INT, &AT_LIST, &AT_ARRAY_TYPE, &AT_DYNARRAY_TYPE, 
+            &AT_MODULE, &AT_DICT, &AT_DICT_TYPE, &AT_DICT_LIST), 120);
+        env->func("annotate", Proto::of("annotate", ARG_VARIABLE, ARG_VARIABLE), 
+            Value(env, ANNOTATE, "annotate"), 0);
+        env->func("typeof", Proto::of("typeof", ARG_VARIABLE), 
+            Value(env, TYPEOF, "typeof"), 0);
+        env->macro("of", Proto::of(ARG_VARIABLE, "of", ARG_VARIABLE), 
+            Value(env, OF_TYPE_MACRO, "of"), 20);
+        env->func("#of", Proto::of("#of", ARG_VARIABLE, ARG_VARIABLE), 
+            Value(env, OF_TYPE, "of"), 0);
+        env->func("list", Proto::of(ARG_VARIABLE, "list"), 
+            Value(env, LIST_TYPE, "list"), 80);
+        env->func("#?", Proto::of(ARG_VARIABLE, "#?", ARG_VARIABLE, ARG_VARIABLE), 
+            Value(env, IF, "if"), 2);
+        env->func("eval", Proto::of("eval", ARG_VARIABLE), 
+            Value(env, EVAL, "eval"), 0);
+        env->func("$flag", Proto::of("$flag", ARG_VARIABLE), 
+            Value(env, FLAG, "flag"), 0);
     }
 } // namespace basil

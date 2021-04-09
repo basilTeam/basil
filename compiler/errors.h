@@ -2,11 +2,12 @@
 #define BASIL_ERRORS_H
 
 #include "util/defs.h"
-#include "util/str.h"
 #include "util/io.h"
 #include "util/slice.h"
+#include "util/str.h"
 
 namespace basil {
+<<<<<<< HEAD
   class Token;
   class Source;
   class Value;
@@ -48,5 +49,40 @@ namespace basil {
     basil::err(loc, message);
   }
 }
+=======
+    class Token;
+    class Source;
+
+    struct SourceLocation {
+        u32 line;
+        u16 column, length;
+
+        SourceLocation();
+        SourceLocation(u32 line_in, u16 column_in, u16 length_in = 1);
+        SourceLocation(const Token& token);
+        // expand later with other types of objects
+    };
+
+    // has length of zero, indicates position not in source
+    extern const SourceLocation NO_LOCATION;
+
+    void err(SourceLocation loc, const string& message);
+    u32 error_count();
+    void clear_errors();
+    void print_errors(stream& io);
+    void print_errors(stream& io, const Source& src);
+    void silence_errors();
+    void unsilence_errors();
+
+    template <typename... Args>
+    void err(SourceLocation loc, Args... args) {
+        buffer b;
+        write(b, args...);
+        string message;
+        while (b.peek()) message += b.read();
+        basil::err(loc, message);
+    }
+} // namespace basil
+>>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
 
 #endif

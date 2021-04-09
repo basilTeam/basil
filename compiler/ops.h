@@ -1,10 +1,10 @@
 #ifndef BASIL_OPS_H
 #define BASIL_OPS_H
 
-#include "util/defs.h"
-#include "util/vec.h"
 #include "ir.h"
 #include "jasmine/target.h"
+#include "util/defs.h"
+#include "util/vec.h"
 
 namespace basil {
     Architecture arch();
@@ -46,6 +46,6 @@ namespace basil {
     void pop(const Location& dest);
     void open_frame(u32 size);
     void close_frame(u32 size);
-}
+} // namespace basil
 
 #endif

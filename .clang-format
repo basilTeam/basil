@@ -1,6 +1,8 @@
 BasedOnStyle: LLVM
 IndentWidth: 4
 ColumnLimit: 120
+
+AllowAllArgumentsOnNextLine: true
 AllowAllParametersOfDeclarationOnNextLine: true
 AllowShortBlocksOnASingleLine: true
 AllowShortCaseLabelsOnASingleLine: true
@@ -8,6 +10,7 @@ AllowShortFunctionsOnASingleLine: Empty
 AllowShortIfStatementsOnASingleLine: Always
 AllowShortLoopsOnASingleLine: true
 AlwaysBreakTemplateDeclarations: Yes
+Cpp11BracedListStyle: false
 FixNamespaceComments: true
 IndentCaseLabels: true
 IndentPPDirectives: BeforeHash

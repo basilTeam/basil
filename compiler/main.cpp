@@ -9,7 +9,6 @@
 using namespace basil;
 
 void print_banner() {
-<<<<<<< HEAD
 	println("");
 	println("┌────────────────────────────────────────┐");
 	println("│                                        │");
@@ -18,15 +17,6 @@ void print_banner() {
 	println("│                                        │");
 	println("└────────────────────────────────────────┘");
 	println(RESET);
-=======
-    println("");
-    println("┌────────────────────────────────────────┐");
-    println("│                                        │");
-    println("│          ", BOLDGREEN, R"(𝐵𝑎𝑠𝑖𝑙)", RESET, " — version 0.1      │");
-    println("│                                        │");
-    println("└────────────────────────────────────────┘");
-    println(RESET);
->>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
 }
 
 static bool repl_done = false;
@@ -78,7 +68,6 @@ Value repl_help(ref<Env> env, const Value& args) {
 int intro();
 
 int main(int argc, char** argv) {
-<<<<<<< HEAD
 	Builtin REPL_HELP(find<FunctionType>(find<ProductType>(), VOID), repl_help, nullptr),
 		REPL_QUIT(find<FunctionType>(find<ProductType>(), VOID), repl_quit, nullptr),
 		PRINT_TOKENS(find<FunctionType>(find<ProductType>(BOOL), VOID), print_tokens, nullptr),
@@ -153,70 +142,6 @@ int main(int argc, char** argv) {
 	println(" - basil exec <code...>  => executes <code...>.");
 	println(" - basil build <file>    => compiles <file> to object.");
 	println("");
-=======
-    Builtin REPL_HELP(find<FunctionType>(find<ProductType>(), VOID), repl_help, nullptr),
-        REPL_QUIT(find<FunctionType>(find<ProductType>(), VOID), repl_quit, nullptr),
-        PRINT_TOKENS(find<FunctionType>(find<ProductType>(BOOL), VOID), print_tokens, nullptr),
-        PRINT_PARSE(find<FunctionType>(find<ProductType>(BOOL), VOID), print_parse, nullptr),
-        PRINT_AST(find<FunctionType>(find<ProductType>(BOOL), VOID), print_ast, nullptr),
-        PRINT_IR(find<FunctionType>(find<ProductType>(BOOL), VOID), print_ir, nullptr),
-        PRINT_ASM(find<FunctionType>(find<ProductType>(BOOL), VOID), print_asm, nullptr);
-
-    if (argc == 1) { // repl mode
-        print_banner();
-        println(BOLDGREEN, "Enter any Basil expression at the prompt, or '", RESET, "$help", BOLDGREEN,
-                "' for a list of commands!", RESET);
-        println("");
-        Source src;
-
-        ref<Env> root = create_root_env();
-        root->def("$help", Value(root, REPL_HELP), 0);
-        root->def("$quit", Value(root, REPL_QUIT), 0);
-        root->def("$print-tokens", Value(root, PRINT_TOKENS), 1);
-        root->def("$print-parse", Value(root, PRINT_PARSE), 1);
-        root->def("$print-ast", Value(root, PRINT_AST), 1);
-        root->def("$print-ir", Value(root, PRINT_IR), 1);
-        root->def("$print-asm", Value(root, PRINT_ASM), 1);
-        ref<Env> global = newref<Env>(root);
-        Function main_fn("main");
-
-        while (!repl_done) repl(global, src, main_fn), clear_errors();
-        return 0;
-    } else if (string(argv[1]) == "intro") {
-        return intro();
-    } else if (argc == 3 && string(argv[1]) == "run") {
-        Source src(argv[2]);
-        return run(src);
-    } else if (argc == 3 && string(argv[1]) == "build") {
-        Source src(argv[2]);
-        return build(src, argv[2]);
-    } else if (argc > 2 && string(argv[1]) == "exec") {
-        Source src;
-        string code;
-        for (int i = 2; i < argc; i++) {
-            code += argv[i];
-            code += ' ';
-        }
-        src.add_line(code);
-        return run(src);
-    } else if (string(argv[1]) != "help") {
-        Source src(argv[1]);
-        return run(src);
-    }
-
-    print_banner();
-
-    println(BOLDGREEN, "Welcome to the Basil programming language!", RESET);
-    println("");
-    println("Commands: ");
-    println(" - basil                 => starts REPL.");
-    println(" - basil <file>          => executes <file>.");
-    println(" - basil help            => prints usage information.");
-    println(" - basil intro           => runs interactive introduction.");
-    println(" - basil exec <code...>  => executes <code...>.");
-    println(" - basil build <file>    => compiles <file> to object.");
-    println("");
->>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
 }
 
 static bool running_intro = false;
@@ -952,7 +877,6 @@ Bye for now!
 }
 
 int intro() {
-<<<<<<< HEAD
 	srand(time(0));
 	init_intro_sections();
 	
@@ -1035,73 +959,4 @@ int intro() {
 	}
 
 	return 0;
-=======
-    srand(time(0));
-    init_intro_sections();
-
-    print_banner();
-    println(BOLDGREEN, "Welcome to the interactive Basil tour!", RESET);
-    println(BOLDGREEN, "Press Enter twice after entering a command to submit it.", RESET);
-
-    Source src;
-
-    Builtin REPL_QUIT(find<FunctionType>(find<ProductType>(), VOID), repl_quit, nullptr),
-        INTRO_HELP(find<FunctionType>(find<ProductType>(), VOID), intro_help, nullptr),
-        INTRO_CONTENTS(find<FunctionType>(find<ProductType>(), VOID), intro_contents, nullptr),
-        INTRO_START(find<FunctionType>(find<ProductType>(), VOID), intro_start, nullptr),
-        INTRO_SET_SECTION(find<FunctionType>(find<ProductType>(INT), VOID), intro_set_section, nullptr);
-
-    ref<Env> root = create_root_env();
-    root->def("$quit", Value(root, REPL_QUIT), 0);
-    root->def("$help", Value(root, INTRO_HELP), 0);
-    root->def("$contents", Value(root, INTRO_CONTENTS), 0);
-    root->def("$start", Value(root, INTRO_START), 0);
-    root->def("$section", Value(root, INTRO_SET_SECTION), 1);
-
-    intro_help(root, Value(VOID));
-
-    const char* congratulations[] = {"Awesome!", "Great!", "Nice!", "Cool!", "You did it!", "You got it!"};
-
-    while (!repl_done) {
-        ref<Env> global = newref<Env>(root);
-        Function main_fn("main");
-
-        bool is_running_intro = running_intro;
-        if (is_running_intro) {
-            const IntroStep& step = intro_sections[intro_section].steps[intro_section_index];
-            if (step.title) println(intro_section + 1, ". ", BOLDGREEN, step.title, RESET, '\n');
-            println(BOLDWHITE, step.text, RESET);
-            println(ITALICWHITE, step.instruction, RESET);
-        }
-
-        if (is_running_intro) {
-            bool correct = false;
-
-            while (!correct && !repl_done) {
-                Value result = repl(global, src, main_fn);
-
-                const IntroStep& step = intro_sections[intro_section].steps[intro_section_index];
-                if (result.is_runtime() && step.expected.is_runtime()) correct = result.type() == step.expected.type();
-                else
-                    correct = result == step.expected;
-
-                if (!correct)
-                    println(ITALICRED, "Expected '", step.expected, "', but given '", result, "'.", RESET, '\n');
-                else {
-                    println(ITALICWHITE, congratulations[rand() % 6], RESET);
-                    intro_section_index++;
-                    if (intro_section_index >= intro_sections[intro_section].steps.size())
-                        intro_section++, intro_section_index = 0;
-                    println("");
-                    usleep(1000000);
-                    println("⸻", "\n");
-                    if (intro_section >= intro_sections.size()) repl_done = true, print_intro_conclusion();
-                }
-            }
-        } else
-            repl(global, src, main_fn);
-    }
-
-    return 0;
->>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
 }

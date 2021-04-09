@@ -35,7 +35,6 @@ namespace basil {
 
     extern void define_builtins(ref<Env> env);
 
-<<<<<<< HEAD
     extern Builtin
         ADD_INT, ADD_SYMBOL, SUB, MUL, DIV, REM,
         AND, OR, XOR, NOT,
@@ -47,13 +46,5 @@ namespace basil {
         ASSIGN, IF,
         EVAL, FLAG;
 }
-=======
-    extern Builtin ADD_INT, ADD_SYMBOL, SUB, MUL, DIV, REM, AND, OR, XOR, NOT, EQUALS, NOT_EQUALS, LESS, GREATER,
-        LESS_EQUAL, GREATER_EQUAL, IS_EMPTY, HEAD, TAIL, CONS, DICT_PUT, DICT_IN, DICT_NOT_IN, DICT_REMOVE, DISPLAY,
-        READ_LINE, READ_WORD, READ_INT, LENGTH, AT_INT, AT_LIST, AT_ARRAY_TYPE, AT_DYNARRAY_TYPE, AT_DICT_TYPE,
-        AT_MODULE, AT_DICT, AT_DICT_LIST, STRCAT, SUBSTR, ANNOTATE, TYPEOF, TYPEDEF, LIST_TYPE, OF_TYPE_MACRO, OF_TYPE,
-        ASSIGN, IF;
-} // namespace basil
->>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
 
 #endif

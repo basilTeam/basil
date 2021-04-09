@@ -584,7 +584,6 @@ namespace basil {
             const ListValue* i = &get_list();
             vector<const Value*> vals;
             while (i) vals.push(&i->head()), i = i->tail().is_void() ? nullptr : &i->tail().get_list();
-<<<<<<< HEAD
             for (i64 i = i64(vals.size()) - 1; i >= 0; i --) l = new ListValue(vals[i]->clone(), l ? l : empty());
             Value result = Value(l);
             result.set_location(_loc);
@@ -608,16 +607,6 @@ namespace basil {
             result._name = _name;
             return result;
         }
-=======
-            for (i64 i = i64(vals.size()) - 1; i >= 0; i--) l = new ListValue(vals[i]->clone(), l ? l : empty());
-            return Value(l);
-        } else if (is_string())
-            return Value(get_string(), STRING);
-        else if (is_named())
-            return Value(new NamedValue(get_named().get().clone()), type());
-        else if (is_sum())
-            return Value(new SumValue(get_sum().value().clone()), type());
->>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
         else if (is_intersect()) {
             map<const Type*, Value> values;
             for (const auto& p : get_intersect()) values.put(p.first, p.second.clone());
@@ -1730,14 +1719,10 @@ namespace basil {
         if (fn.is_builtin()) {
             if (has_runtime && fn.get_builtin().should_lower())
                 for (Value& v : args_copy.get_product()) v = lower(v);
-<<<<<<< HEAD
             Value result = has_runtime ? fn.get_builtin().compile(env, args_copy) 
                 : fn.get_builtin().eval(env, args_copy);
             result.set_location(callsite);
             return result;
-=======
-            return has_runtime ? fn.get_builtin().compile(env, args_copy) : fn.get_builtin().eval(env, args_copy);
->>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
         } else {
             vector<ASTNode*> rtargs;
             ref<Env> fnenv = fn.get_env();
@@ -1772,14 +1757,9 @@ namespace basil {
                     body = instantiate(function.loc(), fn, argst);
                 }
                 if (!body) return error();
-<<<<<<< HEAD
                 return new ASTCall(callsite, body, rtargs);
             }
             else {
-=======
-                return new ASTCall(callable.loc(), body, rtargs);
-            } else {
->>>>>>> f840479bc314e660171a3eb91c404f37c4be4a33
                 Value result = eval(fnenv, fn.body());
                 for (auto& p : bindings) fnenv->find(p.first)->value = p.second;
                 result.set_location(callsite);

@@ -19,10 +19,12 @@ public:
     string();
     ~string();
     string(const string& other);
+    string(string&& other);
     string(const char* s);
     string(const const_slice<u8>& range);
     string(buffer& buf);
     string& operator=(const string& other);
+    string& operator=(string&& other);
 
     string& operator+=(u8 c);
     string& operator+=(char c);

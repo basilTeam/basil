@@ -74,11 +74,28 @@ ustring::ustring(const ustring& other) {
     copy(other.data, other._size);
 }
 
+ustring::ustring(ustring&& other):
+    data(other.data), _size(other._size), _count(other._count), _capacity(other._capacity) {
+    other._capacity = 0; // prevent destructor
+}
+
 ustring& ustring::operator=(const ustring& other) {
     if (this != &other) {
         free();
         init(other._capacity);
         copy(other.data, other._size);
+    }
+    return *this;
+}
+
+ustring& ustring::operator=(ustring&& other) {
+    if (this != &other) {
+        free();
+        _size = other._size;
+        _count = other._count;
+        _capacity = other._capacity;
+        data = other.data;
+        other._capacity = 0; // prevent destructor
     }
     return *this;
 }

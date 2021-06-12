@@ -27,11 +27,11 @@ namespace basil {
 
         // Returns whether this invokable has any prefix-style cases (<name> <value>*).
         // Non-const to permit caching.
-        virtual bool has_prefix_case();
+        virtual bool has_prefix_case() = 0;
 
         // Returns whether this invokable has any infix-style cases (<value> <name> <value>*).
         // Non-const to permit caching.
-        virtual bool has_infix_case();
+        virtual bool has_infix_case() = 0;
 
         // Resets this state machine to the starting state.
         virtual void reset() = 0;
@@ -47,7 +47,7 @@ namespace basil {
         //
         // This is a separate method from advance() to allow keywords to be checked before
         // their forms are inspected and they are potentially applied to nearby parameters.
-        virtual bool precheck_keyword(rc<Env> env, const Value& keyword) = 0;
+        virtual bool precheck_keyword(const Value& keyword) = 0;
 
         // This is similar to precheck_keyword, but for single terms instead of keywords.
         // It checks whether any child machine matches an ungrouped term, and if any do,
@@ -57,10 +57,10 @@ namespace basil {
         // should be lower priority than precheck_keyword, and called after it returns
         // false. The second difference is that a term cannot move a machine out of a
         // variadic parameter.
-        virtual bool precheck_term(rc<Env> env, const Value& term) = 0;
+        virtual bool precheck_term(const Value& term) = 0;
 
         // Moves the state machine forward by the provided value.
-        virtual void advance(rc<Env> env, const Value& value) = 0;
+        virtual void advance(const Value& value) = 0;
 
         // Returns true if the state machine cannot advance further.
         virtual bool is_finished() const = 0;
@@ -69,6 +69,11 @@ namespace basil {
         // Returns a none optional if the state machine isn't finished,
         // or no match was found.
         virtual optional<const Callable&> match() const = 0;
+
+        // Returns a copy of this state machine. Generally, this involves duplicating
+        // associated state, but storing constant information (like parameter lists) by
+        // reference.
+        virtual rc<StateMachine> clone() = 0;
     };
 
     // The type of a callback function used to dynamically resolve forms
@@ -95,6 +100,7 @@ namespace basil {
         PK_VARIADIC, // Parameter can bind to any number of terms.
         PK_KEYWORD, // Parameter matches only the corresponding symbol. Part of the function signature.
         PK_TERM, // Parameter can bind to a single ungrouped term.
+        PK_SELF, // Parameter can bind to any single term. Used to specifically denote the function name.
         NUM_PARAM_KINDS
     };
 
@@ -102,7 +108,6 @@ namespace basil {
     struct Param {
         Symbol name;
         ParamKind kind;
-        optional<ParamCallback> callback;
 
         // Returns whether this parameter matches the provided code value.
         bool matches(const Value& value);
@@ -111,14 +116,11 @@ namespace basil {
     // Since all variables and terms are the same, we use
     // these constants instead of constructing them.
     extern const Param P_VAR, // A variable parameter.
-                       P_TERM; // A term parameter.
+                       P_TERM, // A term parameter.
+                       P_SELF; // The self parameter.
 
     // Constructs a keyword parameter.
     Param p_keyword(Symbol name);
-
-    // Installs a callback function into the provided parameter and
-    // returns the new parameter.
-    Param p_add_callback(const Param& p, ParamCallback callback);
 
     // The form of all invokable terms. This includes both functions and macros.
     // Individual callables can either be infix or prefix. Prefix callables start
@@ -130,7 +132,7 @@ namespace basil {
     // a list of terms, the callback is applied to those terms in the current
     // environment, and the form it returns is used instead.
     struct Callable : public StateMachine {
-        vector<Param> parameters;
+        rc<vector<Param>> parameters;
         optional<FormCallback> callback;
 
         Callable(const vector<Param>& parameters, const optional<FormCallback>& callback);
@@ -138,11 +140,12 @@ namespace basil {
         bool has_prefix_case() override;
         bool has_infix_case() override;
         void reset() override;
-        bool precheck_keyword(rc<Env> env, const Value& keyword) override;
-        bool precheck_term(rc<Env> env, const Value& term)
-        void advance(rc<Env> env, const Value& value) override;
+        bool precheck_keyword(const Value& keyword) override;
+        bool precheck_term(const Value& term) override;
+        void advance(const Value& value) override;
         bool is_finished() const override;
         optional<const Callable&> match() const override;
+        rc<StateMachine> clone() override;
     private:
         // internal state used in the state machine
         u32 index;
@@ -160,13 +163,14 @@ namespace basil {
         bool has_prefix_case() override;
         bool has_infix_case() override;
         void reset() override;
-        bool precheck_keyword(rc<Env> env, const Value& keyword) override;
-        bool precheck_term(rc<Env> env, const Value& term)
-        void advance(rc<Env> env, const Value& value) override;
+        bool precheck_keyword(const Value& keyword) override;
+        bool precheck_term(const Value& term) override;
+        void advance(const Value& value) override;
         bool is_finished() const override;
         optional<const Callable&> match() const override;
-    private:
-        set<Symbol> mangled; // stores mangled forms of the different overloads to detect duplicates
+        rc<StateMachine> clone() override;
+        
+        rc<set<Symbol>> mangled; // stores mangled forms of the different overloads to detect duplicates
         optional<bool> has_prefix, has_infix;
 
         friend optional<rc<Form>> f_overloaded(i64, const vector<rc<Form>>&);
@@ -226,7 +230,7 @@ namespace basil {
     rc<Form> f_callable(i64 precedence, Associativity assoc, const vector<Param>& parameters);
     template<typename ...Args>
     rc<Form> f_callable(i64 precedence, Associativity assoc, Args... args) {
-        return f_callable(precedence, vector_of<Param>(args...));
+        return f_callable(precedence, assoc, vector_of<Param>(args...));
     }
 
     // Constructs a callable form from the provided parameter vector, and
@@ -236,7 +240,7 @@ namespace basil {
     rc<Form> f_callable(i64 precedence, Associativity assoc, FormCallback callback, const vector<Param>& parameters);
     template<typename ...Args>
     rc<Form> f_callable(i64 precedence, Associativity assoc, FormCallback callback, Args... args) {
-        return f_callable(precedence, vector_of<Param>(args...));
+        return f_callable(precedence, assoc, callback, vector_of<Param>(args...));
     }
 
     // Constructs a form for an overloaded term from the provided overload vector.
@@ -249,7 +253,7 @@ namespace basil {
     optional<rc<Form>> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Form>>& overloads);
     template<typename ...Args>
     optional<rc<Form>> f_overloaded(i64 precedence, Associativity assoc, Args... args) {
-        return f_overloaded(precedence, vector_of<rc<Form>>(args...));
+        return f_overloaded(precedence, assoc, vector_of<rc<Form>>(args...));
     }
 
     // Adds the provided 'addend' form to an existing overloaded form. 

@@ -40,7 +40,7 @@ namespace basil {
             u32 col_start : 12;
             u32 line_end : 20;
             u32 col_end : 12;
-    
+
             bool operator==(const Pos& other) const;
             bool operator!=(const Pos& other) const;
         };
@@ -69,6 +69,9 @@ namespace basil {
             // Returns the UTF-8 character currently pointed to by this View.
             // Returns the null character (U+0000) if pointing off the end of the referenced Source.
             rune peek() const;
+
+            // Returns the UTF-8 character n spaces ahead of this View. peek(0) is the same as peek().
+            rune peek(u32 n) const;
 
             // Returns the UTF-8 character currently pointed to by this View and advances past it.
             // If advancing would move the iterator off the end of the current line, this View

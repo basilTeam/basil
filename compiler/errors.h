@@ -15,6 +15,9 @@ namespace basil {
     // represented by a non-null second argument, the relevant code for each error will 
     // be highlighted.
     void print_errors(stream& io, rc<Source> src);
+
+    // Discards all errors.
+    void discard_errors();
     
     // Reports an error at the provided source position with a message constructed from 
     // the remaining arguments.

@@ -1,4 +1,5 @@
 #include "test.h"
+#include "driver.h"
 #include "parse.h"
 
 using namespace basil;
@@ -20,7 +21,7 @@ TEST(constants) {
     auto tokens = lex_all(view);
     TokenView tview(tokens);
 
-    Value a = parse(tview);
+    Value a = *parse(tview);
     ASSERT_EQUAL(error_count(), 0);
 
     ASSERT_EQUAL(a, v_int(a.pos, 1));
@@ -32,11 +33,11 @@ TEST(variables) {
     auto tokens = lex_all(view);
     TokenView tview(tokens);
 
-    Value a = parse(tview), 
-        b = parse(tview), 
-        c = parse(tview),
-        d = parse(tview), 
-        e = parse(tview);
+    Value a = *parse(tview), 
+        b = *parse(tview), 
+        c = *parse(tview),
+        d = *parse(tview), 
+        e = *parse(tview);
     ASSERT_EQUAL(error_count(), 0);
 
     ASSERT_EQUAL(a, v_symbol(a.pos, symbol_from("x")));
@@ -52,7 +53,7 @@ TEST(enclosing) {
     auto tokens = lex_all(view);
     TokenView tview(tokens);
 
-    Value a = parse(tview), b = parse(tview), c = parse(tview);
+    Value a = *parse(tview), b = *parse(tview), c = *parse(tview);
     ASSERT_EQUAL(error_count(), 0);
 
     ASSERT_EQUAL(a, v_void(a.pos)); // ()
@@ -67,11 +68,30 @@ TEST(array) {
     auto tokens = lex_all(view);
     TokenView tview(tokens);
 
-    Value a = parse(tview), b = parse(tview), c = parse(tview);
+    Value a = *parse(tview), b = *parse(tview), c = *parse(tview);
     ASSERT_EQUAL(error_count(), 0);
 
     ASSERT_EQUAL(a, v_list(a.pos, t_list(T_ANY), v_symbol(a.pos, symbol_from("array"))));
     ASSERT_EQUAL(b, v_list(b.pos, t_list(T_ANY), v_symbol(b.pos, symbol_from("array")), v_int(b.pos, 1)));
     ASSERT_EQUAL(c, v_list(c.pos, t_list(T_ANY), v_symbol(c.pos, symbol_from("array")),
         v_string(c.pos, "a"), v_symbol(c.pos, symbol_from("b")), v_symbol(c.pos, symbol_from("c"))));
+}
+
+TEST(indent) {
+    Source src = create_source(R"(
+    a:
+        b c:
+          d
+        e f g:
+            h i
+    j)");
+    Source::View view(src);
+    auto tokens = lex_all(view);
+    TokenView tview(tokens);
+
+    Value a = *parse(tview), b = *parse(tview);
+    ASSERT_NO_ERRORS(ref<Source>(src));
+
+    ASSERT_EQUAL(a, compile("(a b (c d) e f (g h i))", load_step, lex_step, parse_step));
+    ASSERT_EQUAL(b, v_symbol(b.pos, symbol_from("j")));
 }

@@ -12,6 +12,9 @@
 #include "errors.h"
 
 namespace basil {
+    // Forward declaration.
+    struct Builtin;
+
     struct String;
     struct List;
     struct Tuple;
@@ -20,6 +23,9 @@ namespace basil {
     struct Named;
     struct Struct;
     struct Dict;
+    struct Function;
+    struct Alias;
+    struct Macro;
 
     // Represents a compile-time value. Values have a few fundamental
     // properties. A value's type describes what kind of data it holds.
@@ -51,6 +57,12 @@ namespace basil {
             rc<Named> named;    // A named value.
             rc<Struct> str;     // A struct value.
             rc<Dict> dict;      // A dictionary value.
+            rc<Function> fn;    // A function value.
+            rc<Alias> alias;    // An alias value.
+            rc<Macro> macro;    // A macro value.
+
+            Symbol undefined_sym; // Not used in operations. Stores the variable name associated
+                                  // with an undefined value.
 
             Data(Kind kind);
             Data(Kind kind, const Data& other);
@@ -60,7 +72,9 @@ namespace basil {
         Value();
         ~Value();
         Value(const Value& other);
+        Value(Value&& other);
         Value& operator=(const Value& other);
+        Value& operator=(Value&& other);
 
         // Returns a hashcode for this value.
         u64 hash() const;
@@ -70,6 +84,8 @@ namespace basil {
 
         bool operator==(const Value& other) const;
         bool operator!=(const Value& other) const;
+
+        Value& with(rc<Form> form);
     private:
         // Constructs a value with the provided pos and type, but does not initialize
         // the data. Used within value-constructing functions internally, which
@@ -85,6 +101,7 @@ namespace basil {
         friend Value v_bool(Source::Pos, bool);
         friend Value v_void(Source::Pos);
         friend Value v_error(Source::Pos);
+        friend Value v_undefined(Source::Pos, Symbol, rc<Form>);
         friend Value v_string(Source::Pos, const ustring&);
         friend Value v_cons(Source::Pos, Type, const Value&, const Value&);
         friend Value v_list(Source::Pos, Type, const vector<Value>&);
@@ -95,6 +112,11 @@ namespace basil {
         friend Value v_struct(Source::Pos, Type, const map<Symbol, Value>&);
         friend Value v_dict(Source::Pos, Type, const map<Value, Value>&);
         friend Value v_tail(const Value& list);
+        friend Value v_func(const Builtin& builtin);
+        friend Value v_func(Source::Pos pos, Type type, rc<Env> env, const Value& body);
+        friend Value v_alias(Source::Pos pos, const Value& term);
+        friend Value v_macro(const Builtin& builtin);
+        friend Value v_macro(Source::Pos pos, Type type, rc<Env> env, const Value& body);
     };
 
     // Represents the associated data for a compile-time string.
@@ -154,6 +176,31 @@ namespace basil {
         Dict(const map<Value, Value>& elements);
     };
 
+    // Represents the associated data for a function.
+    struct Function {
+        optional<const Builtin&> builtin;
+        rc<Env> env;
+        Value body;
+
+        Function(optional<const Builtin&> builtin, rc<Env> env, const Value& body);
+    };
+
+    // Represents the associated data for an alias.
+    struct Alias {
+        Value term;
+
+        Alias(const Value& term);
+    };
+
+    // Represents the associated data for a macro.
+    struct Macro {
+        optional<const Builtin&> builtin;
+        rc<Env> env;
+        Value body;
+
+        Macro(optional<const Builtin&> builtin, rc<Env> env, const Value& body);
+    };
+
     // Constructs an integer value.
     Value v_int(Source::Pos pos, i64 i); 
 
@@ -188,6 +235,12 @@ namespace basil {
         err(pos, format<ustring>(args...));
         return v_error(pos);
     }
+
+    // Constructs an undefined value with the provided form and variable name.
+    //
+    // Undefined values are used to represent variables that aren't known to have real
+    // initial values yet, but have known forms during the form resolution phase.
+    Value v_undefined(Source::Pos pos, Symbol name, rc<Form> form);
 
     // Constructs a string value.
     Value v_string(Source::Pos pos, const ustring& str);
@@ -246,6 +299,21 @@ namespace basil {
     Value v_dict(Source::Pos pos, Type type, const Args&... args) {
         return v_dict(pos, type, map_of<Value, Value>(args...));
     }
+
+    // Constructs a function value from a builtin.
+    Value v_func(const Builtin& builtin);
+
+    // Constructs a function value from a body and env.
+    Value v_func(Source::Pos pos, Type type, rc<Env> env, const Value& body);
+
+    // Constructs an alias value from a term.
+    Value v_alias(Source::Pos pos, const Value& term);
+
+    // Constructs a macro value from a builtin.
+    Value v_macro(const Builtin& builtin);
+
+    // Constructs a macro value from a body and env.
+    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const Value& body);
 
     // Constant iterator for traversing list values.
     struct const_list_iterator {
@@ -336,6 +404,7 @@ namespace basil {
 
     // Returns the head of a list value.
     const Value& v_head(const Value& list);
+    Value& v_head(Value& list);
 
     // Updates the head of a list value.
     void v_set_head(Value& list, const Value& v);

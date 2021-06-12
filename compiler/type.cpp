@@ -86,7 +86,10 @@ namespace basil {
         4972894215258340103ul,
         5625416075860148053ul,
         7475917240723778177ul,
-        2948583097529606413ul
+        2948583097529606413ul,
+        14239964922572717219ul,
+        14100517225124763857ul,
+        3843382840898873837ul
     };
 
     struct Class {
@@ -113,7 +116,7 @@ namespace basil {
         virtual u64 lazy_hash() const = 0;
         virtual void format(stream& io) const = 0;
 
-        virtual bool coerces_to(const Class& other) const; // Declared above T_INT and such.
+        virtual bool coerces_to(const Class& other) const; // Implemented below, just above T_INT and such.
 
         virtual bool operator==(const Class& other) const = 0;
 
@@ -430,7 +433,7 @@ namespace basil {
         ArrayClass(Type element_in, u64 size_in):
             Class(K_ARRAY), element(TYPE_LIST[element_in.id]), size(size_in), sized(true) {}
 
-        u64 lazy_hash() const {
+        u64 lazy_hash() const override {
             return ::hash(kind()) ^ element->hash() * 8773895335238318147ul
                 ^ (sized ? ::hash(size) * 8954908842287060251ul : 11485220905872292697ul);
         }
@@ -479,7 +482,7 @@ namespace basil {
             for (Type t : members_in) members.insert(TYPE_LIST[t.id]);
         }
 
-        u64 lazy_hash() const {
+        u64 lazy_hash() const override {
             u64 base = ::hash(kind());
             for (const auto& m : members) {
                 base ^= 3958225336639215437ul * m->hash();
@@ -617,7 +620,7 @@ namespace basil {
         }
     };
 
-    Type t_function(Type arg, Type ret) {
+    Type t_func(Type arg, Type ret) {
         return t_create(ref<FunctionClass>(arg, ret));
     }
 
@@ -744,6 +747,25 @@ namespace basil {
         return t_dict(key, T_VOID);
     }
 
+    struct MacroClass : public Class {
+        i64 arity;
+
+        MacroClass(i64 arity_in): Class(K_MACRO), arity(arity_in) {}
+
+        u64 lazy_hash() const override {
+            return ::hash(kind()) * 5822540408738177351ul ^ ::hash(arity);
+        }
+
+        void format(stream& io) const override {
+            write(io, "macro(", arity, ")");
+        }
+
+        bool operator==(const Class& other) const override {
+            return other.kind() == K_MACRO 
+                && as<MacroClass>(other).arity == arity;
+        }
+    };
+
     bool Class::coerces_to(const Class& other) const {
         bool result = *this == other
             || other.kind() == K_ANY // all types can convert to 'any'
@@ -754,7 +776,8 @@ namespace basil {
     }
 
     Type T_VOID, T_INT, T_FLOAT, T_DOUBLE, T_SYMBOL, 
-        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ERROR, T_ANY;
+        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, 
+        T_ANY, T_UNDEFINED;
 
     Type t_tuple_at(Type tuple, u32 i) {
         if (!tuple.of(K_TUPLE)) panic("Expected tuple type!");
@@ -845,10 +868,28 @@ namespace basil {
     }
 
     u32 t_arity(Type fn) {
+        if (fn.of(K_FUNCTION)) {
+            const FunctionClass& fnc = as<FunctionClass>(*TYPE_LIST[fn.id]);
+            if (fnc.arg->kind() == K_TUPLE) return as<TupleClass>(*fnc.arg).members.size();
+            else return 1;
+        }
+        else if (fn.of(K_MACRO)) {
+            return as<MacroClass>(*TYPE_LIST[fn.id]).arity;
+        }
+        else {
+            panic("Expected function or macro type!");
+            return 0;
+        }
+    }
+
+    Type t_arg(Type fn) {
         if (!fn.of(K_FUNCTION)) panic("Expected function type!");
-        const FunctionClass& fnc = as<FunctionClass>(*TYPE_LIST[fn.id]);
-        if (fnc.arg->kind() == K_TUPLE) return as<TupleClass>(*fnc.arg).members.size();
-        else return 1;
+        return t_from(as<FunctionClass>(*TYPE_LIST[fn.id]).arg->id());
+    }
+
+    Type t_ret(Type fn) {
+        if (!fn.of(K_FUNCTION)) panic("Expected function type!");
+        return t_from(as<FunctionClass>(*TYPE_LIST[fn.id]).ret->id());
     }
 
     void init_types() {
@@ -861,8 +902,10 @@ namespace basil {
         T_CHAR = t_create(ref<SingletonClass>(K_CHAR, "char"));
         T_BOOL = t_create(ref<SingletonClass>(K_BOOL, "bool"));
         T_TYPE = t_create(ref<SingletonClass>(K_TYPE, "type"));
+        T_ALIAS = t_create(ref<SingletonClass>(K_ALIAS, "alias"));
         T_ERROR = t_create(ref<SingletonClass>(K_ERROR, "error"));
         T_ANY = t_create(ref<SingletonClass>(K_ANY, "any"));
+        T_UNDEFINED = t_create(ref<SingletonClass>(K_UNDEFINED, "undefined"));
     }
 
     void init_types_and_symbols() {

@@ -10,9 +10,11 @@ class vector {
     u32 _size, _capacity;
 
     void free(u8* array) {
-        T* tptr = (T*)array;
-        for (u32 i = 0; i < _size; i ++) tptr[i].~T();
-        delete[] array;
+        if (array) {
+            T* tptr = (T*)array;
+            for (u32 i = 0; i < _size; i ++) tptr[i].~T();
+            delete[] array;
+        }
     }
 
     void init(u32 size) {
@@ -69,11 +71,26 @@ public:
         copy((const T*)other.data, other._size);
     }
 
+    vector(vector&& other): data(other.data), _size(other._size), _capacity(other._capacity) {
+        other.data = nullptr;
+    }
+
     vector& operator=(const vector& other) {
         if (this != &other) {
             free(data);
             init(other._capacity);
             assign((const T*)other.data, other._size);
+        }
+        return *this;
+    }
+
+    vector& operator=(vector&& other) {
+        if (this != &other) {
+            free(data);
+            data = other.data;
+            _size = other.size;
+            _capacity = other._capacity;
+            other.data = nullptr;
         }
         return *this;
     }

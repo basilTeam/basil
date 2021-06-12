@@ -5,96 +5,130 @@
 #include "io.h"
 
 template<typename T>
-class rc {
-public:
-  struct data {
-    u64 count;
-    T* obj;
-    ~data() {
-      delete obj;
-    }
-  };
-  data* _data;
+class rc final {
+  inline void inc() const {
+    if (_data) (*(u64*)_data) ++;
+  }
 
-  rc(data* ptr): _data(ptr) { if (_data) _data->count ++; }
-  rc(): _data(nullptr) {}
-  rc(T* t): _data(new data{1, t}) {}
-  rc(decltype(nullptr) null): rc() {}
-  virtual ~rc() {
-    if (_data && !--_data->count) {
-      delete _data;
+  inline void dec() const {
+    if (_data) if (!(-- *(u64*)_data)) {
+      value()->~T();
+      delete[] _data;
     }
+  }
+
+  inline T* value() {
+    return (T*)(_data + sizeof(u64));
+  }
+
+  inline const T* value() const {
+    return (const T*)(_data + sizeof(u64));
+  }
+
+public:
+  struct Copy { uint8_t* ptr; };
+  uint8_t* _data;
+
+  // Signifies that we're copying from an existing refcell.
+  rc(Copy copy): _data(copy.ptr) { inc(); }
+  rc(): _data(nullptr) {}
+
+  rc(const T& t): _data(new uint8_t[sizeof(u64) + sizeof(T)]) {
+    *(u64*)_data = 1;
+    new(value()) T(t); // copy value into place
+  }
+
+  rc(decltype(nullptr) null): rc() {}
+  
+  ~rc() {
+    dec();
   }
   
   rc(const rc& other): _data(other._data) {
-    if (_data) ++ _data->count;
+    inc();
   }
 
+  rc(rc&& other): _data(other._data) { other._data = nullptr; }
+
   rc& operator=(const rc& other) {
-    if (other._data) ++ other._data->count;
-    if (_data && !--_data->count) {
-      delete _data;
+    if (!is(other)) {
+      other.inc();
+      dec();
+      _data = other._data;
     }
-    _data = other._data;
 		return *this;
+  }
+
+  rc& operator=(rc&& other) {
+    if (!is(other)) {
+      dec();
+      _data = other._data;
+      other._data = nullptr;
+    }
+    return *this;
   }
 
   const T& operator*() const {
     if (!_data) panic("Attempted to dereference null refcell!");
-    return *_data->obj;
+    return *value();
   }
 
   T& operator*() {
     if (!_data) panic("Attempted to dereference null refcell!");
-    return *_data->obj;
+    return *value();
   }
 
   const T* operator->() const {
     if (!_data) panic("Attempted to dereference null refcell!");
-    return _data->obj;
+    return value();
   }
 
   T* operator->() {
     if (!_data) panic("Attempted to dereference null refcell!");
-    return _data->obj;
+    return value();
   }
 
   operator bool() const {
     return _data;
   }
 
+  // Reference equality between two refcells.
   bool is(const rc& other) const {
     return _data == other._data;
   }
 
-  bool operator!=(const rc& other) const {
-    return _data != other._data;
-  }
-
   T* raw() {
     if (!_data) return nullptr;
-    return _data->obj;
+    return value();
+  }
+
+  u64 count() const {
+    return _data ? *(u64*)_data : 0;
+  }
+
+  void manual_dec() {
+    if (_data) -- *(u64*)_data;
   }
 
   const T* raw() const {
     if (!_data) return nullptr;
-    return _data->obj;
+    return value();
   }
 
   template<typename U>
-  operator rc<U>() {
-    return rc<U>((typename rc<U>::data*)_data);
+  operator rc<U>() const {
+    return rc<U>(typename rc<U>::Copy{_data});
   }
 };
 
 template<typename T>
 rc<T> ref(const T& t) {
-  return rc<T>(new T(t));
+  return rc<T>(t);
 }
 
 template<typename T, typename... Args>
 rc<T> ref(Args&&... args) {
-  return rc<T>(new T(args...));
+  return rc<T>(T(args...));
 }
 
 template<typename T>

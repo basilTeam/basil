@@ -1,4 +1,6 @@
 #include "value.h"
+#include "builtin.h"
+#include "env.h"
 
 namespace basil {
     Value::Data::Data(Kind kind) {
@@ -12,6 +14,7 @@ namespace basil {
             case K_BOOL: b = false; break;
             case K_VOID: break;
             case K_ERROR: break;
+            case K_UNDEFINED: undefined_sym = S_NONE; break;
             case K_STRING: new (&string) rc<String>(); break;
             case K_LIST: new (&list) rc<List>(); break;
             case K_NAMED: new (&named) rc<Named>(); break;
@@ -20,6 +23,7 @@ namespace basil {
             case K_UNION: new (&u) rc<Union>(); break;
             case K_STRUCT: new (&str) rc<Struct>(); break;
             case K_DICT: new (&dict) rc<Dict>(); break;
+            case K_FUNCTION: new (&fn) rc<Function>(); break;
             default:
                 panic("Unsupported value kind!"); 
                 break;
@@ -37,6 +41,7 @@ namespace basil {
             case K_BOOL: b = other.b; break;
             case K_VOID: break;
             case K_ERROR: break;
+            case K_UNDEFINED: undefined_sym = other.undefined_sym; break;
             case K_STRING: new (&string) rc<String>(other.string); break;
             case K_LIST: new (&list) rc<List>(other.list); break;
             case K_NAMED: new (&named) rc<Named>(other.named); break;
@@ -45,6 +50,7 @@ namespace basil {
             case K_UNION: new (&u) rc<Union>(other.u); break;
             case K_STRUCT: new (&str) rc<Struct>(other.str); break;
             case K_DICT: new (&dict) rc<Dict>(other.dict); break;
+            case K_FUNCTION: new (&fn) rc<Function>(other.fn); break;
             default:
                 panic("Unsupported value kind!"); 
                 break;
@@ -57,16 +63,31 @@ namespace basil {
 
     Value::Value(): Value({}, T_VOID, nullptr) {}
 
+    void destruct_list(rc<List>& rc) {
+        uint8_t* it = rc._data;
+        while (it && *(u64*)it) { // while it is not null *and* still has a refcount
+            u64 count = -- *(u64*)it; // decrement refcount
+            if (!count) { // manually deallocate
+                uint8_t* next = ((List*)(it + sizeof(u64)))->tail._data;
+                ((List*)(it + sizeof(u64)))->head.~Value();
+                delete[] it;
+                it = next;
+            }
+            else break; // if we aren't deleting something, no need to decrement further cells
+        }
+    }
+
     Value::~Value() {
         switch (type.kind()) {
             case K_STRING: data.string.~rc(); break;
-            case K_LIST: data.list.~rc(); break;
+            case K_LIST: destruct_list(data.list); break;
             case K_NAMED: data.named.~rc(); break;
             case K_TUPLE: data.tuple.~rc(); break;
             case K_ARRAY: data.array.~rc(); break;
             case K_UNION: data.u.~rc(); break;
             case K_STRUCT: data.str.~rc(); break;
-            case K_DICT: data.dict.~rc();
+            case K_DICT: data.dict.~rc(); break;
+            case K_FUNCTION: data.fn.~rc(); break;
             default: break; // trivial destructor
         }
     }
@@ -74,17 +95,25 @@ namespace basil {
     Value::Value(const Value& other):
         pos(other.pos), type(other.type), form(other.form), data(other.type.kind(), other.data) {}
 
+    Value::Value(Value&& other):
+        pos(other.pos), type(other.type), form(other.form), data(K_VOID) {
+        (u64&)data = (u64&)other.data; // direct byte-to-byte copy
+        other.type = T_VOID; // force other value to do trivial destructor
+        other.form = nullptr;
+    }
+
     Value& Value::operator=(const Value& other) {
         if (this != &other) {
             switch (type.kind()) {
                 case K_STRING: data.string.~rc(); break;
-                case K_LIST: data.list.~rc(); break;
+                case K_LIST: destruct_list(data.list); break;
                 case K_NAMED: data.named.~rc(); break;
                 case K_TUPLE: data.tuple.~rc(); break;
                 case K_ARRAY: data.array.~rc(); break;
                 case K_UNION: data.u.~rc(); break;
                 case K_STRUCT: data.str.~rc(); break;
-                case K_DICT: data.dict.~rc();
+                case K_DICT: data.dict.~rc(); break;
+                case K_FUNCTION: data.fn.~rc(); break;
                 default: break; // trivial destructor
             }
             type = other.type;
@@ -94,6 +123,30 @@ namespace basil {
         }
         return *this;
     }     
+
+    Value& Value::operator=(Value&& other) {
+        if (this != &other) {
+            switch (type.kind()) {
+                case K_STRING: data.string.~rc(); break;
+                case K_LIST: destruct_list(data.list); break;
+                case K_NAMED: data.named.~rc(); break;
+                case K_TUPLE: data.tuple.~rc(); break;
+                case K_ARRAY: data.array.~rc(); break;
+                case K_UNION: data.u.~rc(); break;
+                case K_STRUCT: data.str.~rc(); break;
+                case K_DICT: data.dict.~rc(); break;
+                case K_FUNCTION: data.fn.~rc(); break;
+                default: break; // trivial destructor
+            }
+            type = other.type;
+            pos = other.pos;
+            form = other.form;
+            (u64&)data = (u64&)other.data; // direct byte-to-byte copy
+            other.type = T_VOID; // force other value to do trivial destructor
+            other.form = nullptr; 
+        }
+        return *this;
+    }
     
     u64 Value::hash() const {
         u64 kh = ::hash(type);
@@ -106,6 +159,7 @@ namespace basil {
             case K_BOOL: return kh ^ ::hash(data.b);
             case K_VOID: return kh;
             case K_ERROR: return kh;
+            case K_UNDEFINED: return kh ^ ::hash(data.undefined_sym);
             case K_STRING: return kh ^ ::hash(data.string->data);
             case K_NAMED: return kh ^ ::hash(t_get_name(type)) ^ ::hash(data.named->value);
             case K_UNION: return kh ^ ::hash(data.u->value.hash());
@@ -158,6 +212,7 @@ namespace basil {
             case K_BOOL: write(io, data.b); break;
             case K_VOID: write(io, "()"); break;
             case K_ERROR: write(io, "#error"); break;
+            case K_UNDEFINED: write(io, "#undefined(", data.undefined_sym, ")"); break; // #undefined(x)
             case K_STRING: write(io, '"', data.string->data, '"'); break;
             case K_NAMED: write(io, t_get_name(type), " of ", data.named->value); break; // Name of value
             case K_UNION: write(io, data.u->value, " in ", type); break; // value in (type | type)
@@ -170,6 +225,7 @@ namespace basil {
                 else write_pairs(io, data.dict->elements, "{", " = ", "; ", "}"); // {"x" = 1; "y" = 2}
                 break;
             }
+            case K_FUNCTION: write(io, "#procedure"); break;
             default:
                 panic("Unsupported value kind!"); 
                 break;
@@ -188,6 +244,7 @@ namespace basil {
             case K_BOOL: return data.b == other.data.b;
             case K_VOID: return true;
             case K_ERROR: return true;
+            case K_UNDEFINED: return data.undefined_sym == other.data.undefined_sym;
             case K_STRING: return data.string->data == other.data.string->data;
             case K_NAMED: return data.named->value == other.data.named->value;
             case K_UNION: return data.u->value == other.data.u->value;
@@ -234,6 +291,8 @@ namespace basil {
                 }
                 return copy_elements.size() == 0; // our dict had a matching key for every key in the other dict, and no extras
             }
+            case K_FUNCTION: 
+                return data.fn.is(other.data.fn); // only consider reference equality
             default:
                 panic("Unsupported value kind!"); 
                 return true;
@@ -242,6 +301,11 @@ namespace basil {
     
     bool Value::operator!=(const Value& other) const {
         return !operator==(other);
+    }
+
+    Value& Value::with(rc<Form> form_in) {
+        form = form_in;
+        return *this;
     }
 
     Value::Value(Source::Pos pos_in, Type type_in, rc<Form> form_in):
@@ -262,6 +326,14 @@ namespace basil {
     Struct::Struct(const map<Symbol, Value>& fields_in): fields(fields_in) {}
 
     Dict::Dict(const map<Value, Value>& elements_in): elements(elements_in) {}
+    
+    Function::Function(optional<const Builtin&> builtin_in, rc<Env> env_in, const Value& body_in):
+        builtin(builtin_in), env(env_in), body(body_in) {}
+
+    Alias::Alias(const Value& term_in): term(term_in) {}
+
+    Macro::Macro(optional<const Builtin&> builtin_in, rc<Env> env_in, const Value& body_in):
+        builtin(builtin_in), env(env_in), body(body_in) {}
 
     Value v_int(Source::Pos pos, i64 i) {
         Value v(pos, T_INT, nullptr);
@@ -305,6 +377,12 @@ namespace basil {
     
     Value v_error(Source::Pos pos) {
         return Value(pos, T_ERROR, nullptr);
+    }
+
+    Value v_undefined(Source::Pos pos, Symbol name, rc<Form> form) {
+        Value v(pos, T_UNDEFINED, form);
+        v.data.undefined_sym = name;
+        return v;
     }
 
     Value v_string(Source::Pos pos, const ustring& str) {
@@ -417,6 +495,44 @@ namespace basil {
         return v;
     }
 
+    Value v_func(const Builtin& builtin) {
+        Value v({}, builtin.type, builtin.form);
+        if (!builtin.type.of(K_FUNCTION))
+            panic("Attempted to create function value with non-function builtin!");
+        v.data.fn = ref<Function>(some<const Builtin&>(builtin), nullptr, v_void({}));
+        return v;
+    }
+
+    Value v_func(Source::Pos pos, Type type, rc<Env> env, const Value& body) {
+        Value v(pos, type, nullptr);
+        if (!type.of(K_FUNCTION))
+            panic("Attempted to construct function value with non-function type!");
+        v.data.fn = ref<Function>(none<const Builtin&>(), env, body);
+        return v;
+    }
+
+    Value v_alias(Source::Pos pos, const Value& term) {
+        Value v(pos, T_ALIAS, nullptr);
+        v.data.alias = ref<Alias>(term);
+        return v;
+    }
+
+    Value v_macro(const Builtin& builtin) {
+        Value v({}, builtin.type, builtin.form);
+        if (!builtin.type.of(K_MACRO))
+            panic("Attempted to create macro value with non-macro builtin!");
+        v.data.macro = ref<Macro>(some<const Builtin&>(builtin), nullptr, v_void({}));
+        return v;
+    }
+
+    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const Value& body) {
+        Value v(pos, type, nullptr);
+        if (!type.of(K_MACRO))
+            panic("Attempted to construct macro value with non-macro type!");
+        v.data.macro = ref<Macro>(none<const Builtin&>(), env, body);
+        return v;
+    }
+
     const_list_iterator::const_list_iterator(const rc<List> l): list(l.raw()) {}
     
     const_list_iterator::const_list_iterator(const List* l): list(l) {}
@@ -502,8 +618,11 @@ namespace basil {
     }
 
     list_iterable iter_list(const Value& v) {
-        if (!v.type.of(K_LIST)) panic("Expected list value!");
-        return list_iterable(v.data.list);
+        if (v.type.of(K_LIST)) return list_iterable(v.data.list);
+        else if (!v.type.of(K_VOID)) {
+            panic("Expected list value!");
+        }
+        return list_iterable(nullptr);
     }
 
     Type infer_list(const Value& head, const Value& tail) {
@@ -558,6 +677,12 @@ namespace basil {
     }
 
     const Value& v_head(const Value& list) {
+        if (!list.type.of(K_LIST)) panic("Expected a list value!");
+        if (!list.data.list) panic("Attempted to get head of empty list!");
+        return list.data.list->head;
+    }
+
+    Value& v_head(Value& list) {
         if (!list.type.of(K_LIST)) panic("Expected a list value!");
         if (!list.data.list) panic("Attempted to get head of empty list!");
         return list.data.list->head;

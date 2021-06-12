@@ -14,6 +14,9 @@ typedef int16_t i16;
 typedef int32_t i32;
 typedef int64_t i64;
 
+#define I64_MIN -9223372036854775808ul
+#define I64_MAX 9223372036854775807ul
+
 // ubuntu and mac color codes, from 
 // https://stackoverflow.com/questions/9158150/colored-output-in-c/
 #define RESET   "\033[0m"

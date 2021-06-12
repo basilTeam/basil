@@ -18,6 +18,7 @@ namespace basil {
         TK_SPLICE,      // A splice character, aka '\'
         TK_INTCOEFF,    // An integer coefficient.
         TK_FLOATCOEFF,  // A rational/floating-point coefficient.
+        TK_BLOCK,       // A postfix colon indicating the start of a block.
         TK_PLUS,        // A unary prefix plus sign.
         TK_MINUS,       // A unary prefix minus sign.
         TK_QUOTE,       // A unary prefix quote.
@@ -68,5 +69,6 @@ namespace basil {
 }
 
 void write(stream& io, basil::TokenKind tk);
+void write(stream& io, const basil::Token& t);
 
 #endif

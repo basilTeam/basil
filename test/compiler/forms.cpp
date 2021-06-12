@@ -16,8 +16,8 @@ TEST(term) {
 }
 
 TEST(prefix_callable) {
-    rc<Form> f1 = f_callable(0, p_keyword(symbol_from("f")), P_VAR), 
-        f2 = f_callable(10, p_keyword(symbol_from("f")), P_VAR, P_VAR);
+    rc<Form> f1 = f_callable(0, ASSOC_RIGHT, P_SELF, P_VAR), 
+        f2 = f_callable(10, ASSOC_RIGHT, P_SELF, P_VAR, P_VAR);
 
     ASSERT_TRUE(f1->is_invokable()); // all of these should be invokable
     ASSERT_TRUE(f2->is_invokable());
@@ -32,7 +32,7 @@ TEST(prefix_callable) {
     f1m->advance(v_int({}, 1));
     ASSERT_TRUE(f1m->is_finished()); // f1 should be done after name and one value
     ASSERT_TRUE((bool)f1m->match()); // f1 should match name and one value
-    ASSERT_TRUE(&*f1m->match() == &*f1->invokable); // f1 should result in itself
+    ASSERT_TRUE(&*f1m->match() == &*f1m); // f1 should result in itself
 
     f1m = f1->start(); // we should be able to restart f1 with the same results
     ASSERT_FALSE(f1m->is_finished());
@@ -41,7 +41,7 @@ TEST(prefix_callable) {
     f1m->advance(v_int({}, 1));
     ASSERT_TRUE(f1m->is_finished());
     ASSERT_TRUE(f1m->match());
-    ASSERT_TRUE(&*f1m->match() == &*f1->invokable);
+    ASSERT_TRUE(&*f1m->match() == &*f1m);
 
     auto f2m = f2->start();
     ASSERT_FALSE(f2m->is_finished());
@@ -52,24 +52,16 @@ TEST(prefix_callable) {
     f2m->advance(v_int({}, 2));
     ASSERT_TRUE(f2m->is_finished()); // f2 should be done after name and one value
     ASSERT_TRUE(f2m->match()); // f2 should match name and two values
-    ASSERT_TRUE(&*f2m->match() == &*f2->invokable); // f2 should result in itself
+    ASSERT_TRUE(&*f2m->match() == &*f2m); // f2 should result in itself
 }
 
 TEST(infix_callable) {
-    rc<Form> f1 = f_callable(40, P_VAR, p_keyword(symbol_from("foo")), P_VAR);
+    rc<Form> f1 = f_callable(40, ASSOC_LEFT, P_VAR, P_SELF, P_VAR);
 
     ASSERT_TRUE(f1->is_invokable());
     ASSERT_EQUAL(f1->precedence, 40);
 
-    auto f1m = f1->start();
-    ASSERT_FALSE(f1m->is_finished());
-    f1m->advance(v_int({}, 1));
-    ASSERT_FALSE(f1m->is_finished());
-    f1m->advance(v_int({}, 2));
-    ASSERT_TRUE(f1m->is_finished()); // should stop, expected "foo", got 2
-    ASSERT_FALSE(f1m->match()); // shouldn't match
-
-    f1m = f1->start(); // try again!
+    auto f1m = f1->start(); // try again!
     ASSERT_FALSE(f1m->is_finished());
     f1m->advance(v_int({}, 1));
     f1m->advance(v_symbol({}, symbol_from("foo")));
@@ -77,5 +69,5 @@ TEST(infix_callable) {
     f1m->advance(v_symbol({}, symbol_from("x")));
     ASSERT_TRUE(f1m->is_finished());
     ASSERT_TRUE(f1m->match()); // this time we should match
-    ASSERT_TRUE(&*f1m->match() == &*f1->invokable); // and we should return f1
+    ASSERT_TRUE(&*f1m->match() == &*f1m); // and we should return f1
 }

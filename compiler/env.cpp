@@ -1,4 +1,5 @@
 #include "env.h"
+#include "eval.h"
 #include "value.h"
 
 namespace basil {
@@ -29,6 +30,8 @@ namespace basil {
     }
 
     rc<Env> extend(rc<Env> parent) {
-        return ref<Env>(parent);
+        rc<Env> env = ref<Env>(parent);
+        parent->children.push(env);
+        return env;
     }
 }

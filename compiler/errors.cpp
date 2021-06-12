@@ -38,4 +38,8 @@ namespace basil {
     void print_errors(stream& io, rc<Source> src) {
         for (const Error& e : errors) print_error(io, e, src);
     }
+
+    void discard_errors() {
+        errors.clear();
+    }
 }

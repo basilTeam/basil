@@ -8,5 +8,5 @@ SETUP {
 }
 
 TEST(foo) {
-    Value v = v_list({}, t_list(T_INT), v_double({}, 1.0), v_void({}));
+    Value v = v_list({}, t_list(T_ANY), v_double({}, 1.0), v_void({}));
 }

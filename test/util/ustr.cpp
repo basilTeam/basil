@@ -15,6 +15,8 @@ TEST(size) {
     ASSERT_EQUAL(d.size(), 4);
 }
 
+// 00000000000000000000001110110011
+
 TEST(add_char) {
     ustring a;
     ASSERT_EQUAL(a.size(), 0);

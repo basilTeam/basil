@@ -9,9 +9,7 @@
 
 enum class EndianOrder : u32 {
     UTIL_LITTLE_ENDIAN = 0x03020100ul,
-    UTIL_BIG_ENDIAN = 0x00010203ul,
-    UTIL_PDP_ENDIAN = 0x01000302ul,     
-    UTIL_HONEYWELL_ENDIAN = 0x02030001ul
+    UTIL_BIG_ENDIAN = 0x00010203ul
 };
 
 static const union { 

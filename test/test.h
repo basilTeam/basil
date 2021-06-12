@@ -33,6 +33,7 @@ int main(int argc, char** argv);
 #define ASSERT_GREATER_OR_EQUAL(a, b) if ((a) < (b)) throw exc_message{format<ustring>("line ", __LINE__, ": ", (a), " < ", (b))};
 #define ASSERT_TRUE(a) if (!(a)) throw exc_message{format<ustring>("line ", __LINE__, ": ", (bool)(a), " was not true")};
 #define ASSERT_FALSE(a) if (a) throw exc_message{format<ustring>("line ", __LINE__, ": ", (bool)(a), " was not false")};
+#define ASSERT_NO_ERRORS(src) { if (error_count()) { buffer b; print_errors(b, (src)); discard_errors(); throw exc_message{format<ustring>("line ", __LINE__, ": errors were reported:\n", b)}; } }
 
 #define SETUP void __setup_fn(); auto __setup_dummy = (setup_fn = __setup_fn); void __setup_fn() 
 

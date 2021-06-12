@@ -209,3 +209,43 @@ TEST(eof) {
     ASSERT_FALSE(c);
     ASSERT_FALSE(d);
 }
+
+TEST(block_colon) {
+    Source src = create_source("do: :: 2.1: (:3): 4");
+    Source::View view(src);
+
+    optional<Token> a = lex(view), b = lex(view), c = lex(view), d = lex(view),
+        e = lex(view), f = lex(view), 
+        g = lex(view), 
+        h = lex(view), i = lex(view), 
+        j = lex(view), k = lex(view);
+    ASSERT_EQUAL(error_count(), 0);
+
+    ASSERT_EQUAL(a->kind, TK_SYMBOL);
+    ASSERT_EQUAL(a->contents, symbol_from("do"));
+
+    ASSERT_EQUAL(b->kind, TK_BLOCK);
+
+    ASSERT_EQUAL(c->kind, TK_SYMBOL);
+    ASSERT_EQUAL(c->contents, symbol_from("::"));
+
+    ASSERT_EQUAL(d->kind, TK_FLOAT);
+    ASSERT_EQUAL(d->contents, symbol_from("2.1"));
+
+    ASSERT_EQUAL(e->kind, TK_BLOCK);
+
+    ASSERT_EQUAL(f->kind, TK_LPAREN);
+
+    println(g->contents);
+    ASSERT_EQUAL(g->kind, TK_QUOTE);
+
+    ASSERT_EQUAL(h->kind, TK_INT);
+    ASSERT_EQUAL(h->contents, symbol_from("3"));
+
+    ASSERT_EQUAL(i->kind, TK_RPAREN);
+
+    ASSERT_EQUAL(j->kind, TK_BLOCK);
+
+    ASSERT_EQUAL(k->kind, TK_INT);
+    ASSERT_EQUAL(k->contents, symbol_from("4"));
+}

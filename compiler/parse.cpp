@@ -80,7 +80,8 @@ namespace basil {
 
     // Pulls a simple expression from the token stream.
     Value parse_primary(TokenView& view, ParseContext ctx) {
-        if (!view) panic("Attempted to get tokens from exhausted token view!");
+        if (!view) 
+            panic("Attempted to get tokens from exhausted token view!");
         
         Source::Pos pos = view.peek().pos;
         Symbol contents = view.peek().contents;
@@ -183,17 +184,36 @@ namespace basil {
 
     // Pulls a full expression from the token stream, handling any indented blocks.
     Value parse_expr(TokenView& view, ParseContext ctx) {
+        while (view.peek().kind == TK_NEWLINE) view.read(); // consume leading newlines
         Value suffixed = parse_suffix(view, ctx);
-        if (view && view.peek().kind == TK_NEWLINE) { // consider indented block
-            view.read(); // consume newline
-            if (view && view.peek().pos.col_start > ctx.indent)
-                return parse_indented(suffixed, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start)});
+        if (view && view.peek().kind == TK_BLOCK) { // consider block
+            view.read(); // consume block
+            if (view && view.peek().kind == TK_NEWLINE) { // consider indented block
+                while (view.peek().kind == TK_NEWLINE) view.read(); // consume all leading newlines
+                if (view && view.peek().pos.col_start > ctx.indent)
+                    return parse_indented(suffixed, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start)});
+                else {
+                    err(view.peek().pos, 
+                        "Expected indented block, but line isn't indented past the previous non-empty line.");
+                    return v_error(view.peek().pos);
+                }
+            }
+            else { // inline block
+                vector<Value> values;
+                values.push(suffixed);
+                while (view && view.peek().kind != TK_NEWLINE) {
+                    Value v = parse_expr(view, ctx);
+                    if (v.pos.line_start >= suffixed.pos.line_end) break; // stop if we're on a different line
+                    values.push(v);
+                }
+            }
         }
         return suffixed;
     }
 
-    Value parse(TokenView& view) {
-        if (!view) return v_void({}); // return void for empty source
-        return parse_expr(view, ParseContext{0, u16(view.peek().pos.col_start)}); // start with indentation of first token
+    optional<Value> parse(TokenView& view) {
+        while (view.peek().kind == TK_NEWLINE) view.read(); // consume leading newlines
+        if (!view) return none<Value>(); // return void for empty source
+        return some<Value>(parse_expr(view, ParseContext{0, u16(view.peek().pos.col_start)})); // start with indentation of first token
     }
 }

@@ -4018,7 +4018,7 @@ unsigned long int utf16_encode(const rune* str, unsigned long int str_length,
 }
 
 int utf8_digit_value(rune digit) {
-    int range = find(decimal_digits, sizeof(decimal_digits) / sizeof(range), digit);
+    int range = find(decimal_digits, (sizeof(decimal_digits)) / sizeof(range), digit);
 	if (range == -1) { // Not a digit
 		ERROR = INVALID_RUNE;
 		return -1;

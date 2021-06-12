@@ -53,6 +53,11 @@ string::string(const string& other) {
     copy(other.data);
 }
 
+string::string(string&& other): 
+    data(other.data), _size(other._size), _capacity(other._capacity) {
+    other._capacity = 0; // prevent destructor
+}
+
 string::string(const char* s): string() {
     operator+=(s);
 }
@@ -70,6 +75,17 @@ string& string::operator=(const string& other) {
         free();
         init(other._capacity);
         copy(other.data);
+    }
+    return *this;
+}
+
+string& string::operator=(string&& other) {
+    if (this != &other) {
+        free();
+        _size = other._size;
+        _capacity = other._capacity;
+        data = other.data;
+        other._capacity = 0; // prevent destructor
     }
     return *this;
 }

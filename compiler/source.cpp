@@ -88,6 +88,13 @@ namespace basil {
         if (line == src->lines.size()) return 0;
         return *iter;
     }
+    
+    rune Source::View::peek(u32 n) const {
+        Source::View copy = *this;
+        rune ch = '\0';
+        while (n --) copy.read();
+        return copy.peek();
+    }
 
     rune Source::View::read() {
         rune r = peek();

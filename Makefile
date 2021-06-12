@@ -7,12 +7,12 @@ OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 TEST_SRCS := $(wildcard test/**/*.cpp)
 TEST_OBJS := $(patsubst %.cpp,%.test,$(TEST_SRCS))
 
-CXX := g++
+CXX := clang++
 CXXHEADERS := -I. -Iutil -Ijasmine -Icompiler -Itest
 SHAREDFLAGS := $(CXXHEADERS) -std=c++17 \
 	-ffunction-sections -fdata-sections -ffast-math -fno-rtti \
-	-Wall -Werror -Wno-unused -Wno-comment \
-	-DINCLUDE_UTF8_LOOKUP_TABLE	
+	-Wall -Werror -Wno-unused -Wno-comment -Wno-implicit-exception-spec-mismatch \
+	-DINCLUDE_UTF8_LOOKUP_TABLE
 	
 %.test: SHAREDFLAGS += -g3
 test: SHAREDFLAGS += -g3
@@ -21,7 +21,7 @@ basil: SHAREDFLAGS += -g3
 
 release: SHAREDFLAGS += -Os -DBASIL_RELEASE
 
-CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions
+CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -nostdlib++ 
 TESTFLAGS = $(SHAREDFLAGS)
 LDFLAGS := -Wl,--gc-sections
 
@@ -42,6 +42,8 @@ runtime/%.o: runtime/%.cpp
 
 %.o: %.cpp %.h
 	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+.PRECIOUS: %.test # don't delete tests if they run and error (we might want to run valgrind or gdb)
 
 %.test: %.cpp $(OBJS)
 	@$(CXX) $(TESTFLAGS) $< test/test.cpp $(LDFLAGS) $(OBJS) -o $@

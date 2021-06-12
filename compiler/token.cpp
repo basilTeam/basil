@@ -5,7 +5,7 @@
 namespace basil {
     const char* TOKEN_NAMES[NUM_TOKEN_KINDS] = {
         "(", ")", "[", "[", "]", "{", "}", "<newline>", "\\",
-        "int-coeff", "float-coeff", "+", "-", ":",
+        "int-coeff", "float-coeff", ":", "plus", "minus", "quote",
         "int", "float", "symbol", "string", "char",
         "none"
     };
@@ -136,6 +136,10 @@ namespace basil {
         }
     }
 
+    bool is_block_colon(Source::View& view) {
+        return is_space(view.peek(1)) || is_opener(view.peek(1));
+    }
+
     optional<Token> lex(Source::View& view) {
         Token result{view.pos(), S_NONE, TK_NONE};
         rune ch = view.peek();
@@ -151,19 +155,22 @@ namespace basil {
 
         Source::Pos begin = view.pos(), end = view.pos();
 
-        if (ch == '[' && view.last() != '\0' && !is_space(view.last()) && !is_opener(view.last())
-            && !is_digit(view.last()) && view.last() != '+' && view.last() != '-' && view.last() != ':') // access bracket
-            result = Token{view.pos(), S_LSQUARE, TK_ACCESS}, view.read();
-        else if (ch < 128 && SINGLETON_KINDS[ch] != TK_NONE) // singleton characters like parens and brackets
-            result = Token{view.pos(), SINGLETON_SYMS[ch], SINGLETON_KINDS[ch]}, view.read();
+        if (ch < 128 && SINGLETON_KINDS[ch] != TK_NONE) // singleton characters like parens and brackets
+            if (ch == '[' && view.last() != '\0' && !is_space(view.last()) && !is_opener(view.last())
+                && !is_digit(view.last()) && view.last() != '+' && view.last() != '-' && view.last() != ':') // access bracket
+                result = Token{view.pos(), S_LSQUARE, TK_ACCESS}, view.read();
+            else 
+                result = Token{view.pos(), SINGLETON_SYMS[ch], SINGLETON_KINDS[ch]}, view.read();
         else if (ch == '\'') {
             ustring acc;
             view.read(); // consume leading quote
-            if (view.peek() == '\'') err(view.pos(), "Character literal must contain at least one character.");
-            else if (view.peek() == '\n') err(view.pos(), "Character literal may not contain a line break.");
-            else if (view.peek() == '\0') err(view.pos(), "Unexpected end of input.");
-            else if (view.peek() == '\\') view.read(), acc += escape_seq(view); // escape sequence
-            else acc += view.read(); // normal char
+            switch (view.peek()) {
+                case '\'': err(view.pos(), "Character literal must contain at least one character."); break;
+                case '\n': err(view.pos(), "Character literal may not contain a line break."); break;
+                case '\0': err(view.pos(), "Unexpected end of input."); break;
+                case '\\': view.read(), acc += escape_seq(view); break; // escape sequence break;
+                default: acc += view.read(); // normal char
+            }
             if (view.peek() && view.peek() != '\'') {
                 err(view.pos(), "Expected closing quote in character literal, found '", view.peek(), "'.");
                 return some<Token>(result);
@@ -205,43 +212,60 @@ namespace basil {
             // whether it's an integer or float constant, we should be done reading the numeric portion
             if (is_opener(ch) || is_letter(ch))
                 result = Token{span(begin, end), symbol_from(acc), floating ? TK_FLOATCOEFF : TK_INTCOEFF};
-            else if (is_separator(ch))
+            else if (is_separator(ch) 
+                || (ch == ':' && is_block_colon(view))) // block colons are special, since : is not a separator but it can terminate numbers
                 result = Token{span(begin, end), symbol_from(acc), floating ? TK_FLOAT : TK_INT};
-        }
-        else if (is_letter(ch) || is_sigil(ch)) {
-            if (ch == '_') {
-                err(view.pos(), "Symbols may not begin with underscores.");
-                view.read();
+            else {
+                err(view.pos(), "Unexpected character in numeric literal: '", ch, "'.");
                 return none<Token>();
             }
+        }
+        else if (is_letter(ch) || is_sigil(ch)) {
             ustring acc;
             bool skip_symbol = false;
-            if (ch == '+') {        // prefix +
-                end = view.pos(), acc += view.read(), ch = view.peek();
-                if (is_letter(ch) || is_opener(ch)) 
-                    skip_symbol = true, result = Token{span(begin, end), S_PLUS, TK_PLUS};
-            }
-            else if (ch == '-') {   // prefix -
-                end = view.pos(), acc += view.read(), ch = view.peek();
-                if (is_letter(ch) || is_opener(ch)) 
-                    skip_symbol = true, result = Token{span(begin, end), S_MINUS, TK_MINUS};
-            }
-            else if (ch == ':') {   // prefix :
-                end = view.pos(), acc += view.read(), ch = view.peek();
-                if (is_letter(ch) || is_opener(ch)) 
-                    skip_symbol = true, result = Token{span(begin, end), S_COLON, TK_QUOTE};
-            }
-            else if (is_separator(ch)) {
-                rune repeated = ch; // identifiers that start with a separator are legal if
-                                    // they only consist of that separator
-                skip_symbol = true; // we want to skip normal symbol stuff
-                while (ch == repeated) 
+            switch (ch) {
+                case '_':
+                    err(view.pos(), "Symbols may not begin with underscores.");
+                    view.read();
+                    return none<Token>();
+                case '+': // prefix plus
                     end = view.pos(), acc += view.read(), ch = view.peek();
-                result = Token{span(begin, end), symbol_from(acc), TK_SYMBOL};
+                    if (is_letter(ch) || is_opener(ch)) 
+                        skip_symbol = true, result = Token{span(begin, end), S_PLUS, TK_PLUS};
+                    break;
+                case '-': // prefix minus
+                    end = view.pos(), acc += view.read(), ch = view.peek();
+                    if (is_letter(ch) || is_opener(ch)) 
+                        skip_symbol = true, result = Token{span(begin, end), S_MINUS, TK_MINUS};
+                    break;
+                case ':': // prefix quote or block colon  
+                    if (view.last() != '\0' && !is_space(view.last()) 
+                        && !is_opener(view.last()) && !is_sigil(view.last()) 
+                        && is_block_colon(view)) { // block colon
+                        skip_symbol = true, result = Token{view.pos(), S_COLON, TK_BLOCK};
+                        view.read();
+                    }
+                    else { // prefix quote or normal ident
+                        end = view.pos(), acc += view.read(), ch = view.peek();
+                        if (is_letter(ch) || is_digit(ch) || is_opener(ch)) 
+                            skip_symbol = true, result = Token{span(begin, end), S_COLON, TK_QUOTE};
+                    }
+                    break;
+                default:
+                    if (is_separator(ch)) {
+                        rune repeated = ch; // identifiers that start with a separator are legal if
+                                            // they only consist of that separator
+                        skip_symbol = true; // we want to skip normal symbol stuff
+                        while (ch == repeated) 
+                            end = view.pos(), acc += view.read(), ch = view.peek();
+                        result = Token{span(begin, end), symbol_from(acc), TK_SYMBOL};
+                    }
             }
             if (!skip_symbol) { // do normal symbol tokenization
-                while ((is_letter(ch) || is_sigil(ch) || is_digit(ch)) && !is_separator(ch)) 
+                while ((is_letter(ch) || is_sigil(ch) || is_digit(ch)) && !is_separator(ch)) {
+                    if (ch == ':' && acc.back() != ':') break; // block colon ends identifiers that don't end with colon
                     end = view.pos(), acc += view.read(), ch = view.peek();
+                }
                 result = Token{span(begin, end), symbol_from(acc), TK_SYMBOL};
             }
         }
@@ -263,4 +287,8 @@ namespace basil {
 
 void write(stream& io, basil::TokenKind tk) {
     write(io, basil::TOKEN_NAMES[tk]);
+}
+
+void write(stream& io, const basil::Token& t) {
+    write(io, t.pos, " \"", escape(string_from(t.contents)), "\" : ", t.kind);
 }

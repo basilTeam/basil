@@ -24,7 +24,9 @@ public:
     ustring(const string& str);
     ustring(buffer& buf);
     ustring(const ustring& other);
+    ustring(ustring&& other);
     ustring& operator=(const ustring& other);
+    ustring& operator=(ustring&& other);
 
     struct iterator {
         const char* _ptr;

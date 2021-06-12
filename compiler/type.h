@@ -58,6 +58,7 @@ namespace basil {
         K_TYPE,
         K_VOID,
         K_ERROR,
+        K_UNDEFINED,
         K_ANY,
         K_NAMED,
         K_LIST,
@@ -68,6 +69,8 @@ namespace basil {
         K_FUNCTION,
         K_STRUCT,
         K_DICT,
+        K_MACRO,
+        K_ALIAS,
         NUM_KINDS
     };
 
@@ -127,14 +130,14 @@ namespace basil {
     Type t_tuple(const vector<Type>& elements);
     template<typename ...Args>
     Type t_tuple(Args... args) {
-        return basil::t_tuple(vector_of<Type>(args...));    
+        return basil::t_tuple(vector_of<Type>(args...));
     }
 
     // Constructs an incomplete tuple type from the provided element types.
     Type t_incomplete_tuple(const vector<Type>& elements);
     template<typename ...Args>
     Type t_incomplete_tuple(Args... args) {
-        return basil::t_incomplete_tuple(vector_of<Type>(args...));    
+        return basil::t_incomplete_tuple(vector_of<Type>(args...));
     }
 
     // Constructs an unsized array type for the given element type.
@@ -158,7 +161,7 @@ namespace basil {
     }
 
     // Constructs a function type with the given argument and return types.
-    Type t_function(Type arg, Type ret);
+    Type t_func(Type arg, Type ret);
 
     // Constructs a complete struct type with the given fields and associated field types.
     Type t_struct(const map<Symbol, Type>& fields);
@@ -180,8 +183,12 @@ namespace basil {
     // Constructs a dictionary type with the given key type and a void value type.
     Type t_dict(Type key);
 
+    // Constructs a macro type with the given arity.
+    Type t_macro(int arity);
+
     extern Type T_VOID, T_INT, T_FLOAT, T_DOUBLE, T_SYMBOL, 
-        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ERROR, T_ANY;
+        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, 
+        T_ANY, T_UNDEFINED;
 
     // Returns the ith member type of the provided tuple type.
     Type t_tuple_at(Type tuple, u32 i);
@@ -234,8 +241,14 @@ namespace basil {
     // Returns the value type of the provided dictionary type.
     Type t_dict_value(Type dict);
 
-    // Returns the arity of the provided function type.
+    // Returns the arity of the provided function or macro type.
     u32 t_arity(Type fn);
+
+    // Returns the argument type of the provided function type.
+    Type t_arg(Type fn);
+
+    // Returns the return type of the provided function type.
+    Type t_ret(Type fn);
     
     // Performs initialization for this source file. Sets up the symbol
     // and type tables, and initializes all static variables.

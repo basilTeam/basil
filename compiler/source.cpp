@@ -91,7 +91,6 @@ namespace basil {
     
     rune Source::View::peek(u32 n) const {
         Source::View copy = *this;
-        rune ch = '\0';
         while (n --) copy.read();
         return copy.peek();
     }

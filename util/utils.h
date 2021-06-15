@@ -16,4 +16,6 @@ void operator delete[](void* ptr);
 #endif 
 void __internal_panic(const char* file, int line, const char* msg);
 
+extern "C" void __cxa_pure_virtual();
+
 #endif

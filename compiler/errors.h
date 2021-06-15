@@ -2,7 +2,7 @@
 #define BASIL_ERRORS_H
 
 #include "source.h"
-#include "rc.h"
+#include "util/rc.h"
 
 namespace basil {
     // Reports an error at the provided source position with the provided message.

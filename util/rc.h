@@ -10,7 +10,7 @@ class rc final {
     if (_data) (*(u64*)_data) ++;
   }
 
-  inline void dec() const {
+  inline void dec() {
     if (_data) if (!(-- *(u64*)_data)) {
       value()->~T();
       delete[] _data;

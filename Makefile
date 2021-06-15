@@ -10,9 +10,9 @@ TEST_OBJS := $(patsubst %.cpp,%.test,$(TEST_SRCS))
 CXX := clang++
 CXXHEADERS := -I. -Iutil -Ijasmine -Icompiler -Itest
 SHAREDFLAGS := $(CXXHEADERS) -std=c++17 \
-	-ffunction-sections -fdata-sections -ffast-math -fno-rtti \
+	-ffunction-sections -fdata-sections -ffast-math -fno-rtti -fPIC \
 	-Wall -Werror -Wno-unused -Wno-comment -Wno-implicit-exception-spec-mismatch \
-	-DINCLUDE_UTF8_LOOKUP_TABLE
+	-DINCLUDE_UTF8_LOOKUP_TABLE 
 	
 %.test: SHAREDFLAGS += -g3
 test: SHAREDFLAGS += -g3
@@ -33,6 +33,14 @@ basil: $(OBJS) librt.a
 
 release: $(OBJS) librt.a
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) -o basil
+	strip -g -R .gnu.version \
+			 -R .gnu.hash \
+			 -R .note.ABI-tag \
+			 -R .note.gnu.build-id \
+			 -R .eh_frame \
+			 -R .eh_frame_hdr \
+			 -R .comment \
+			 basil
 
 librt.a: runtime/core.o runtime/sys.o
 	ar r $@ $^

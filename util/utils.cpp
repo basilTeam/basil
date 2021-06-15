@@ -41,3 +41,7 @@ void __internal_panic(const char* file, int line, const char* msg) {
     #endif
     exit(1);
 }
+
+void __cxa_pure_virtual() {
+    panic("Tried to invoke pure virtual function!");
+}

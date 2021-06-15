@@ -41,7 +41,7 @@ u64 key_hash(const T& a) {
 
 template<typename T>
 class set {
-    enum bucket_status {
+    enum bucket_status : u8 {
         EMPTY, GHOST, FILLED
     };
 

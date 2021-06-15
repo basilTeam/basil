@@ -34,7 +34,7 @@ namespace basil {
 
     bool is_separator(rune r) {
         return is_space(r) || utf8_is_punctuation_open(r) || utf8_is_punctuation_close(r) || utf8_is_initial_quote(r) || utf8_is_final_quote(r)
-            || r == '"' || r == '\'' || r == ',' || r == '.' || r == ';' || r == '\\' || r == '\0';
+            || r == '"' || r == '\'' || r == ',' || r == '.' || r == ';' || r == '\\' || r == '\0' || r == '?';
     }
 
     bool is_opener(rune r) {

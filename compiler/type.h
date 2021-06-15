@@ -34,7 +34,8 @@ namespace basil {
     // tracked by the compiler. They should be treated as constants.
     extern Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
-        S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST;
+        S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
+        S_QUESTION;
 
     // Returns the associated string for the provided symbol.
     const ustring& string_from(Symbol sym);
@@ -253,6 +254,9 @@ namespace basil {
     // Performs initialization for this source file. Sets up the symbol
     // and type tables, and initializes all static variables.
     void init_types_and_symbols();
+
+    // Releases all internal memory being held.
+    void free_types();
 }
 
 u64 hash(const basil::Symbol& symbol);

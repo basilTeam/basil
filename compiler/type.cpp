@@ -42,7 +42,8 @@ namespace basil {
 
     Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
-        S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST;
+        S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
+        S_QUESTION;
 
     void init_symbols() {
         S_NONE = symbol_from("");
@@ -64,6 +65,7 @@ namespace basil {
         S_SPLICE = symbol_from("splice");
         S_AT = symbol_from("at");
         S_LIST = symbol_from("list");
+        S_QUESTION = symbol_from("?");
     }
 
     const u64 KIND_HASHES[NUM_KINDS] = {
@@ -98,7 +100,7 @@ namespace basil {
         Kind _kind;
         u32 _id;
 
-        Class(Kind kind): _kind(kind) {}
+        Class(Kind kind): _kind(kind), _id(0) {}
         virtual ~Class() {}
 
         Kind kind() const {
@@ -429,7 +431,7 @@ namespace basil {
         bool sized;
 
         ArrayClass(Type element_in): 
-            Class(K_ARRAY), element(TYPE_LIST[element_in.id]), sized(false) {}
+            Class(K_ARRAY), element(TYPE_LIST[element_in.id]), size(0), sized(false) {}
         ArrayClass(Type element_in, u64 size_in):
             Class(K_ARRAY), element(TYPE_LIST[element_in.id]), size(size_in), sized(true) {}
 
@@ -651,7 +653,7 @@ namespace basil {
                 write(io, s, " : ", t);
             }
             if (incomplete) {
-                if (!first) write(io, ", ");
+                if (!first) write(io, "; ");
                 write(io, "...");
             }
             write(io, "}");
@@ -911,6 +913,10 @@ namespace basil {
     void init_types_and_symbols() {
         init_symbols();
         init_types();
+    }
+
+    void free_types() {
+        for (rc<Class>& r : TYPE_LIST) r = nullptr;
     }
 }
 

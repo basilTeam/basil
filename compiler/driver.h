@@ -2,10 +2,16 @@
 #define BASIL_DRIVER_H
 
 #include "env.h"
-#include "builtin.h"
+#include "eval.h"
 #include "token.h"
 
 namespace basil {
+    // Initializes all necessary state for the compiler.
+    void init();
+
+    // Safely cleans up all resources before the compiler terminates.
+    void deinit();
+
     enum PrintFlag {
         PRINT_TOKENS,
         PRINT_PARSED,
@@ -15,8 +21,8 @@ namespace basil {
     Source load_step(const char* const& str);
     vector<Token> lex_step(const Source& source);
     Value parse_step(const vector<Token>& tokens);
-    auto resolve_step(rc<Env> env);
-    auto eval_step(rc<Env> env);
+    Value resolve_step(const Value& term);
+    Value eval_step(const Value& term);
 
     template<typename T>
     T compile(const T& input) {

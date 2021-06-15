@@ -11,6 +11,7 @@ namespace basil {
             case PK_VARIABLE:
             case PK_VARIADIC:
             case PK_TERM:
+            case PK_QUOTED:
             case PK_SELF:
                 return true;
             case PK_KEYWORD:
@@ -21,6 +22,7 @@ namespace basil {
     }
 
     const Param P_VAR{ S_NONE, PK_VARIABLE },
+                P_QUOTED{ S_NONE, PK_QUOTED },
                 P_TERM{ S_NONE, PK_TERM },
                 P_SELF{ S_NONE, PK_SELF };
 
@@ -83,6 +85,10 @@ namespace basil {
 
     rc<StateMachine> Callable::clone() {
         return ref<Callable>(*this);
+    }
+    
+    optional<const Param&> Callable::current_param() const {
+        return index < parameters->size() ? some<const Param&>((*parameters)[index]) : none<const Param&>();
     }
 
     Overloaded::Overloaded(const vector<rc<Callable>>& overloads_in):

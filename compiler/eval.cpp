@@ -31,7 +31,7 @@ namespace basil {
 
         while (!sm->is_finished() && it != end) {
             if (sm->precheck_keyword(*it)) { // keyword matches
-                // params.push(*it); <-- don't actually add keywords to the parameter list
+                params.push(*it);
                 sm->advance(*it ++);
             }
             else if (sm->precheck_term(*it)) { // matches that avoid grouping
@@ -211,31 +211,27 @@ namespace basil {
         }
     }
 
-    // We use this structure to wrap the root environment so that it can be
-    // freed at the end of the program.
-    struct Root {
-        void unbind(rc<Env> env) {
-            for (rc<Env>& child : env->children) if (child) {
-                unbind(child);
-                child = nullptr;
-            }
+    void unbind(rc<Env> env) {
+        for (rc<Env>& child : env->children) if (child) {
+            unbind(child);
+            child->parent = nullptr;
         }
+        env->children.clear();
+    }
+    
+    rc<Env> root;
 
-        ~Root() {
-            if (root) unbind(root);
-        }
-
-        static rc<Env> root;
-    };
-
-    rc<Env> Root::root;
+    void free_root_env() {
+        if (root) unbind(root);
+        root = nullptr;
+    }
 
     rc<Env> root_env() {
-        if (Root::root) return Root::root; // return existing root if possible
+        if (root) return root; // return existing root if possible
 
-        Root::root = ref<Env>(); // allocate empty, parentless environment
-        add_builtins(Root::root);
-        return Root::root;
+        root = ref<Env>(); // allocate empty, parentless environment
+        add_builtins(root);
+        return root;
     }
 
     EvalResult call(rc<Env> env, Value func, const Value& args) {
@@ -257,8 +253,28 @@ namespace basil {
             return fndata->builtin->comptime(env, args); // for now, assume compile time
         }
         else {
-            // TODO: user-defined function application
-            return { env, v_error({}) };
+            rc<Env> fn_env = func.data.fn->env;
+            const vector<Symbol>& fn_args = func.data.fn->args;
+            vector<optional<Value>> existing;
+            if (fn_args.size() == 1) { // bind args to single argument
+                if (auto found = fn_env->find(fn_args[0])) existing.push(some<Value>(*found)); // save previous arg value
+                else existing.push(none<Value>());
+
+                fn_env->def(fn_args[0], args);
+            }
+            else for (u32 i = 0; i < v_len(args); i ++) { // bind args to multiple arguments
+                if (auto found = fn_env->find(fn_args[i])) existing.push(some<Value>(*found)); // save previous arg value
+                else existing.push(none<Value>());
+
+                fn_env->def(fn_args[i], v_at(args, i));
+            }
+            Value fn_body = func.data.fn->body; // copy function body
+            EvalResult result = eval(fn_env, fn_body); // eval it
+
+            for (u32 i = 0; i < existing.size(); i ++) 
+                if (existing[i]) *fn_env->find(fn_args[i]) = *existing[i]; // restore any previous values
+            
+            return result;
         }
     }
 
@@ -291,22 +307,33 @@ namespace basil {
                 auto head_result = eval(env, v_head(term)); // evaluate first term
                 env = head_result.env;
                 Value head = head_result.value;
+                
+                if (v_tail(term).type == T_VOID) return {env, head}; // return the function if no args, e.g. (+)
 
                 if (head.type.of(K_FUNCTION)) {
                     vector<Value> args;
+                    rc<Callable> form = (rc<Callable>)head.form->start();
+
+                    // we basically re-run the form over the argument list here to figure out where to evaluate
                     for (Value& arg : iter_list(v_tail(term))) { // evaluate each argument
-                        auto arg_result = eval(env, arg);
-                        env = arg_result.env;
-                        args.push(arg_result.value);
+                        while (form->current_param() && form->current_param()->kind == PK_SELF) // skip self parameter
+                            form->advance(v_void({}));
+                        if (form->current_param() && 
+                            (form->current_param()->kind == PK_TERM || form->current_param()->kind == PK_QUOTED)) // skip evaluation
+                            args.push(arg); 
+                        else if (form->current_param()->kind != PK_KEYWORD) { // evaluate but ignore keywords
+                            auto arg_result = eval(env, arg);
+                            env = arg_result.env;
+                            args.push(arg_result.value);
+                        }
+                        form->advance(arg);
                     }
-                    if (args.size() == 0) return {env, head}; // return the function if no args, e.g. (+)
-                    else {
-                        Value args_value = args.size() == 1 ? args[0]
-                            : v_tuple(span(args.front().pos, args.back().pos), infer_tuple(args), args);
-                        EvalResult result = call(env, head, args_value);
-                        result.value.pos = term.pos; // prefer term pos over any other pos determined within call()
-                        return result;
-                    }
+
+                    Value args_value = args.size() == 1 ? args[0]
+                        : v_tuple(term.pos, infer_tuple(args), args);
+                    EvalResult result = call(env, head, args_value);
+                    result.value.pos = term.pos; // prefer term pos over any other pos determined within call()
+                    return result;
                 }
                 else {
                     err(term.pos, "Could not evaluate list '", term, "'.");

@@ -7,6 +7,9 @@
 #include "builtin.h"
 
 namespace basil {
+    // Untracks root env. Should only be called during deinit!
+    void free_root_env();
+
     // Returns the root environment of the compilation unit, allocating
     // and populating it the first time this function is called.
     rc<Env> root_env();

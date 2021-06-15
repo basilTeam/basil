@@ -113,10 +113,10 @@ namespace basil {
         friend Value v_dict(Source::Pos, Type, const map<Value, Value>&);
         friend Value v_tail(const Value& list);
         friend Value v_func(const Builtin& builtin);
-        friend Value v_func(Source::Pos pos, Type type, rc<Env> env, const Value& body);
+        friend Value v_func(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_alias(Source::Pos pos, const Value& term);
         friend Value v_macro(const Builtin& builtin);
-        friend Value v_macro(Source::Pos pos, Type type, rc<Env> env, const Value& body);
+        friend Value v_macro(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
     };
 
     // Represents the associated data for a compile-time string.
@@ -180,9 +180,10 @@ namespace basil {
     struct Function {
         optional<const Builtin&> builtin;
         rc<Env> env;
+        vector<Symbol> args;
         Value body;
 
-        Function(optional<const Builtin&> builtin, rc<Env> env, const Value& body);
+        Function(optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
     };
 
     // Represents the associated data for an alias.
@@ -196,9 +197,10 @@ namespace basil {
     struct Macro {
         optional<const Builtin&> builtin;
         rc<Env> env;
+        vector<Symbol> args;
         Value body;
 
-        Macro(optional<const Builtin&> builtin, rc<Env> env, const Value& body);
+        Macro(optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
     };
 
     // Constructs an integer value.
@@ -304,7 +306,7 @@ namespace basil {
     Value v_func(const Builtin& builtin);
 
     // Constructs a function value from a body and env.
-    Value v_func(Source::Pos pos, Type type, rc<Env> env, const Value& body);
+    Value v_func(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body);
 
     // Constructs an alias value from a term.
     Value v_alias(Source::Pos pos, const Value& term);
@@ -313,7 +315,7 @@ namespace basil {
     Value v_macro(const Builtin& builtin);
 
     // Constructs a macro value from a body and env.
-    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const Value& body);
+    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body);
 
     // Constant iterator for traversing list values.
     struct const_list_iterator {
@@ -491,6 +493,9 @@ namespace basil {
     // Sets the value associated with the given field in the provided struct.
     void v_struct_set(Value& str, Symbol field, const Value& v);
 
+    // Returns the number of fields in the provided struct.
+    u32 v_struct_len(const Value& str);
+
     // Returns the underlying symbol -> value map of the provided struct.
     const map<Symbol, Value>& v_struct_fields(const Value& str);
 
@@ -506,8 +511,22 @@ namespace basil {
     // Removes the key and associated value from the provided dict.
     void v_dict_erase(Value& dict, const Value& key);
 
+    // Returns the number of elements in the provided dict.
+    u32 v_dict_len(const Value& dict);
+
     // Returns the underlying value -> value map of the provided dict.
     const map<Value, Value>& v_dict_elements(const Value& dict);
+
+    // Delegates to v_tuple_len, v_dict_len, v_array_len, or v_struct_len
+    // depending on the type of 'v'.
+    u32 v_len(const Value& v);
+
+    // Delegates to v_tuple_at, v_dict_at, v_struct_at, or v_array_at 
+    // depending on the type of 'v'.
+    Value v_at(const Value& v, const Value& key);
+
+    // Delegates to v_tuple_at or v_array_at depending on the type of 'v'.
+    Value v_at(const Value& v, u32 i);
 
     // Attempts to match value v to a pattern. Returns a map of resulting
     // variable bindings if successful, or a none optional otherwise.

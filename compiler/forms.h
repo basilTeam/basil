@@ -100,6 +100,7 @@ namespace basil {
         PK_VARIADIC, // Parameter can bind to any number of terms.
         PK_KEYWORD, // Parameter matches only the corresponding symbol. Part of the function signature.
         PK_TERM, // Parameter can bind to a single ungrouped term.
+        PK_QUOTED, // Parameter can bind to any single term, with grouping, but skips evaluation.
         PK_SELF, // Parameter can bind to any single term. Used to specifically denote the function name.
         NUM_PARAM_KINDS
     };
@@ -116,6 +117,7 @@ namespace basil {
     // Since all variables and terms are the same, we use
     // these constants instead of constructing them.
     extern const Param P_VAR, // A variable parameter.
+                       P_QUOTED, // A quoted parameter.
                        P_TERM, // A term parameter.
                        P_SELF; // The self parameter.
 
@@ -146,6 +148,8 @@ namespace basil {
         bool is_finished() const override;
         optional<const Callable&> match() const override;
         rc<StateMachine> clone() override;
+        
+        optional<const Param&> current_param() const;
     private:
         // internal state used in the state machine
         u32 index;

@@ -327,13 +327,15 @@ namespace basil {
 
     Dict::Dict(const map<Value, Value>& elements_in): elements(elements_in) {}
     
-    Function::Function(optional<const Builtin&> builtin_in, rc<Env> env_in, const Value& body_in):
-        builtin(builtin_in), env(env_in), body(body_in) {}
+    Function::Function(optional<const Builtin&> builtin_in, rc<Env> env_in, 
+        const vector<Symbol>& args_in, const Value& body_in):
+        builtin(builtin_in), env(env_in), args(args_in), body(body_in) {}
 
     Alias::Alias(const Value& term_in): term(term_in) {}
 
-    Macro::Macro(optional<const Builtin&> builtin_in, rc<Env> env_in, const Value& body_in):
-        builtin(builtin_in), env(env_in), body(body_in) {}
+    Macro::Macro(optional<const Builtin&> builtin_in, rc<Env> env_in, 
+        const vector<Symbol>& args_in, const Value& body_in):
+        builtin(builtin_in), env(env_in), args(args_in), body(body_in) {}
 
     Value v_int(Source::Pos pos, i64 i) {
         Value v(pos, T_INT, nullptr);
@@ -499,15 +501,15 @@ namespace basil {
         Value v({}, builtin.type, builtin.form);
         if (!builtin.type.of(K_FUNCTION))
             panic("Attempted to create function value with non-function builtin!");
-        v.data.fn = ref<Function>(some<const Builtin&>(builtin), nullptr, v_void({}));
+        v.data.fn = ref<Function>(some<const Builtin&>(builtin), nullptr, vector_of<Symbol>(), v_void({}));
         return v;
     }
 
-    Value v_func(Source::Pos pos, Type type, rc<Env> env, const Value& body) {
+    Value v_func(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body) {
         Value v(pos, type, nullptr);
         if (!type.of(K_FUNCTION))
             panic("Attempted to construct function value with non-function type!");
-        v.data.fn = ref<Function>(none<const Builtin&>(), env, body);
+        v.data.fn = ref<Function>(none<const Builtin&>(), env, args, body);
         return v;
     }
 
@@ -521,15 +523,15 @@ namespace basil {
         Value v({}, builtin.type, builtin.form);
         if (!builtin.type.of(K_MACRO))
             panic("Attempted to create macro value with non-macro builtin!");
-        v.data.macro = ref<Macro>(some<const Builtin&>(builtin), nullptr, v_void({}));
+        v.data.macro = ref<Macro>(some<const Builtin&>(builtin), nullptr, vector_of<Symbol>(), v_void({}));
         return v;
     }
 
-    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const Value& body) {
+    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body) {
         Value v(pos, type, nullptr);
         if (!type.of(K_MACRO))
             panic("Attempted to construct macro value with non-macro type!");
-        v.data.macro = ref<Macro>(none<const Builtin&>(), env, body);
+        v.data.macro = ref<Macro>(none<const Builtin&>(), env, args, body);
         return v;
     }
 
@@ -817,6 +819,11 @@ namespace basil {
         it->second = coerce(v, t_struct_field(str.type, field));
     }
 
+    u32 v_struct_len(const Value& str) {
+        if (!str.type.of(K_STRUCT)) panic("Expected a struct value!");
+        return str.data.str->fields.size();
+    }
+
     const map<Symbol, Value>& v_struct_fields(const Value& str) {
         if (!str.type.of(K_STRUCT)) panic("Expected a struct value!");
         return str.data.str->fields;
@@ -858,9 +865,66 @@ namespace basil {
         dict.data.dict->elements.erase(coerce(key, t_dict_key(dict.type)));
     }
 
+    u32 v_dict_len(const Value& dict) {
+        if (!dict.type.of(K_DICT)) panic("Expected a dictionary value!");
+        return dict.data.dict->elements.size();
+    }
+
     const map<Value, Value>& v_dict_elements(const Value& dict) {
         if (!dict.type.of(K_DICT)) panic("Expected a dictionary value!");
         return dict.data.dict->elements;
+    }
+    
+    u32 v_len(const Value& v) {
+        switch (v.type.kind()) {
+            case K_TUPLE: return v_tuple_len(v);
+            case K_ARRAY: return v_array_len(v);
+            case K_DICT: return v_dict_len(v);
+            case K_STRUCT: return v_struct_len(v);
+            case K_LIST:
+                panic("List does not support the length operation due to performance reasons.");
+                return 0;
+            default:
+                panic("Provided value does not support the length operation!");
+                return 0;
+        }
+    }
+
+    Value v_at(const Value& v, u32 i) {
+        switch (v.type.kind()) {
+            case K_TUPLE: 
+                return v_tuple_at(v, i);
+            case K_ARRAY:
+                return v_array_at(v, i);
+            case K_LIST:
+                panic("List does not support indexing due to performance reasons.");
+                return v_error({});
+            default:
+                panic("Provided value is not indexable!");
+                return v_error({});
+        }
+    }
+
+    Value v_at(const Value& v, const Value& key) {
+        switch (v.type.kind()) {
+            case K_TUPLE: 
+                if (key.type != T_INT) panic("Expected integer key accessing tuple element!"); 
+                return v_tuple_at(v, key.data.i);
+            case K_ARRAY:
+                if (key.type != T_INT) panic("Expected integer key accessing array element!"); 
+                return v_array_at(v, key.data.i);
+            case K_STRUCT:
+                if (key.type != T_SYMBOL) panic("Expected symbol key accessing struct field!"); 
+                return v_struct_at(v, key.data.sym);
+            case K_DICT:
+                return v_dict_at(v, key);
+            case K_LIST:
+                panic("List does not support indexing due to performance reasons.");
+                return v_error({});
+            default:
+                panic("Provided value is not indexable!");
+                return v_error({});
+        }
     }
 
     optional<map<Symbol, Value>> v_match(const Value& pattern, const Value& v) {

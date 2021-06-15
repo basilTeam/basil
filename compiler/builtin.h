@@ -30,7 +30,7 @@ namespace basil {
     };
 
     extern Builtin
-        // DEF, // Special forms/core functionality.
+        DEF, // Special forms/core functionality.
         ADD, SUB, MUL; // , DIV, MOD, NEGATE; // Basic arithmetic.
 
     // Adds all built-in functions and macros to the provided environment.

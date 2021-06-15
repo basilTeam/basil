@@ -6,6 +6,15 @@
 #include "eval.h"
 
 namespace basil {
+    void init() {
+        init_types_and_symbols();
+    }
+
+    void deinit() {
+        free_root_env();
+        free_types();
+    }
+
     Source load_step(const char* const& str) {
         buffer b;
         write(b, str);
@@ -28,18 +37,14 @@ namespace basil {
         else return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), values);
     }
 
-    auto resolve_step(rc<Env> env) {
-        return [=](const Value& term) -> EvalResult {
-            Value term_copy = term;
-            auto new_env = resolve_form(env, term_copy);
-            return { new_env, term_copy };
-        };
+    Value resolve_step(const Value& term) {
+        Value term_copy = term;
+        auto new_env = resolve_form(root_env(), term_copy);
+        return term_copy;
     }
 
-    auto eval_step(rc<Env> env) {
-        return [=](const Value& term) -> EvalResult {
-            Value term_copy = term;
-            return eval(env, term_copy);
-        };
+    Value eval_step(const Value& term) {
+        Value term_copy = term;
+        return eval(root_env(), term_copy).value;
     }
 }

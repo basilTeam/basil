@@ -45,6 +45,8 @@ namespace basil {
 
     Value eval_step(const Value& term) {
         Value term_copy = term;
-        return eval(root_env(), term_copy).value;
+        Value result = eval(root_env(), term_copy).value;
+        if (error_count()) print_errors(_stdout, nullptr), discard_errors();
+        return result;
     }
 }

@@ -293,7 +293,7 @@ namespace basil {
                     || var->type == T_UNDEFINED) {
                     // undefined is a placeholder for values that exist at form
                     // resolution but are not actually defined during evaluation
-                    err(term.pos, "Undefined variable '", var, "'.");
+                    err(term.pos, "Undefined variable '", term.data.sym, "'.");
                     return {env, v_error(term.pos)};
                 }
                 return {env, *var};
@@ -307,26 +307,60 @@ namespace basil {
                 auto head_result = eval(env, v_head(term)); // evaluate first term
                 env = head_result.env;
                 Value head = head_result.value;
-                
+
                 if (v_tail(term).type == T_VOID) return {env, head}; // return the function if no args, e.g. (+)
 
                 if (head.type.of(K_FUNCTION)) {
                     vector<Value> args;
+                    vector<Value> varargs; // we use this to accumulate arguments for an individual variadic parameter
                     rc<Callable> form = (rc<Callable>)head.form->start();
 
                     // we basically re-run the form over the argument list here to figure out where to evaluate
                     for (Value& arg : iter_list(v_tail(term))) { // evaluate each argument
                         while (form->current_param() && form->current_param()->kind == PK_SELF) // skip self parameter
                             form->advance(v_void({}));
-                        if (form->current_param() && 
-                            (form->current_param()->kind == PK_TERM || form->current_param()->kind == PK_QUOTED)) // skip evaluation
-                            args.push(arg); 
+                        
+                        form->precheck_keyword(arg); // leave variadics for keyword if possible
+
+                        // if we were building a variadic list, and aren't on a variadic anymore,
+                        // we clear the varargs and push them as a list onto the arg array
+                        if (form->current_param()->kind != PK_VARIADIC 
+                            && form->current_param()->kind != PK_QUOTED_VARIADIC
+                            && varargs.size() > 0) {
+                            args.push(v_list(
+                                span(varargs.front().pos, varargs.back().pos),
+                                infer_list(varargs),
+                                varargs
+                            ));
+                            varargs.clear();
+                        }
+                        if (form->current_param() &&  // skip evaluation
+                            (form->current_param()->kind == PK_TERM 
+                             || form->current_param()->kind == PK_QUOTED 
+                             || form->current_param()->kind == PK_QUOTED_VARIADIC)) {
+                                 
+                            if (form->current_param()->kind == PK_QUOTED_VARIADIC) varargs.push(arg);
+                            else args.push(arg);
+                        }
                         else if (form->current_param()->kind != PK_KEYWORD) { // evaluate but ignore keywords
                             auto arg_result = eval(env, arg);
                             env = arg_result.env;
-                            args.push(arg_result.value);
+                            if (form->current_param()->kind == PK_VARIADIC) varargs.push(arg_result.value);
+                            else args.push(arg_result.value);
                         }
                         form->advance(arg);
+                    }
+                    if (varargs.size() > 0) { // push any remaining varargs as list onto args
+                        args.push(v_list(
+                            span(varargs.front().pos, varargs.back().pos),
+                            infer_list(varargs),
+                            varargs
+                        ));
+                    }
+
+                    if (args.size() == 0) {
+                        err(term.pos, "Procedure must be called on one or more arguments; zero given.");
+                        return { env, v_error({}) };
                     }
 
                     Value args_value = args.size() == 1 ? args[0]

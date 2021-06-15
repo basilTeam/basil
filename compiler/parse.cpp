@@ -203,9 +203,10 @@ namespace basil {
                 values.push(suffixed);
                 while (view && view.peek().kind != TK_NEWLINE) {
                     Value v = parse_expr(view, ctx);
-                    if (v.pos.line_start >= suffixed.pos.line_end) break; // stop if we're on a different line
+                    if (v.pos.line_start > suffixed.pos.line_end) break; // stop if we're on a different line
                     values.push(v);
                 }
+                return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), values);
             }
         }
         return suffixed;

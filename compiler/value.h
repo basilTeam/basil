@@ -30,11 +30,11 @@ namespace basil {
     // Represents a compile-time value. Values have a few fundamental
     // properties. A value's type describes what kind of data it holds.
     // A value's pos (position) corresponds to the location in the source
-    // file that gave rise to that value. 
-    // 
-    // We use these values to represent code, where the position corresponds 
-    // directly to the region the value was read from. As evaluation progresses, 
-    // the code being evaluated imparts its location to any resulting values it 
+    // file that gave rise to that value.
+    //
+    // We use these values to represent code, where the position corresponds
+    // directly to the region the value was read from. As evaluation progresses,
+    // the code being evaluated imparts its location to any resulting values it
     // produces.
     struct Value {
         Source::Pos pos;
@@ -42,7 +42,7 @@ namespace basil {
         rc<Form> form;
 
         union Data {
-            i64 i;              // A primitive int value, of any bit width. 
+            i64 i;              // A primitive int value, of any bit width.
             float f32;          // A 32-bit primitive float value.
             double f64;         // A 64-bit primitive float value.
             Symbol sym;         // A primitive symbol value.

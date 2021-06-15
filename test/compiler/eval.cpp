@@ -145,7 +145,7 @@ TEST(keyword_match) {
     env = group(env, code);
 
      // we should only take the second form if 'else' is present
-    ASSERT_EQUAL(code, compile("(if (< 1 2) 1) (if (< 1 2) 1 2)", load_step, lex_step, parse_step));
+    ASSERT_EQUAL(code, compile("(if (< 1 2) 1) (if (< 1 2) 1 else 2)", load_step, lex_step, parse_step));
 
     Value code2 = compile("foo 1 end 2", load_step, lex_step, parse_step);
     env->def(symbol_from("foo"), v_void({}).with(*f_overloaded(0, ASSOC_RIGHT,
@@ -155,7 +155,7 @@ TEST(keyword_match) {
     env = group(env, code2);
 
     // we should prefer the shorter form because it has a keyword match
-    ASSERT_EQUAL(code2, compile("(foo 1) 2", load_step, lex_step, parse_step));
+    ASSERT_EQUAL(code2, compile("(foo 1 end) 2", load_step, lex_step, parse_step));
 }
 
 TEST(form_callback) {

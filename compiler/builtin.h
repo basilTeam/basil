@@ -30,8 +30,16 @@ namespace basil {
     };
 
     extern Builtin
-        DEF, // Special forms/core functionality.
-        ADD, SUB, MUL; // , DIV, MOD, NEGATE; // Basic arithmetic.
+        DEF, DO, EVAL, // Special forms/core functionality.
+        IF, WHILE, // Control flow.
+        ADD, SUB, MUL, DIV, MOD, // Basic arithmetic.
+        INCR, DECR, // Increment / decrement.
+        LESS, LESS_EQUAL, GREATER, GREATER_EQUAL, EQUAL, NOT_EQUAL, // Comparisons.
+        AND, OR, XOR, NOT, // Logic.
+        HEAD, TAIL, CONS, // List manipulation.
+        LENGTH, FIND, SUBSTR, // String manipulation.
+        LIST, ARRAY, TUPLE, // Data constructors.
+        ASSIGN; // Mutation.
 
     // Adds all built-in functions and macros to the provided environment.
     void add_builtins(rc<Env> env);

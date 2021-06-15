@@ -12,6 +12,7 @@ namespace basil {
             case PK_VARIADIC:
             case PK_TERM:
             case PK_QUOTED:
+            case PK_QUOTED_VARIADIC:
             case PK_SELF:
                 return true;
             case PK_KEYWORD:
@@ -24,6 +25,8 @@ namespace basil {
     const Param P_VAR{ S_NONE, PK_VARIABLE },
                 P_QUOTED{ S_NONE, PK_QUOTED },
                 P_TERM{ S_NONE, PK_TERM },
+                P_VARIADIC{ S_NONE, PK_VARIADIC },
+                P_QUOTED_VARIADIC{ S_NONE, PK_QUOTED_VARIADIC },
                 P_SELF{ S_NONE, PK_SELF };
 
     Param p_keyword(Symbol name) {
@@ -49,7 +52,7 @@ namespace basil {
     bool Callable::precheck_keyword(const Value& keyword) {
         if (is_finished()) return false;
         if ((*parameters)[index].kind == PK_KEYWORD) return (*parameters)[index].matches(keyword);
-        if ((*parameters)[index].kind == PK_VARIADIC 
+        if (((*parameters)[index].kind == PK_VARIADIC || (*parameters)[index].kind == PK_QUOTED_VARIADIC)
             && index < parameters->size() - 1
             && (*parameters)[index + 1].kind == PK_KEYWORD
             && (*parameters)[index + 1].matches(keyword)) {
@@ -65,12 +68,16 @@ namespace basil {
 
     void Callable::advance(const Value& value) {
         if (is_finished()) {
-            if (index == parameters->size() && (*parameters)[index - 1].kind != PK_VARIADIC)
+            if (index == parameters->size() 
+                && (*parameters)[index - 1].kind != PK_VARIADIC
+                && (*parameters)[index - 1].kind != PK_QUOTED_VARIADIC)
                 index = parameters->size() + 1; // advance past end so we don't continue to match
             return; // don't advance if we've already stopped
         }
         if ((*parameters)[index].matches(value)) {
-            if ((*parameters)[index].kind != PK_VARIADIC) index ++; // don't advance if we're in a variadic
+            if ((*parameters)[index].kind != PK_VARIADIC 
+                && (*parameters)[index].kind != PK_QUOTED_VARIADIC) 
+                index ++; // don't advance if we're in a variadic
         }
         else stopped = true;
     }
@@ -80,6 +87,9 @@ namespace basil {
     }
 
     optional<const Callable&> Callable::match() const {
+        if (index == parameters->size() - 1 
+            && (parameters->back().kind == PK_VARIADIC || parameters->back().kind == PK_QUOTED_VARIADIC))
+            return some<const Callable&>(*this);
         return index == parameters->size() ? some<const Callable&>(*this) : none<const Callable&>();
     }
 
@@ -276,7 +286,11 @@ namespace basil {
     const char* PK_NAMES[NUM_PARAM_KINDS] = {
         "variable",
         "variadic",
-        "keyword"
+        "keyword",
+        "term",
+        "quoted",
+        "quoted-variadic",
+        "self"
     };
 }
 

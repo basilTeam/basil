@@ -43,7 +43,7 @@ namespace basil {
     Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION;
+        S_QUESTION, S_ELLIPSIS, S_COMMA;
 
     void init_symbols() {
         S_NONE = symbol_from("");
@@ -66,6 +66,8 @@ namespace basil {
         S_AT = symbol_from("at");
         S_LIST = symbol_from("list");
         S_QUESTION = symbol_from("?");
+        S_ELLIPSIS = symbol_from("...");
+        S_COMMA = symbol_from(",");
     }
 
     const u64 KIND_HASHES[NUM_KINDS] = {
@@ -405,19 +407,20 @@ namespace basil {
         bool operator==(const Class& other) const override {
             if (other.kind() != K_TUPLE
                 || as<TupleClass>(other).members.size() != members.size()
-                || as<TupleClass>(other).incomplete != incomplete) 
+                || as<TupleClass>(other).incomplete != incomplete)
                 return false;
             // At this point, we know that the other class is a tuple with the same number of
             // members.
-            for (u32 i = 0; i < members.size(); i ++) 
+            for (u32 i = 0; i < members.size(); i ++)
                 if (*members[i] != *as<TupleClass>(other).members[i]) return false;
-            
+
             return true; // All members must have been matched.
         }
     };
 
     Type t_tuple(const vector<Type>& elements) {
-        if (elements.size() < 2) panic("Cannot create complete tuple type with less than two members!");
+        if (elements.size() < 2)
+            panic("Cannot create complete tuple type with less than two members!");
         return t_create(ref<TupleClass>(elements, false));
     }
 
@@ -430,7 +433,7 @@ namespace basil {
         u64 size;
         bool sized;
 
-        ArrayClass(Type element_in): 
+        ArrayClass(Type element_in):
             Class(K_ARRAY), element(TYPE_LIST[element_in.id]), size(0), sized(false) {}
         ArrayClass(Type element_in, u64 size_in):
             Class(K_ARRAY), element(TYPE_LIST[element_in.id]), size(size_in), sized(true) {}
@@ -478,7 +481,7 @@ namespace basil {
 
     struct UnionClass : public Class {
         set<rc<Class>> members;
-    
+
         UnionClass(const set<Type>& members_in):
             Class(K_UNION) {
             for (Type t : members_in) members.insert(TYPE_LIST[t.id]);
@@ -512,7 +515,7 @@ namespace basil {
 
         bool operator==(const Class& other) const override {
             if (other.kind() != K_UNION
-                || as<UnionClass>(other).members.size() != members.size()) 
+                || as<UnionClass>(other).members.size() != members.size())
                 return false;
 
             // At this point we know the size of both types' member sets is the same.
@@ -531,7 +534,7 @@ namespace basil {
 
     struct IntersectionClass : public Class {
         set<rc<Class>> members;
-    
+
         IntersectionClass(const set<Type>& members_in):
             Class(K_INTERSECT) {
             for (Type t : members_in) members.insert(TYPE_LIST[t.id]);
@@ -564,7 +567,7 @@ namespace basil {
 
         bool operator==(const Class& other) const override {
             if (other.kind() != K_INTERSECT
-                || as<IntersectionClass>(other).members.size() != members.size()) 
+                || as<IntersectionClass>(other).members.size() != members.size())
                 return false;
 
             // At this point we know the size of both types' member sets is the same.
@@ -584,9 +587,9 @@ namespace basil {
     struct FunctionClass : public Class {
         rc<Class> arg, ret;
 
-        FunctionClass(Type arg_in, Type ret_in): 
+        FunctionClass(Type arg_in, Type ret_in):
             Class(K_FUNCTION), arg(TYPE_LIST[arg_in.id]), ret(TYPE_LIST[ret_in.id]) {}
-        
+
         u64 lazy_hash() const override {
             return ::hash(kind()) ^ arg->hash() * 4858037243276500399ul ^ ret->hash() * 16668975004056768077ul;
         }
@@ -629,8 +632,8 @@ namespace basil {
     struct StructClass : public Class {
         map<Symbol, rc<Class>> fields;
         bool incomplete;
-    
-        StructClass(const map<Symbol, Type>& fields_in, bool incomplete_in): 
+
+        StructClass(const map<Symbol, Type>& fields_in, bool incomplete_in):
             Class(K_STRUCT), incomplete(incomplete_in) {
             for (auto [s, t] : fields_in) fields[s] = TYPE_LIST[t.id];
         }

@@ -1,8 +1,7 @@
 SRCS := $(wildcard *.cpp) \
-		$(wildcard compiler/*.cpp) \
+		$(filter-out compiler/main.cpp,$(wildcard compiler/*.cpp)) \
 		$(wildcard util/*.cpp) \
 		$(wildcard jasmine/*.cpp)
-OBJS := $(patsubst %.cpp,%.o,$(SRCS))
 
 TEST_SRCS := $(wildcard test/**/*.cpp)
 TEST_OBJS := $(patsubst %.cpp,%.test,$(TEST_SRCS))
@@ -13,7 +12,12 @@ SHAREDFLAGS := $(CXXHEADERS) -std=c++17 \
 	-ffunction-sections -fdata-sections -ffast-math -fno-rtti -fPIC \
 	-Wall -Werror -Wno-unused -Wno-comment -Wno-implicit-exception-spec-mismatch \
 	-DINCLUDE_UTF8_LOOKUP_TABLE 
-	
+
+basil: SRCS += compiler/main.cpp
+release: SRCS += compiler/main.cpp
+
+OBJS := $(patsubst %.cpp,%.o,$(SRCS))
+
 %.test: SHAREDFLAGS += -g3
 test: SHAREDFLAGS += -g3
 

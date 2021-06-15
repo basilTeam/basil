@@ -226,8 +226,8 @@ TEST(intersect_coercion) {
 }
 
 TEST(function_equality) {
-    Type a = t_function(T_INT, T_BOOL), b = t_function(T_INT, T_BOOL), c = t_function(T_BOOL, T_INT),
-        d = t_function(T_FLOAT, T_BOOL);
+    Type a = t_func(T_INT, T_BOOL), b = t_func(T_INT, T_BOOL), c = t_func(T_BOOL, T_INT),
+        d = t_func(T_FLOAT, T_BOOL);
     
     ASSERT_EQUAL(a, b);
     ASSERT_NOT_EQUAL(a, c);
@@ -235,8 +235,8 @@ TEST(function_equality) {
 }
 
 TEST(function_coercion) {
-    Type a = t_function(T_INT, T_BOOL), b = t_function(T_FLOAT, T_BOOL), c = t_function(T_ANY, T_BOOL),
-        d = t_function(T_INT, T_ANY), e = t_function(T_ANY, T_ANY);
+    Type a = t_func(T_INT, T_BOOL), b = t_func(T_FLOAT, T_BOOL), c = t_func(T_ANY, T_BOOL),
+        d = t_func(T_INT, T_ANY), e = t_func(T_ANY, T_ANY);
     
     ASSERT_FALSE(a.coerces_to(b)); // functions are not variant in argument or return types
      
@@ -253,7 +253,7 @@ TEST(function_coercion) {
     ASSERT_FALSE(e.coerces_to(d));
     ASSERT_FALSE(e.coerces_to(a));
 
-    Type f = t_function(T_INT, T_TYPE), g = t_function(T_TYPE, T_INT);
+    Type f = t_func(T_INT, T_TYPE), g = t_func(T_TYPE, T_INT);
 
     ASSERT_TRUE(f.coerces_to(T_TYPE)); // function types that return types can be coerced to types themselves
     ASSERT_FALSE(g.coerces_to(T_TYPE));

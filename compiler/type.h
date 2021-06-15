@@ -35,7 +35,7 @@ namespace basil {
     extern Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION;
+        S_QUESTION, S_ELLIPSIS, S_COMMA;
 
     // Returns the associated string for the provided symbol.
     const ustring& string_from(Symbol sym);

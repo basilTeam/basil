@@ -101,6 +101,7 @@ namespace basil {
         PK_KEYWORD, // Parameter matches only the corresponding symbol. Part of the function signature.
         PK_TERM, // Parameter can bind to a single ungrouped term.
         PK_QUOTED, // Parameter can bind to any single term, with grouping, but skips evaluation.
+        PK_QUOTED_VARIADIC, // Parameter can bind to any number of terms, but skips evaluation for all of them.
         PK_SELF, // Parameter can bind to any single term. Used to specifically denote the function name.
         NUM_PARAM_KINDS
     };
@@ -119,6 +120,8 @@ namespace basil {
     extern const Param P_VAR, // A variable parameter.
                        P_QUOTED, // A quoted parameter.
                        P_TERM, // A term parameter.
+                       P_VARIADIC, // A variadic parameter.
+                       P_QUOTED_VARIADIC, // A variadic quoted parameter.
                        P_SELF; // The self parameter.
 
     // Constructs a keyword parameter.

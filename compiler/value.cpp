@@ -373,6 +373,12 @@ namespace basil {
         return v;
     }
 
+    Value v_bool(Source::Pos pos, bool b) {
+        Value v(pos, T_BOOL, nullptr);
+        v.data.b = b;
+        return v;
+    }
+
     Value v_void(Source::Pos pos) {
         return Value(pos, T_VOID, nullptr);
     }

@@ -147,11 +147,19 @@ namespace basil {
     Type::Type(): id(0) {}
 
     Kind Type::kind() const {
-        return TYPE_LIST[id]->kind();
+        Kind k = TYPE_LIST[id]->kind();
+        if (k == K_TVAR) { // look at underlying type for this
+            return t_tvar_concrete(*this).kind();
+        }
+        else return k;
     }
 
     bool Type::of(Kind kind) const {
         return this->kind() == kind;
+    }
+
+    bool Type::is_tvar() const {
+        return TYPE_LIST[id]->kind() == K_TVAR;
     }
 
     void Type::format(stream& io) const {
@@ -261,6 +269,15 @@ namespace basil {
 
         bool coerces_to(const Class& other) const override {
             return Class::coerces_to(other) || other.kind() == K_LIST;
+        }
+    };
+
+    // Represents the undefined type.
+    struct UndefinedClass : public SingletonClass {
+        UndefinedClass(Kind kind, const char* name): SingletonClass(kind, name) {}
+
+        bool coerces_to(const Class& other) const override {
+            return true; // undefined can coerce to all other types
         }
     };
 
@@ -771,6 +788,46 @@ namespace basil {
         }
     };
 
+    static vector<Type> tvar_bindings;
+
+    struct TVarClass : public Class {
+        u32 id;
+        Symbol name;
+
+        TVarClass(): Class(K_TVAR), id(tvar_bindings.size()), 
+            name(symbol_from(::format<ustring>("#", id))) { // use #<id> for default name
+            tvar_bindings.push(T_ANY); // start out as 'any'
+        }
+
+        TVarClass(Symbol name_in): TVarClass() { name = name_in; }
+
+        u64 lazy_hash() const override {
+            return ::hash(kind()) * 3078465884631522967ul 
+                ^ ::hash(id) * 8292421814661686869ul
+                ^ ::hash(name);
+        }
+
+        void format(stream& io) const override {
+            write(io, name);
+        }
+
+        bool coerces_to(const Class& other) const override {
+            return TYPE_LIST[tvar_bindings[id].id]->coerces_to(other);
+        }
+
+        bool operator==(const Class& other) const override {
+            return &other == this; // we can just do ref equality, since tvars don't really need to be deduplicated
+        }
+    };
+    
+    Type t_var() {
+        return t_create(ref<TVarClass>());
+    }
+    
+    Type t_var(Symbol name) {
+        return t_create(ref<TVarClass>(name));
+    }
+
     bool Class::coerces_to(const Class& other) const {
         bool result = *this == other
             || other.kind() == K_ANY // all types can convert to 'any'
@@ -897,6 +954,16 @@ namespace basil {
         return t_from(as<FunctionClass>(*TYPE_LIST[fn.id]).ret->id());
     }
 
+    Type t_tvar_concrete(Type tvar) {
+        if (!tvar.is_tvar()) panic("Expected type variable!");
+        return tvar_bindings[as<TVarClass>(*TYPE_LIST[tvar.id]).id];
+    }
+
+    Symbol t_tvar_name(Type tvar) {
+        if (!tvar.is_tvar()) panic("Expected type variable!");
+        return as<TVarClass>(*TYPE_LIST[tvar.id]).name;
+    }
+
     void init_types() {
         T_VOID = t_create(ref<VoidClass>(K_VOID, "void"));
         T_INT = t_create(ref<NumberClass>(K_INT, "int", false, 8)); // 8-byte integral type
@@ -910,7 +977,7 @@ namespace basil {
         T_ALIAS = t_create(ref<SingletonClass>(K_ALIAS, "alias"));
         T_ERROR = t_create(ref<SingletonClass>(K_ERROR, "error"));
         T_ANY = t_create(ref<SingletonClass>(K_ANY, "any"));
-        T_UNDEFINED = t_create(ref<SingletonClass>(K_UNDEFINED, "undefined"));
+        T_UNDEFINED = t_create(ref<UndefinedClass>(K_UNDEFINED, "undefined"));
     }
 
     void init_types_and_symbols() {

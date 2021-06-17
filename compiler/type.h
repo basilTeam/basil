@@ -72,6 +72,7 @@ namespace basil {
         K_DICT,
         K_MACRO,
         K_ALIAS,
+        K_TVAR, 
         NUM_KINDS
     };
 
@@ -86,10 +87,24 @@ namespace basil {
         Type();
 
         // Returns the kind of this type, in the above enum.
+        // 
+        // Note: this is the "concrete kind" of the type - if this type is a
+        // type variable, it will return the kind of the currently bound
+        // type to that type variable.
+        // 
+        // The motivation for this is to allow type variables to be seamlessly
+        // used in place of their bound types wherever possible - it's only in
+        // exceptional cases that we really need to know if a type is a type
+        // variable or not.
         Kind kind() const;
         
         // Returns whether the kind of this type equals the provided one.
+        //
+        // Note: like kind(), this is based on the concrete kind of the type.
         bool of(Kind kind) const;
+
+        // Returns true if this type is a type variable.
+        bool is_tvar() const;
 
         // Returns whether this type can coerce to the provided target type.
         bool coerces_to(Type other) const;
@@ -187,6 +202,12 @@ namespace basil {
     // Constructs a macro type with the given arity.
     Type t_macro(int arity);
 
+    // Returns a fresh type variable.
+    Type t_var();
+
+    // Returns a fresh type variable, identified with the provided name.
+    Type t_var(Symbol name);
+
     extern Type T_VOID, T_INT, T_FLOAT, T_DOUBLE, T_SYMBOL, 
         T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, 
         T_ANY, T_UNDEFINED;
@@ -250,6 +271,12 @@ namespace basil {
 
     // Returns the return type of the provided function type.
     Type t_ret(Type fn);
+
+    // Returns the best symbol representation of the provided type variable.
+    Symbol t_tvar_name(Type tvar);
+
+    // Returns the currently-bound type of the provided type variable.
+    Type t_tvar_concrete(Type tvar);
     
     // Performs initialization for this source file. Sets up the symbol
     // and type tables, and initializes all static variables.

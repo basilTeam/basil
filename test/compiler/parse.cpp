@@ -9,17 +9,17 @@ SETUP {
 }
 
 template<typename ...Args>
-Source create_source(const Args&... args) {
+rc<Source> create_source(const Args&... args) {
     buffer b;
     write(b, args...);
-    return Source(b);
+    return ref<Source>(b);
 }
 
 TEST(constants) {
-    Source src = create_source("1 2.0 \'a\' \"abc\" foo");
-    Source::View view(src);
+    rc<Source> src = create_source("1 2.0 \'a\' \"abc\" foo");
+    Source::View view(*src);
     auto tokens = lex_all(view);
-    TokenView tview(tokens);
+    TokenView tview(src, tokens);
 
     Value a = *parse(tview);
     ASSERT_EQUAL(error_count(), 0);
@@ -28,10 +28,10 @@ TEST(constants) {
 }
 
 TEST(variables) {
-    Source src = create_source("x :: y = z_w");
-    Source::View view(src);
+    rc<Source> src = create_source("x :: y = z_w");
+    Source::View view(*src);
     auto tokens = lex_all(view);
-    TokenView tview(tokens);
+    TokenView tview(src, tokens);
 
     Value a = *parse(tview), 
         b = *parse(tview), 
@@ -48,10 +48,10 @@ TEST(variables) {
 }
 
 TEST(enclosing) {
-    Source src = create_source("() (1) (2 \n(3)\n)");
-    Source::View view(src);
+    rc<Source> src = create_source("() (1) (2 \n(3)\n)");
+    Source::View view(*src);
     auto tokens = lex_all(view);
-    TokenView tview(tokens);
+    TokenView tview(src, tokens);
 
     Value a = *parse(tview), b = *parse(tview), c = *parse(tview);
     ASSERT_EQUAL(error_count(), 0);
@@ -63,10 +63,10 @@ TEST(enclosing) {
 }
 
 TEST(array) {
-    Source src = create_source("[] [ 1] [\"a\" b c ]");
-    Source::View view(src);
+    rc<Source> src = create_source("[] [ 1] [\"a\" b c ]");
+    Source::View view(*src);
     auto tokens = lex_all(view);
-    TokenView tview(tokens);
+    TokenView tview(src, tokens);
 
     Value a = *parse(tview), b = *parse(tview), c = *parse(tview);
     ASSERT_EQUAL(error_count(), 0);
@@ -78,19 +78,20 @@ TEST(array) {
 }
 
 TEST(indent) {
-    Source src = create_source(R"(
+    rc<Source> src = create_source(R"(
     a:
         b c:
           d
         e f g:
             h i
+            
     j)");
-    Source::View view(src);
+    Source::View view(*src);
     auto tokens = lex_all(view);
-    TokenView tview(tokens);
+    TokenView tview(src, tokens);
 
     Value a = *parse(tview), b = *parse(tview);
-    ASSERT_NO_ERRORS(ref<Source>(src));
+    ASSERT_NO_ERRORS(src);
 
     ASSERT_EQUAL(a, compile("(a b (c d) e f (g h i))", load_step, lex_step, parse_step));
     ASSERT_EQUAL(b, v_symbol(b.pos, symbol_from("j")));

@@ -298,6 +298,55 @@ namespace basil {
                 return true;
         }
     }
+
+    Value Value::clone() const {
+        switch (type.kind()) {
+            case K_INT:
+            case K_FLOAT:
+            case K_DOUBLE:
+            case K_SYMBOL:
+            case K_TYPE:
+            case K_CHAR:
+            case K_BOOL:
+            case K_VOID:
+            case K_ERROR:
+            case K_UNDEFINED:
+            case K_FUNCTION:
+                return *this; // shallow copy is sufficient, no ref fields
+            case K_STRING: return v_string(pos, data.string->data).with(form);
+            case K_NAMED: return v_named(pos, type, data.named->value.clone()).with(form);
+            case K_UNION: return v_union(pos, type, data.u->value.clone()).with(form);
+            case K_LIST: {
+                vector<Value> elts;
+                rc<List> l = data.list;
+                while (l) elts.push(l->head.clone()), l = l->tail;
+                return v_list(pos, type, elts).with(form);
+            }
+            case K_TUPLE: {
+                vector<Value> elts;
+                for (const Value& v : data.tuple->members) elts.push(v.clone());
+                return v_tuple(pos, type, elts).with(form);
+            }
+            case K_ARRAY: {
+                vector<Value> elts;
+                for (const Value& v : data.array->elements) elts.push(v.clone());
+                return v_array(pos, type, elts).with(form);
+            }
+            case K_STRUCT: {
+                map<Symbol, Value> fields;
+                for (const auto& [s, v] : data.str->fields) fields[s] = v.clone();
+                return v_struct(pos, type, fields).with(form);
+            }
+            case K_DICT: {
+                map<Value, Value> elements;
+                for (const auto& [k, v] : data.dict->elements) elements[k.clone()] = v.clone();
+                return v_dict(pos, type, elements).with(form);    
+            }
+            default:
+                panic("Unsupported value kind!"); 
+                return *this;
+        }
+    }
     
     bool Value::operator!=(const Value& other) const {
         return !operator==(other);
@@ -326,6 +375,21 @@ namespace basil {
     Struct::Struct(const map<Symbol, Value>& fields_in): fields(fields_in) {}
 
     Dict::Dict(const map<Value, Value>& elements_in): elements(elements_in) {}
+
+    bool FormTuple::operator==(const FormTuple& other) const {
+        if (forms.size() != other.forms.size()) return false;
+        for (u32 i = 0; i < forms.size(); i ++) if (*forms[i] != *other.forms[i]) return false;
+        return true;
+    }
+
+    void FormTuple::compute_hash() {
+        u64 h = 16267324476120324511ul;
+        for (const auto& f : forms) {
+            h *= 13332580176933800113ul;
+            h ^= f->hash();
+        }
+        hash = h;
+    }
     
     Function::Function(optional<const Builtin&> builtin_in, rc<Env> env_in, 
         const vector<Symbol>& args_in, const Value& body_in):
@@ -943,6 +1007,32 @@ namespace basil {
         if (src.type != target) panic("Implicit conversion rules are unimplemented!");
         return src;
     }
+
+    rc<Value> v_resolve_body(Value fn, const Value& args) {
+        u32 num_args = fn.data.fn->args.size();
+        auto& table = fn.data.fn->resolutions;
+        FormTuple tup;
+        if (num_args == 1) {
+            tup.forms.push(args.form); // single arg
+        }
+        else for (u32 i = 0; i < num_args; i ++) {
+            tup.forms.push(v_tuple_at(args, i).form); // get forms for each arg
+        }
+        tup.compute_hash();
+
+        auto it = table.find(tup);
+        if (it == table.end()) {
+            table.put(tup, ref<Value>(fn.data.fn->body.clone()));
+            return table.find(tup)->second;
+        }
+        else {
+            return it->second;
+        }
+    }
+}
+
+u64 hash(const basil::FormTuple& forms) {
+    return forms.hash;
 }
 
 void write(stream& io, const basil::Value& value) {

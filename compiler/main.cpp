@@ -3,15 +3,18 @@
 
 using namespace basil;
 
-void do_thing() {
-    Value code = compile("1 + 2", load_step, lex_step, parse_step);
-    auto er = eval(root_env(), code);
-    println(er.value);
-}
-
 int main(int argc, char** argv) {
     init();
-    do_thing();
+    if (argc == 2) {
+        if (ustring(argv[1]) == "help") help(argv[0]);
+        else run(argv[1]);
+    }
+    else if (argc == 1) {
+        repl();
+    }
+    else {
+        help(argv[0]);
+    }
     deinit();
     return 0;
 }

@@ -153,10 +153,14 @@ namespace basil {
         rc<StateMachine> clone() override;
         
         optional<const Param&> current_param() const;
+        bool operator==(const Callable& other) const;
+        bool operator!=(const Callable& other) const;
+        u64 hash();
     private:
         // internal state used in the state machine
         u32 index;
         bool stopped;
+        optional<u64> lazy_hash;
         friend struct Overloaded;
     };
 
@@ -176,9 +180,14 @@ namespace basil {
         bool is_finished() const override;
         optional<const Callable&> match() const override;
         rc<StateMachine> clone() override;
+
+        bool operator==(const Overloaded& other) const;
+        bool operator!=(const Overloaded& other) const;
+        u64 hash();
         
         rc<set<Symbol>> mangled; // stores mangled forms of the different overloads to detect duplicates
         optional<bool> has_prefix, has_infix;
+        optional<u64> lazy_hash;
 
         friend optional<rc<Form>> f_overloaded(i64, const vector<rc<Form>>&);
         friend optional<rc<Form>> f_add_overload(rc<Form>, rc<Form>);
@@ -225,7 +234,13 @@ namespace basil {
         // PANICS if this form is not invokable. Please check this before
         // calling!
         rc<StateMachine> start();
+
+        bool operator==(const Form& other) const;
+        bool operator!=(const Form& other) const;
+        u64 hash() const;
     };
+
+    bool operator==(rc<Form> a, rc<Form> b);
 
     // The form of a single term. Terms represent constants, variables, and all sorts of
     // non-invokable values.
@@ -269,6 +284,8 @@ namespace basil {
     // the existing overloaded form and returns its refcell.
     optional<rc<Form>> f_add_overload(rc<Form> existing, rc<Form> addend);
 }
+
+u64 hash(const rc<basil::Form>& form);
 
 void write(stream& io, basil::ParamKind fk);
 void write(stream& io, basil::FormKind fk);

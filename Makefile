@@ -13,7 +13,6 @@ SHAREDFLAGS := $(CXXHEADERS) -std=c++17 \
 	-Wall -Werror -Wno-unused -Wno-comment -Wno-implicit-exception-spec-mismatch \
 	-DINCLUDE_UTF8_LOOKUP_TABLE 
 
-basil: SRCS += compiler/main.cpp
 release: SRCS += compiler/main.cpp
 
 OBJS := $(patsubst %.cpp,%.o,$(SRCS))
@@ -32,11 +31,11 @@ LDFLAGS := -Wl,--gc-sections
 clean:
 	rm -f $(OBJS) $(TEST_OBJS) *.o.tmp basil librt.a runtime/*.o
 
-basil: $(OBJS) librt.a
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) -o $@
+basil: $(OBJS) compiler/main.o librt.a
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o $@
 
-release: $(OBJS) librt.a
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) -o basil
+release: $(OBJS) compiler/main.o librt.a
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o basil
 	strip -g -R .gnu.version \
 			 -R .gnu.hash \
 			 -R .note.ABI-tag \

@@ -10,8 +10,9 @@ namespace basil {
         "none"
     };
 
-    TokenView::TokenView(const vector<Token>& tokens_in):
-        tokens(tokens_in), eof(Token{tokens.back().pos, S_NONE, TK_NONE}), i(0) {}
+    TokenView::TokenView(rc<Source> source_in, vector<Token>& tokens_in):
+        source(source_in), tokens(tokens_in), 
+        eof(Token{{}, S_NONE, TK_NONE}), i(0) {}
 
     TokenView::operator bool() const {
         return i < tokens.size();
@@ -26,6 +27,20 @@ namespace basil {
 
     const Token& TokenView::read() {
         return tokens[i ++];
+    }
+
+    bool TokenView::expand_line(stream& io) {
+        if (!source) return false; // fail if we don't have an attached source
+
+        u32 i = tokens.size(); // move to the end of the current token list
+
+        Source::View view = source->expand_line(io);
+        while (view.peek()) {
+            if (auto tok = lex(view)) tokens.push(*tok);
+            else return false; // fail if token error occurs
+        }
+
+        return true;
     }
 
     bool is_space(rune r) {
@@ -194,7 +209,7 @@ namespace basil {
             else if (view.peek() != '\"') 
                 err(view.pos(), "Expected closing quote in string literal, found '", view.peek(), "'.");
             else view.read(); // consume trailing quote
-            result = Token{span(begin, view.pos()), symbol_from(acc), TK_STRING};
+            result = Token{span(begin, end), symbol_from(acc), TK_STRING};
         }
         else if (is_digit(ch)) {
             ustring acc;

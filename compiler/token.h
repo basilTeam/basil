@@ -41,12 +41,13 @@ namespace basil {
     // Movable view over a vector of tokens. Provides a peek/read interface
     // for tokens to be used in the context-free parser.
     struct TokenView {
-        const vector<Token>& tokens;
+        rc<Source> source;
+        vector<Token>& tokens;
         Token eof;
         u32 i;
 
         // Constructs a TokenView at the beginning of the provided token vector.
-        TokenView(const vector<Token>& tokens);
+        TokenView(rc<Source> source, vector<Token>& tokens);
 
         // Returns whether or not there are still tokens to be read from this view.
         operator bool() const;
@@ -56,6 +57,11 @@ namespace basil {
 
         // Returns and moves past the next token in the token sequence.
         const Token& read();
+
+        // Expands this TokenView's underlying source by one line, and adds
+        // the tokens it contains to this view's underlying vector.
+        // Returns false if expansion failed, such as if an illegal token was found.
+        bool expand_line(stream& io);
     };
 
     // Consumes the next token available from the provided view, moving

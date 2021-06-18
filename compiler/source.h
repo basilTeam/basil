@@ -90,6 +90,10 @@ namespace basil {
 
         // Returns a Source::Pos spanning the entire source file.
         Pos full_span() const;
+
+        // Reads text from the provided stream until encountering a 
+        // line break. Adds the text as a new line to this source.
+        View expand_line(stream& io);
     };
 
     // Returns a new Source::Pos, representing the smallest range that

@@ -29,6 +29,11 @@ namespace basil {
 
     Source::Source(const char* filename) {
         file f(filename, "r");
+        if (!f) {
+            err({}, "Could not open file '", filename, "'.");
+            return;
+        }
+
         string s; // we're using this as a byte buffer
         while (f.peek()) {
             s += f.peek();
@@ -133,6 +138,18 @@ namespace basil {
     Source::Pos Source::full_span() const {
         if (lines.size() == 0) return { 0, 0, 0, 0 };
         return { 0, 0, lines.size(), 0 };
+    }
+    
+    Source::View Source::expand_line(stream& io) {
+        string s; // we're using this as a byte buffer
+        while (io.peek()) {
+            s += io.peek();
+            if (io.read() == '\n') {
+                lines.push(process_line(s)); // convert to ustring and push 
+                break; // stop after reading one line
+            }
+        }
+        return Source::View(*this, lines.size() - 1);
     }
 
     Source::Pos span(Source::Pos a, Source::Pos b) { 

@@ -82,6 +82,9 @@ namespace basil {
         // Writes this value to the provided stream.
         void format(stream& io) const;
 
+        // Deep-copies this value.
+        Value clone() const;
+
         bool operator==(const Value& other) const;
         bool operator!=(const Value& other) const;
 
@@ -176,12 +179,21 @@ namespace basil {
         Dict(const map<Value, Value>& elements);
     };
 
+    struct FormTuple {
+        u64 hash;
+        vector<rc<Form>> forms;
+
+        void compute_hash();
+        bool operator==(const FormTuple& other) const;
+    };
+
     // Represents the associated data for a function.
     struct Function {
         optional<const Builtin&> builtin;
         rc<Env> env;
         vector<Symbol> args;
         Value body;
+        map<FormTuple, rc<Value>> resolutions;
 
         Function(optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
     };
@@ -536,7 +548,14 @@ namespace basil {
     // is impossible.
     // Should not return an error if src.type.coerces_to(target) returns true.
     Value coerce(const Value& src, Type target);
+
+    // Returns the most appropriate body term for the function, given the provided
+    // arguments. Specifically, this handles things like avoiding duplicate form
+    // resolution.
+    rc<Value> v_resolve_body(Value fn, const Value& args);
 }
+
+u64 hash(const basil::FormTuple& forms);
 
 void write(stream& io, const basil::Value& value);
 

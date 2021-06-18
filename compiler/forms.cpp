@@ -101,6 +101,36 @@ namespace basil {
         return index < parameters->size() ? some<const Param&>((*parameters)[index]) : none<const Param&>();
     }
 
+    bool Callable::operator==(const Callable& other) const {
+        if (parameters->size() != other.parameters->size()) return false; // should have same parameter count
+        for (u32 i = 0; i < parameters->size(); i ++) {
+            Param ours = (*parameters)[i], theirs = (*other.parameters)[i];
+            if (ours.kind != theirs.kind) return false; // all parameters should have the same kinds
+            if (ours.kind == PK_KEYWORD && ours.name != theirs.name) return false; // ...and same names
+        }
+        return true; // everything must have matched
+    }
+
+    bool Callable::operator!=(const Callable& other) const {
+        return !(*this == other);
+    }
+
+    u64 Callable::hash() {
+        if (!lazy_hash) {
+            u64 h = 12877513369093186357ul;
+            for (const auto& p : *parameters) {
+                h *= 16698397012925964971ul;
+                h ^= ::hash(p.kind);
+                if (p.kind == PK_KEYWORD) {
+                    h *= 5169422403109494793ul;
+                    h ^= ::hash(p.name);
+                }
+            }
+            lazy_hash = some<u64>(h);
+        }
+        return *lazy_hash;
+    }
+
     Overloaded::Overloaded(const vector<rc<Callable>>& overloads_in):
         overloads(overloads_in), mangled(ref<set<Symbol>>()) {}
 
@@ -170,6 +200,30 @@ namespace basil {
         return ref<Overloaded>(*this);
     }
 
+    bool Overloaded::operator==(const Overloaded& other) const {
+        if (other.overloads.size() != overloads.size()) return false; // should have same number of cases
+        for (u32 i = 0; i < overloads.size(); i ++) {
+            if (*overloads[i] != *other.overloads[i]) return false; // all cases should match
+        }
+        return true;
+    }
+
+    bool Overloaded::operator!=(const Overloaded& other) const {
+        return !(*this == other);
+    }
+
+    u64 Overloaded::hash() {
+        if (!lazy_hash) {
+            u64 h = 9970700534761675987ul;
+            for (auto c : overloads) {
+                h *= 15605238538515081067ul;
+                h ^= c->hash();
+            }
+            lazy_hash = some<u64>(h);
+        }
+        return *lazy_hash;
+    }
+
     Form::Form(): kind(FK_TERM), precedence(0), assoc(ASSOC_LEFT) {}
 
     Form::Form(FormKind kind_in, i64 precedence_in, Associativity assoc_in): 
@@ -192,6 +246,38 @@ namespace basil {
 
     bool Form::has_infix_case() {
         return is_invokable() && invokable->has_infix_case();
+    }
+
+    bool Form::operator==(const Form& other) const {
+        if (kind != other.kind) return false; // kinds should be the same
+
+        switch (kind) {
+            case FK_OVERLOADED:
+                return *(rc<Overloaded>)invokable == *(rc<Overloaded>)other.invokable;
+            case FK_CALLABLE:
+                return *(rc<Callable>)invokable == *(rc<Callable>)other.invokable;
+            case FK_TERM:
+                return true; // if the kind matched, we're good
+            default:
+                panic("Unsupported form kind!");
+                return false;
+        }
+    }
+
+    bool Form::operator!=(const Form& other) const {
+        return !(*this == other);
+    }
+
+    u64 Form::hash() const {
+        u64 kind_hash = ::hash(kind);
+        switch (kind) {
+            case FK_CALLABLE:
+                return kind_hash * 14361106427190892639ul ^ ((rc<Callable>)invokable)->hash();
+            case FK_OVERLOADED:
+                return kind_hash * 14114865678206345347ul ^ ((rc<Overloaded>)invokable)->hash();
+            default:
+                return kind_hash;
+        }
     }
 
     const rc<Form> F_TERM = ref<Form>(FK_TERM, 0, ASSOC_LEFT);
@@ -292,6 +378,10 @@ namespace basil {
         "quoted-variadic",
         "self"
     };
+}
+
+u64 hash(const rc<basil::Form>& form) {
+    return form->hash();
 }
 
 void write(stream& io, basil::ParamKind pk) {

@@ -43,7 +43,7 @@ namespace basil {
     Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION, S_ELLIPSIS, S_COMMA;
+        S_QUESTION, S_ELLIPSIS, S_COMMA, S_DO;
 
     void init_symbols() {
         S_NONE = symbol_from("");
@@ -68,6 +68,7 @@ namespace basil {
         S_QUESTION = symbol_from("?");
         S_ELLIPSIS = symbol_from("...");
         S_COMMA = symbol_from(",");
+        S_DO = symbol_from("do");
     }
 
     const u64 KIND_HASHES[NUM_KINDS] = {
@@ -407,6 +408,25 @@ namespace basil {
                 write(io, "...");
             }
             write(io, ")");
+        }
+
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
+
+            if (other.kind() == K_TUPLE) {
+                const TupleClass& tc = as<TupleClass>(other);
+                if (incomplete && !tc.incomplete) return false; // Can't go from incomplete to complete tuple.
+                for (u32 i = 0; i < members.size(); i ++) {
+                    if (i >= tc.members.size()) 
+                        return tc.incomplete; // If target is smaller, we can only coerce if it's incomplete.
+
+                    if (!members[i]->coerces_to_generic(*tc.members[i]))
+                        return false; // Fail if members aren't convertible to the target members.
+                }
+                return members.size() == tc.members.size(); // Can't convert to tuple with more complete members.
+            }
+
+            return false;
         }
 
         bool coerces_to(const Class& other) const override {

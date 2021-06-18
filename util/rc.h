@@ -79,12 +79,16 @@ public:
   }
 
   const T* operator->() const {
-    if (!_data) panic("Attempted to dereference null refcell!");
+    if (!_data) {
+      panic("Attempted to dereference null refcell!");
+    }
     return value();
   }
 
   T* operator->() {
-    if (!_data) panic("Attempted to dereference null refcell!");
+    if (!_data) {
+      panic("Attempted to dereference null refcell!");
+    }
     return value();
   }
 

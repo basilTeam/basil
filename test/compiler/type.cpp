@@ -333,5 +333,9 @@ TEST(flat_type_variables) {
 TEST(inner_type_variables) {
     Type a = t_list(t_var());
     ASSERT_TRUE(a.coerces_to(t_list(T_INT)));
-    ASSERT_EQUAL(t_list_element(a), T_INT);
+    ASSERT_EQUAL(t_tvar_concrete(t_list_element(a)), T_INT);
+
+    Type b = t_var(), c = t_list(t_tuple(b, T_INT)), d = t_list(t_tuple(T_STRING, T_INT));
+    ASSERT_TRUE(c.coerces_to(d));
+    ASSERT_EQUAL(t_tvar_concrete(b), T_STRING);
 }

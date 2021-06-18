@@ -5,6 +5,7 @@
 #include "str.h"
 #include "ustr.h"
 #include "slice.h"
+#include "io.h"
 
 template<typename T>
 bool equals(const T& a, const T& b) {
@@ -285,6 +286,7 @@ public:
 
             if (data[i].status == FILLED && equals(data[i].value(), item)) {
                 data[i].value() = t; // potentially redundant assignment allows for overwriting existing values
+                return;
             }
 
             u64 other_dist = (i - (hash(data[i].value()) & _mask)) & _mask;
@@ -337,7 +339,7 @@ public:
         u64 i = h & _mask;
         while (true) {
             if (data[i].status == EMPTY) return end();
-            u64 dist = (i - (h & _mask)) & _mask;
+            u64 dist = (i - h) & _mask;
             u64 oh = hash(data[i].value());
             u64 other_dist = (i - (oh & _mask)) & _mask;
             if (other_dist < dist) return end();

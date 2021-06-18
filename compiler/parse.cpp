@@ -1,4 +1,5 @@
 #include "parse.h"
+#include "driver.h"
 
 namespace basil {
     struct ParseContext {
@@ -51,7 +52,7 @@ namespace basil {
 
     Value parse_enclosed(Source::Pos begin, TokenKind closer, TokenView& view, ParseContext ctx) {
         vector<Value> values;
-        while (view && view.peek().kind != closer) {
+        while (!out_of_input(view) && view.peek().kind != closer) {
             values.push(parse_suffix(view, ctx));
             while (view.peek().kind == TK_NEWLINE) view.read(); // consume blank lines
         }
@@ -68,12 +69,12 @@ namespace basil {
     Value parse_indented(Value opener, TokenView& view, ParseContext ctx) {
         vector<Value> values;
         values.push(opener);
-        while (view.peek().pos.col_start > ctx.prev_indent) {
+        while (!out_of_input(view) && ((view.peek().kind == TK_NEWLINE && !is_repl()) || view.peek().pos.col_start > ctx.prev_indent)) {
             if (view.peek().kind != TK_NEWLINE) values.push(parse_expr(view, ctx));
-            if (view.peek().kind == TK_NEWLINE) {
+            else {
                 view.read();
+                continue;
             }
-            if (!view) break;
         }
         return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), values);
     }
@@ -190,11 +191,11 @@ namespace basil {
             view.read(); // consume block
             if (view && view.peek().kind == TK_NEWLINE) { // consider indented block
                 while (view.peek().kind == TK_NEWLINE) view.read(); // consume all leading newlines
-                if (view && view.peek().pos.col_start > ctx.indent)
+                if (!out_of_input(view) && view.peek().pos.col_start > ctx.indent)
                     return parse_indented(suffixed, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start)});
                 else {
                     err(view.peek().pos, 
-                        "Expected indented block, but line isn't indented past the previous non-empty line.");
+                        "Expected indented block, but line isn't indented past the previous non-empty line. Prev indent = ", ctx.indent, ", cur indent = ", view.peek().pos.col_start);
                     return v_error(view.peek().pos);
                 }
             }
@@ -214,7 +215,17 @@ namespace basil {
 
     optional<Value> parse(TokenView& view) {
         while (view.peek().kind == TK_NEWLINE) view.read(); // consume leading newlines
-        if (!view) return none<Value>(); // return void for empty source
-        return some<Value>(parse_expr(view, ParseContext{0, u16(view.peek().pos.col_start)})); // start with indentation of first token
+        if (out_of_input(view)) return none<Value>(); // return void for empty source
+
+        // bit of a workaround to find indent
+        u32 indent = 0;
+        for (i64 i = i64(view.i); i < view.tokens.size() && i >= 0; i --) {
+            if (view.tokens[i].pos.line_start == view.peek().pos.line_start) {
+                indent = view.tokens[i].pos.col_start; // earlier token on same line
+            }
+            else break;
+        }
+
+        return some<Value>(parse_expr(view, ParseContext{0, indent})); // start with indentation of first token
     }
 }

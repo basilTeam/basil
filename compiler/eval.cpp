@@ -1,13 +1,14 @@
 #include "builtin.h"
 #include "eval.h"
+#include "driver.h"
 
 namespace basil {
     // Infers a form from the provided type.
-    rc<Form> infer_form(Symbol name, Type type) {
+    rc<Form> infer_form(Type type) {
         switch (type.kind()) {
             case K_FUNCTION: {
                 vector<Param> params;
-                params.push(p_keyword(name));
+                params.push(P_SELF);
                 for (u32 i = 0; i < t_arity(type); i ++) params.push(P_VAR);
                 return f_callable(0, ASSOC_RIGHT, params);
             }
@@ -62,6 +63,7 @@ namespace basil {
             }
 
             Source::Pos resultpos = span(params.front().pos, params.back().pos); // params can never be empty, so this is safe
+            if (params.size() >= 2) resultpos = span(params[1].pos, resultpos); // this handles the infix left hand operand
             Value result = v_list(resultpos, t_list(T_ANY), params);
             rc<Env> new_env = resolve_form(env, result);
             return some<GroupResult>(GroupResult{
@@ -182,7 +184,7 @@ namespace basil {
                         term.form = found->form;
                     }
                     else { // otherwise, try to guess the form from the type
-                        term.form = infer_form(found->data.sym, found->type);
+                        term.form = infer_form(found->type);
                     }
                 }
                 else term.form = F_TERM; // default to 'term'
@@ -190,6 +192,10 @@ namespace basil {
             }
             case K_LIST: { // the spooky one...
                 if (!v_head(term).form) env = group(env, term); // group all terms within the list first
+
+                if (!term.type.of(K_LIST)) // make sure that it's still some kind of list
+                    term = v_cons(term.pos, t_list(T_ANY), term, v_void(term.pos)).with(term.form);
+
                 if (v_head(term).form->kind == FK_CALLABLE) {
                     auto callback = ((const rc<Callable>)v_head(term).form->invokable)->callback;
                     if (callback) {
@@ -241,9 +247,11 @@ namespace basil {
             // TODO: overload resolution by type
         }
         else if (func.type.of(K_FUNCTION)) {
-            if (!args.type.coerces_to(t_arg(func.type)))
+            if (!args.type.coerces_to(t_arg(func.type))) {
                 err(args.pos, "Incompatible arguments for function! Expected '",
                     t_arg(func.type), "', got '", args.type, "'.");
+                return { env, v_error({}) };
+            }
         }
         else panic("Tried to call non-callable value!");
 
@@ -253,6 +261,8 @@ namespace basil {
             return fndata->builtin->comptime(env, args); // for now, assume compile time
         }
         else {
+            static int n = 0;
+            n ++;
             rc<Env> fn_env = func.data.fn->env;
             const vector<Symbol>& fn_args = func.data.fn->args;
             vector<optional<Value>> existing;
@@ -268,8 +278,8 @@ namespace basil {
 
                 fn_env->def(fn_args[i], v_at(args, i));
             }
-            Value fn_body = func.data.fn->body; // copy function body
-            EvalResult result = eval(fn_env, fn_body); // eval it
+            rc<Value> fn_body = v_resolve_body(func, args); // copy function body
+            EvalResult result = eval(fn_env, *fn_body); // eval it
 
             for (u32 i = 0; i < existing.size(); i ++) 
                 if (existing[i]) *fn_env->find(fn_args[i]) = *existing[i]; // restore any previous values
@@ -299,8 +309,7 @@ namespace basil {
                 return {env, *var};
             }
             case K_LIST: { // non-empty lists eval to the results of applying functions
-                if (!term.form) env = resolve_form(env, term); // resolve form if necessary
-
+                if (!term.form) env = resolve_form(env, term);
                 // TODO: expand splices
                 // TODO: expand macros
 
@@ -308,7 +317,8 @@ namespace basil {
                 env = head_result.env;
                 Value head = head_result.value;
 
-                if (v_tail(term).type == T_VOID) return {env, head}; // return the function if no args, e.g. (+)
+                if (v_tail(term).type == T_VOID) 
+                    return {env, head.with(infer_form(head.type))}; // return the function if no args, e.g. (+)
 
                 if (head.type.of(K_FUNCTION)) {
                     vector<Value> args;
@@ -345,6 +355,8 @@ namespace basil {
                         else if (form->current_param()->kind != PK_KEYWORD) { // evaluate but ignore keywords
                             auto arg_result = eval(env, arg);
                             env = arg_result.env;
+                            if (arg_result.value.type == T_ERROR) return { env, v_error({}) }; // propagate errors
+
                             if (form->current_param()->kind == PK_VARIADIC) varargs.push(arg_result.value);
                             else args.push(arg_result.value);
                         }
@@ -365,7 +377,9 @@ namespace basil {
 
                     Value args_value = args.size() == 1 ? args[0]
                         : v_tuple(term.pos, infer_tuple(args), args);
+
                     EvalResult result = call(env, head, args_value);
+                    result.value.form = infer_form(result.value.type);
                     result.value.pos = term.pos; // prefer term pos over any other pos determined within call()
                     return result;
                 }
@@ -373,6 +387,8 @@ namespace basil {
                     err(term.pos, "Could not evaluate list '", term, "'.");
                 }
             }
+            case K_ERROR:
+                return {env, v_error(term.pos)}; // return an error if an error already occurred
             default:
                 err(term.pos, "Could not evaluate term '", term, "'.");
                 return {env, v_error(term.pos)};

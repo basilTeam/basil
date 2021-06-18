@@ -231,7 +231,7 @@ namespace basil {
                 Value cond = v_at(args, 0), body = v_at(args, 1);
                 EvalResult cond_eval = eval(env, cond);
                 env = cond_eval.env;
-                while (cond_eval.value.type == T_BOOL && !cond_eval.value.data.b) {
+                while (cond_eval.value.type == T_BOOL && cond_eval.value.data.b) {
                     EvalResult body_eval = eval(env, body); // eval body
                     env = body_eval.env;
                     cond_eval = eval(env, cond); // re-eval condition

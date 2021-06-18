@@ -109,6 +109,16 @@ namespace basil {
         // Returns whether this type can coerce to the provided target type.
         bool coerces_to(Type other) const;
 
+        // Returns whether this type can coerce to the provided target type,
+        // constrained to JUST generic types - as in, type variables and 'any'.
+        //
+        // This must be strictly a subset of coerces_to - coerces_to_generic implies
+        // coerces_to (and this is implemented in Class::coerces_to).
+        //
+        // Generally, we use this to implement elementwise subtyping rules that would
+        // otherwise be inappropriate due to performance reasons.
+        bool coerces_to_generic(Type other) const;
+
         // Formats the type associated with this id to the provided stream.
         void format(stream& io) const;
 

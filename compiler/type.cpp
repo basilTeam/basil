@@ -120,7 +120,8 @@ namespace basil {
         virtual u64 lazy_hash() const = 0;
         virtual void format(stream& io) const = 0;
 
-        virtual bool coerces_to(const Class& other) const; // Implemented below, just above T_INT and such.
+        virtual bool coerces_to(const Class& other) const;
+        virtual bool coerces_to_generic(const Class& other) const;
 
         virtual bool operator==(const Class& other) const = 0;
 
@@ -168,6 +169,10 @@ namespace basil {
 
     bool Type::coerces_to(Type other) const {
         return TYPE_LIST[id]->coerces_to(*TYPE_LIST[other.id]);
+    }
+
+    bool Type::coerces_to_generic(Type other) const {
+        return TYPE_LIST[id]->coerces_to_generic(*TYPE_LIST[other.id]);
     }
 
     bool Type::operator==(Type other) const {
@@ -267,8 +272,8 @@ namespace basil {
     struct VoidClass : public SingletonClass {
         VoidClass(Kind kind, const char* name): SingletonClass(kind, name) {}
 
-        bool coerces_to(const Class& other) const override {
-            return Class::coerces_to(other) || other.kind() == K_LIST;
+        bool coerces_to_generic(const Class& other) const override {
+            return Class::coerces_to_generic(other) || other.kind() == K_LIST;
         }
     };
 
@@ -276,7 +281,7 @@ namespace basil {
     struct UndefinedClass : public SingletonClass {
         UndefinedClass(Kind kind, const char* name): SingletonClass(kind, name) {}
 
-        bool coerces_to(const Class& other) const override {
+        bool coerces_to_generic(const Class& other) const override {
             return true; // undefined can coerce to all other types
         }
     };
@@ -297,14 +302,14 @@ namespace basil {
             write(io, name, " of ", base);
         }
 
-        bool coerces_to(const Class& other) const override {
-            if (Class::coerces_to(other)) return true;
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
 
-            if (other.kind() == K_NAMED
-                && as<NamedClass>(other).name == name
-                && as<NamedClass>(other).base->kind() == K_ANY)
-                return true; // e.g. Foo of int can coerce to Foo of any
-            
+            if (other.kind() == K_NAMED) {
+                return as<NamedClass>(other).name == name  
+                    && base->coerces_to_generic(*as<NamedClass>(other).base);
+            }
+
             return false;
         }
 
@@ -338,12 +343,19 @@ namespace basil {
             write(io, "[", element, "]");
         }
 
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
+
+            if (other.kind() == K_LIST) {
+                return element->coerces_to_generic(*as<ListClass>(other).element);
+            }
+            
+            return false;
+        }
+
         bool coerces_to(const Class& other) const override {
             if (Class::coerces_to(other)) return true;
 
-            if (other.kind() == K_LIST && as<ListClass>(other).element->kind() == K_ANY)
-                return true; // all lists can convert to [any]
-            
             if (other.kind() == K_TYPE) 
                 return element->kind() == K_TYPE; // [type] can convert to type
             
@@ -466,15 +478,23 @@ namespace basil {
             write(io, "]");
         }
 
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
+
+            if (other.kind() == K_ARRAY) {
+                return element->coerces_to_generic(*as<ArrayClass>(other).element)
+                    && (!as<ArrayClass>(other).sized || as<ArrayClass>(other).size == size);
+            }
+
+            return false;
+        }
+
         bool coerces_to(const Class& other) const override {
             if (Class::coerces_to(other)) return true;
 
             if (other.kind() == K_ARRAY) {
                 if (*element == *as<ArrayClass>(other).element) // Can convert to unsized array with same element type.
                     return !as<ArrayClass>(other).sized;
-                else if (as<ArrayClass>(other).element->kind() == K_ANY) // Can convert to unsized or same-sized 'any' arrays.
-                    return !as<ArrayClass>(other).sized
-                        || as<ArrayClass>(other).size == size;
             }
 
             return false;
@@ -514,6 +534,31 @@ namespace basil {
 
         void format(stream& io) const override {
             write_seq(io, members, "(", " | ", ")");
+        }
+
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
+
+            if (other.kind() == K_UNION) {
+                auto copy_members = members, 
+                    copy_other_members = as<UnionClass>(other).members;
+                if (members.size() != copy_members.size()) return false;
+                vector<rc<Class>> toRemove;
+                for (const auto& m : copy_members) {
+                    if (copy_other_members.contains(m)) {
+                        copy_other_members.erase(m);
+                        toRemove.push(m);
+                    }
+                }
+                for (const auto& m : toRemove) copy_members.erase(m);
+                
+                // we permit type inference on one member, such as t?|int -> string|int
+                // we can't currently infer more than one, given that unions are unordered structures
+                if (copy_members.size() == 1 && copy_other_members.size() == 1)
+                    return (*copy_members.begin())->coerces_to_generic(**copy_other_members.begin());
+            }
+
+            return false;
         }
 
         bool coerces_to(const Class& other) const override {
@@ -615,18 +660,19 @@ namespace basil {
             write(io, arg, " -> ", ret);
         }
 
-        bool coerces_to(const Class& other) const override {
-            if (Class::coerces_to(other)) return true;
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
 
             if (other.kind() == K_FUNCTION) {
-                if (!arg->coerces_to(*as<FunctionClass>(other).arg)) // Argument type must be coercible to target arg type.
-                    return false;
-                if (!ret->coerces_to(*as<FunctionClass>(other).ret)) // Return type must be coercible to target return type.
-                    return false;
-
-                return (arg->kind() != K_ANY && as<FunctionClass>(other).arg->kind() == K_ANY) // Permit coercion to more generic function type.
-                    || (ret->kind() != K_ANY && as<FunctionClass>(other).ret->kind() == K_ANY);
+                return arg->coerces_to_generic(*as<FunctionClass>(other).arg)
+                    && ret->coerces_to_generic(*as<FunctionClass>(other).ret);
             }
+
+            return false;
+        }
+
+        bool coerces_to(const Class& other) const override {
+            if (Class::coerces_to(other)) return true;
 
             if (other.kind() == K_TYPE) {
                 return ret->kind() == K_TYPE; // Functions that return type can be coerced to 'type'.
@@ -738,6 +784,17 @@ namespace basil {
             write(io, key, "[", value, "]");
         }
 
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
+
+            if (other.kind() == K_DICT) {
+                return key->coerces_to_generic(*as<DictClass>(other).key)
+                    && value->coerces_to_generic(*as<DictClass>(other).value);
+            }
+
+            return false;
+        }
+
         bool coerces_to(const Class& other) const override {
             if (Class::coerces_to(other)) return true;
 
@@ -811,7 +868,7 @@ namespace basil {
             write(io, name);
         }
 
-        bool coerces_to(const Class& other) const override {
+        bool coerces_to_generic(const Class& other) const override {
             return TYPE_LIST[tvar_bindings[id].id]->coerces_to(other);
         }
 

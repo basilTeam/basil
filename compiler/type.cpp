@@ -149,10 +149,13 @@ namespace basil {
 
     Kind Type::kind() const {
         Kind k = TYPE_LIST[id]->kind();
-        if (k == K_TVAR) { // look at underlying type for this
-            return t_tvar_concrete(*this).kind();
+
+        Type t = *this;
+        while (k == K_TVAR) { // look at underlying type until we find a non-tvar
+            t = t_tvar_concrete(t);
+            k = TYPE_LIST[id]->kind();
         }
-        else return k;
+        return k;
     }
 
     bool Type::of(Kind kind) const {
@@ -291,7 +294,7 @@ namespace basil {
         Symbol name;
         rc<Class> base;
 
-        NamedClass(Symbol name_in, Type base_in): 
+        NamedClass(Symbol name_in, Type base_in):
             Class(K_NAMED), name(name_in), base(TYPE_LIST[base_in.id]) {}
 
         u64 lazy_hash() const override {
@@ -358,14 +361,14 @@ namespace basil {
 
             if (other.kind() == K_TYPE) 
                 return element->kind() == K_TYPE; // [type] can convert to type
-            
+
             return false;
         }
 
         bool operator==(const Class& other) const override {
             return other.kind() == K_LIST && *element == *as<ListClass>(other).element;
         }
-    };  
+    };
 
     Type t_list(Type element) {
         return t_create(ref<ListClass>(element));
@@ -851,15 +854,15 @@ namespace basil {
         u32 id;
         Symbol name;
 
-        TVarClass(): Class(K_TVAR), id(tvar_bindings.size()), 
+        TVarClass(): Class(K_TVAR), id(tvar_bindings.size()),
             name(symbol_from(::format<ustring>("#", id))) { // use #<id> for default name
-            tvar_bindings.push(T_ANY); // start out as 'any'
+            tvar_bindings.push(T_UNDEFINED); // start out as 'undefined'
         }
 
         TVarClass(Symbol name_in): TVarClass() { name = name_in; }
 
         u64 lazy_hash() const override {
-            return ::hash(kind()) * 3078465884631522967ul 
+            return ::hash(kind()) * 3078465884631522967ul
                 ^ ::hash(id) * 8292421814661686869ul
                 ^ ::hash(name);
         }
@@ -869,29 +872,34 @@ namespace basil {
         }
 
         bool coerces_to_generic(const Class& other) const override {
-            return TYPE_LIST[tvar_bindings[id].id]->coerces_to(other);
+            bool result = TYPE_LIST[tvar_bindings[id].id]->coerces_to(other);
+            if (result) tvar_bindings[id] = t_from(other.id()); // bind this tvar to the other type
+            return result;
         }
 
         bool operator==(const Class& other) const override {
             return &other == this; // we can just do ref equality, since tvars don't really need to be deduplicated
         }
     };
-    
+
     Type t_var() {
         return t_create(ref<TVarClass>());
     }
-    
+
     Type t_var(Symbol name) {
         return t_create(ref<TVarClass>(name));
     }
 
+    bool Class::coerces_to_generic(const Class& other) const {
+        if (other.kind() == K_TVAR) return other.coerces_to_generic(*this);
+        return *this == other 
+            || other.kind() == K_ANY
+            || other.kind() == K_ERROR;
+    }
+
     bool Class::coerces_to(const Class& other) const {
-        bool result = *this == other
-            || other.kind() == K_ANY // all types can convert to 'any'
-            || other.kind() == K_ERROR // ...and 'error', although it's more of an implementation detail
-            || (other.kind() == K_UNION // all types can convert to unions containing them
-                && as<UnionClass>(other).members.contains(TYPE_LIST[_id])); // TYPE_LIST[_id] is an rc to self
-        return result;
+        return coerces_to_generic(other)
+            || (other.kind() == K_UNION && as<UnionClass>(other).members.contains(TYPE_LIST[_id]));
     }
 
     Type T_VOID, T_INT, T_FLOAT, T_DOUBLE, T_SYMBOL, 
@@ -1013,7 +1021,9 @@ namespace basil {
 
     Type t_tvar_concrete(Type tvar) {
         if (!tvar.is_tvar()) panic("Expected type variable!");
-        return tvar_bindings[as<TVarClass>(*TYPE_LIST[tvar.id]).id];
+        Type t = tvar_bindings[as<TVarClass>(*TYPE_LIST[tvar.id]).id];
+        if (t.is_tvar()) return t_tvar_concrete(t);
+        else return t;
     }
 
     Symbol t_tvar_name(Type tvar) {

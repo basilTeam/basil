@@ -1,0 +1,17 @@
+use std/list
+
+def (sieve nums?) : [Int] -> [Int] do: 
+    match nums with:
+        case ()      => ()
+        case x :: xs => x :: sieve (xs filter n -> n % x != 0)
+
+def (sieve n?) : Int -> [Int] do:
+    sieve 2..n
+
+    t? -> float -> int
+
+    f x : float
+    f 1
+
+    f x : t?
+    f x : any

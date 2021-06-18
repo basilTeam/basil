@@ -122,7 +122,7 @@ namespace basil {
             new (&data) Data(type.kind(), other.data); // copy over
         }
         return *this;
-    }     
+    }    
 
     Value& Value::operator=(Value&& other) {
         if (this != &other) {

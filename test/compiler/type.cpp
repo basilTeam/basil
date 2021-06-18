@@ -303,3 +303,35 @@ TEST(struct_coercion) {
     ASSERT_TRUE(b.coerces_to(h));
     ASSERT_TRUE(c.coerces_to(h));
 }
+
+TEST(flat_type_variables) {
+    Type a = t_var(), b = t_var();
+
+    ASSERT_TRUE(a.coerces_to(T_INT)); // a is bound to int
+    ASSERT_FALSE(a.coerces_to(T_STRING)); // a is already bound to int so this should fail
+    ASSERT_EQUAL(t_tvar_concrete(a), T_INT);
+
+    ASSERT_TRUE(b.coerces_to(T_STRING));
+    ASSERT_FALSE(b.coerces_to(T_INT));
+    ASSERT_EQUAL(t_tvar_concrete(b), T_STRING);
+
+    Type c = t_var(), d = t_var();
+    ASSERT_TRUE(c.coerces_to(d));
+    ASSERT_TRUE(d.coerces_to(T_INT));
+    ASSERT_FALSE(c.coerces_to(T_STRING));
+    ASSERT_EQUAL(t_tvar_concrete(d), T_INT);
+    ASSERT_EQUAL(t_tvar_concrete(c), T_INT);
+
+    Type e = t_var();
+    ASSERT_TRUE(e.coerces_to(T_INT));
+    ASSERT_EQUAL(t_tvar_concrete(e), T_INT);
+    ASSERT_TRUE(e.coerces_to(T_FLOAT));
+    ASSERT_EQUAL(t_tvar_concrete(e), T_FLOAT);
+    ASSERT_FALSE(e.coerces_to(T_INT));
+}
+
+TEST(inner_type_variables) {
+    Type a = t_list(t_var());
+    ASSERT_TRUE(a.coerces_to(t_list(T_INT)));
+    ASSERT_EQUAL(t_list_element(a), T_INT);
+}

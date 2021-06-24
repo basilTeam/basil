@@ -1,6 +1,7 @@
 #include "value.h"
 #include "builtin.h"
 #include "env.h"
+#include "forms.h"
 
 namespace basil {
     Value::Data::Data(Kind kind) {
@@ -23,6 +24,7 @@ namespace basil {
             case K_UNION: new (&u) rc<Union>(); break;
             case K_STRUCT: new (&str) rc<Struct>(); break;
             case K_DICT: new (&dict) rc<Dict>(); break;
+            case K_INTERSECT: new (&isect) rc<Intersect>(); break;
             case K_FUNCTION: new (&fn) rc<Function>(); break;
             default:
                 panic("Unsupported value kind!"); 
@@ -50,6 +52,7 @@ namespace basil {
             case K_UNION: new (&u) rc<Union>(other.u); break;
             case K_STRUCT: new (&str) rc<Struct>(other.str); break;
             case K_DICT: new (&dict) rc<Dict>(other.dict); break;
+            case K_INTERSECT: new (&isect) rc<Intersect>(other.isect); break;
             case K_FUNCTION: new (&fn) rc<Function>(other.fn); break;
             default:
                 panic("Unsupported value kind!"); 
@@ -87,6 +90,7 @@ namespace basil {
             case K_UNION: data.u.~rc(); break;
             case K_STRUCT: data.str.~rc(); break;
             case K_DICT: data.dict.~rc(); break;
+            case K_INTERSECT: data.isect.~rc(); break;
             case K_FUNCTION: data.fn.~rc(); break;
             default: break; // trivial destructor
         }
@@ -113,6 +117,7 @@ namespace basil {
                 case K_UNION: data.u.~rc(); break;
                 case K_STRUCT: data.str.~rc(); break;
                 case K_DICT: data.dict.~rc(); break;
+                case K_INTERSECT: data.isect.~rc(); break;
                 case K_FUNCTION: data.fn.~rc(); break;
                 default: break; // trivial destructor
             }
@@ -135,6 +140,7 @@ namespace basil {
                 case K_UNION: data.u.~rc(); break;
                 case K_STRUCT: data.str.~rc(); break;
                 case K_DICT: data.dict.~rc(); break;
+                case K_INTERSECT: data.isect.~rc(); break;
                 case K_FUNCTION: data.fn.~rc(); break;
                 default: break; // trivial destructor
             }
@@ -195,6 +201,13 @@ namespace basil {
                 }
                 return kh;
             }
+            case K_INTERSECT: {
+                for (const auto& [t, v] : data.isect->values) {
+                    kh ^= 200878521973963957ul * ::hash(t);
+                    kh ^= 11923319286714586559ul * ::hash(v);
+                }
+                return kh;
+            }
             default:
                 panic("Unsupported value kind!"); 
                 return kh;
@@ -225,6 +238,7 @@ namespace basil {
                 else write_pairs(io, data.dict->elements, "{", " = ", "; ", "}"); // {"x" = 1; "y" = 2}
                 break;
             }
+            case K_INTERSECT: write_values(io, data.isect->values, "(", " & ", ")"); break; // (1 & 2 & 3)
             case K_FUNCTION: write(io, "#procedure"); break;
             default:
                 panic("Unsupported value kind!"); 
@@ -291,6 +305,17 @@ namespace basil {
                 }
                 return copy_elements.size() == 0; // our dict had a matching key for every key in the other dict, and no extras
             }
+            case K_INTERSECT: {
+                if (data.isect->values.size() != other.data.isect->values.size()) return false;
+                auto copy_values = data.isect->values;
+                for (const auto& [t, v] : other.data.isect->values) {
+                    auto it = copy_values.find(t);
+                    if (it == copy_values.end()) return false; // fail if the other intersect has a type we don't have
+                    if (it->second != v) return false;         // fail if the other intersect's type has a different value than ours
+                    copy_values.erase(t);                    // otherwise, make sure we don't consider this type again
+                }
+                return copy_values.size() == 0; // our intersect had a matching type for every type in the other intersect
+            }
             case K_FUNCTION: 
                 return data.fn.is(other.data.fn); // only consider reference equality
             default:
@@ -342,6 +367,11 @@ namespace basil {
                 for (const auto& [k, v] : data.dict->elements) elements[k.clone()] = v.clone();
                 return v_dict(pos, type, elements).with(form);    
             }
+            case K_INTERSECT: {
+                map<Type, Value> values;
+                for (const auto& [t, v] : data.isect->values) values[t] = v.clone();
+                return v_intersect(pos, type, values).with(form);    
+            }
             default:
                 panic("Unsupported value kind!"); 
                 return *this;
@@ -375,6 +405,8 @@ namespace basil {
     Struct::Struct(const map<Symbol, Value>& fields_in): fields(fields_in) {}
 
     Dict::Dict(const map<Value, Value>& elements_in): elements(elements_in) {}
+
+    Intersect::Intersect(const map<Type, Value>& values_in): values(values_in) {}
 
     bool FormTuple::operator==(const FormTuple& other) const {
         if (forms.size() != other.forms.size()) return false;
@@ -565,6 +597,28 @@ namespace basil {
         }
         v.data.dict = ref<Dict>(entries);
         return v;
+    }
+
+    Value v_intersect(Source::Pos pos, Type type, const map<Type, Value>& values) {
+        Value v(pos, type, nullptr);
+        if (!type.of(K_INTERSECT))
+            panic("Attempted to construct intersection value with non-intersection type!");
+        v.data.isect = ref<Intersect>(values);
+        return v;
+    }
+
+    Value v_intersect(const vector<Builtin*>& builtins) {
+        vector<rc<Form>> value_forms;
+        set<Type> value_types;
+        map<Type, Value> values;
+        for (Builtin* b : builtins) {
+            if (value_types.contains(b->type)) panic("Tried to overload builtins with duplicate types!");
+            value_forms.push(b->form);
+            value_types.insert(b->type);
+            values.put(b->type, v_func(*b));
+        }
+        return v_intersect({}, t_intersect(value_types), values)
+            .with(f_overloaded(value_forms[0]->precedence, value_forms[0]->assoc, value_forms));
     }
 
     Value v_func(const Builtin& builtin) {
@@ -1018,11 +1072,13 @@ namespace basil {
         else for (u32 i = 0; i < num_args; i ++) {
             tup.forms.push(v_tuple_at(args, i).form); // get forms for each arg
         }
+        for (rc<Form>& form : tup.forms) if (!form) form = F_TERM; // default to term
         tup.compute_hash();
 
         auto it = table.find(tup);
         if (it == table.end()) {
             table.put(tup, ref<Value>(fn.data.fn->body.clone()));
+            for (const auto& [k, v] : table) if (k == tup) return v;
             return table.find(tup)->second;
         }
         else {

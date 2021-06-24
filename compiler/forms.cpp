@@ -22,15 +22,54 @@ namespace basil {
         }
     }
 
-    const Param P_VAR{ S_NONE, PK_VARIABLE },
-                P_QUOTED{ S_NONE, PK_QUOTED },
-                P_TERM{ S_NONE, PK_TERM },
-                P_VARIADIC{ S_NONE, PK_VARIADIC },
-                P_QUOTED_VARIADIC{ S_NONE, PK_QUOTED_VARIADIC },
-                P_SELF{ S_NONE, PK_SELF };
+    const Param P_SELF{ S_NONE, PK_SELF };
+
+    Param p_var(Symbol name) {
+        return Param{ name, PK_VARIABLE };
+    }
+
+    Param p_var(const char* name) {
+        return p_var(symbol_from(name));
+    }
+
+    Param p_quoted(Symbol name) {
+        return Param{ name, PK_QUOTED };
+    }
+
+    Param p_quoted(const char* name) {
+        return p_quoted(symbol_from(name));
+    }
+
+    Param p_term(Symbol name) {
+        return Param{ name, PK_TERM };
+    }
+
+    Param p_term(const char* name) {
+        return p_term(symbol_from(name));
+    }
+
+    Param p_variadic(Symbol name) {
+        return Param{ name, PK_VARIADIC };
+    }
+
+    Param p_variadic(const char* name) {
+        return p_variadic(symbol_from(name));
+    }
+
+    Param p_quoted_variadic(Symbol name) {
+        return Param{ name, PK_QUOTED_VARIADIC };
+    }
+
+    Param p_quoted_variadic(const char* name) {
+        return p_quoted_variadic(symbol_from(name));
+    }
 
     Param p_keyword(Symbol name) {
         return Param{ name, PK_KEYWORD };
+    }
+
+    Param p_keyword(const char* name) {
+        return p_keyword(symbol_from(name));
     }
     
     Callable::Callable(const vector<Param>& parameters_in, const optional<FormCallback>& callback_in):
@@ -46,7 +85,9 @@ namespace basil {
 
     void Callable::reset() {
         index = 0;
+        advances = 0;
         stopped = false;
+        wrong_value = none<Value>();
     }  
 
     bool Callable::precheck_keyword(const Value& keyword) {
@@ -78,8 +119,12 @@ namespace basil {
             if ((*parameters)[index].kind != PK_VARIADIC 
                 && (*parameters)[index].kind != PK_QUOTED_VARIADIC) 
                 index ++; // don't advance if we're in a variadic
+            advances ++; // count this advance
         }
-        else stopped = true;
+        else {
+            stopped = true;
+            wrong_value = some<Value>(value);
+        }
     }
 
     bool Callable::is_finished() const {
@@ -279,6 +324,14 @@ namespace basil {
                 return kind_hash;
         }
     }
+    
+    bool operator==(rc<Form> a, rc<Form> b) {
+        return *a == *b;
+    }
+    
+    bool operator!=(rc<Form> a, rc<Form> b) {
+        return *a != *b;
+    }
 
     const rc<Form> F_TERM = ref<Form>(FK_TERM, 0, ASSOC_LEFT);
 
@@ -315,52 +368,38 @@ namespace basil {
         return symbol_from(acc);
     }
 
-    optional<rc<Form>> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Form>>& overloads) {
+    rc<Form> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Form>>& overloads) {
         for (const auto& form : overloads) if (form->kind == FK_TERM)
             panic("Attempted to construct overloaded form with at least one non-invokable form!");
         rc<Form> form = ref<Form>(FK_OVERLOADED, precedence, assoc);
-        static vector<rc<Callable>> callables;
-        callables.clear();
+        vector<rc<Callable>> callables;
         for (rc<Form> form : overloads) {
-            if (form->kind == FK_CALLABLE) callables.push((rc<Callable>)form->invokable);
+            if (form->kind == FK_CALLABLE) {
+                bool found_match = false;
+                for (rc<Callable> callable : callables) {
+                    if (*callable == *(rc<Callable>)form->invokable) {
+                        found_match = true;
+                        break;
+                    }
+                }
+                if (!found_match) callables.push((rc<Callable>)form->invokable);
+            }
             else if (form->kind == FK_OVERLOADED) {
-                for (rc<Callable> callable : ((rc<Overloaded>)form->invokable)->overloads)
-                    callables.push(callable);
-            }
-        }
-        rc<Overloaded> invokable = ref<Overloaded>(callables);
-        for (const auto& callable : callables) {
-            Symbol m = mangle(callable);
-            if (invokable->mangled->contains(m)) return none<rc<Form>>(); // ambiguous
-            else invokable->mangled->insert(m);
-        }
-        form->invokable = invokable;
-        return some<rc<Form>>(form);
-    }
-
-    optional<rc<Form>> f_add_overload(rc<Form> overloaded, rc<Form> addend) {
-        if (overloaded->kind != FK_OVERLOADED) panic("Attempted to add overload to non-overloaded form!");
-        if (addend->kind == FK_TERM) panic("Attempted to append non-invokable form to overloaded form!");
-        rc<Overloaded> existing = (rc<Overloaded>)overloaded->invokable;
-        if (addend->kind == FK_CALLABLE) {
-            Symbol m = mangle((rc<Callable>)addend->invokable);
-            if (existing->mangled->contains(m)) return none<rc<Form>>(); // ambiguous
-            else {
-                existing->overloads.push((rc<Callable>)addend->invokable);
-                existing->mangled->insert(m);
-            }
-        }
-        else if (addend->kind == FK_OVERLOADED) {
-            for (rc<Callable> callable : ((rc<Overloaded>)addend->invokable)->overloads) {
-                Symbol m = mangle(callable);
-                if (existing->mangled->contains(m)) return none<rc<Form>>(); // ambiguous
-                else {
-                    existing->overloads.push(callable);
-                    existing->mangled->insert(m);
+                for (rc<Callable> callable : ((rc<Overloaded>)form->invokable)->overloads) {
+                    bool found_match = false;
+                    for (rc<Callable> existing_callable : callables) {
+                        if (*callable == *existing_callable) {
+                            found_match = true;
+                            break;
+                        }
+                    }
+                    if (!found_match) callables.push(callable);
                 }
             }
         }
-        return some<rc<Form>>(overloaded);
+        rc<Overloaded> invokable = ref<Overloaded>(callables);
+        form->invokable = invokable;
+        return rc<Form>(form);
     }
 
     const char* FK_NAMES[NUM_FORM_KINDS] = {
@@ -382,6 +421,46 @@ namespace basil {
 
 u64 hash(const rc<basil::Form>& form) {
     return form->hash();
+}
+
+void write(stream& io, const basil::Param& param) {
+    switch (param.kind) {
+        case basil::PK_VARIABLE: write(io, ITALICWHITE, param.name, RESET, "?"); break;
+        case basil::PK_QUOTED: write(io, ITALICWHITE, param.name, RESET, "?"); break;
+        case basil::PK_TERM: write(io, ITALICWHITE, param.name, RESET, "?"); break;
+        case basil::PK_VARIADIC: write(io, ITALICWHITE, param.name, RESET, "...?"); break;
+        case basil::PK_QUOTED_VARIADIC: write(io, ITALICWHITE, param.name, RESET, "...?"); break;
+        case basil::PK_KEYWORD: write(io, param.name); break;
+        case basil::PK_SELF: write(io, "<self>"); break;
+        default: break;
+    }
+}
+
+void write(stream& io, const rc<basil::Form>& form) {
+    if (form->kind == basil::FK_TERM) {
+        write(io, "term");
+    }
+    else if (form->kind == basil::FK_CALLABLE) {
+        write_seq(io, *((rc<basil::Callable>)form->invokable)->parameters, "(", " ", ")");
+    }
+    else if (form->kind == basil::FK_OVERLOADED) {
+        bool first = true;
+        for (const rc<basil::Callable>& callable : ((rc<basil::Overloaded>)form->invokable)->overloads) {
+            if (!first) write(io, " & ");
+            first = false;
+            write_seq(io, *callable->parameters, "(", " ", ")");
+        }
+    }
+}
+
+void write_with_self(stream& io, const basil::Value& self, const rc<basil::Callable>& callable) {
+    bool first = true;
+    for (const basil::Param& p : *callable->parameters) {
+        if (!first) write(io, " ");
+        first = false;
+        if (p.kind == basil::PK_SELF) write(io, self);
+        else write(io, p);
+    }
 }
 
 void write(stream& io, basil::ParamKind pk) {

@@ -625,6 +625,9 @@ namespace basil {
             for (Type t : members_in) members.insert(TYPE_LIST[t.id]);
         }
 
+        IntersectionClass(const set<rc<Class>>& members_in):
+            Class(K_INTERSECT), members(members_in) {}
+
         u64 lazy_hash() const override {
             u64 base = ::hash(kind());
             for (const auto& m : members) {
@@ -665,7 +668,7 @@ namespace basil {
     };
 
     Type t_intersect(const set<Type>& members) {
-        if (members.size() < 2) panic("Cannot create intersection type with less than two members!");
+        if (members.size() < 1) panic("Cannot create intersection type with zero members!");
         return t_create(ref<IntersectionClass>(members));
     }
 
@@ -946,9 +949,38 @@ namespace basil {
         return as<UnionClass>(*TYPE_LIST[u.id]).members.contains(TYPE_LIST[member.id]);
     }
 
+    Type t_intersect_with(Type intersect, Type other) {
+        if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
+        set<rc<Class>> members = as<IntersectionClass>(*TYPE_LIST[intersect.id]).members;
+        members.insert(TYPE_LIST[other.id]);
+        return t_create(ref<IntersectionClass>(members));
+    }
+
+    Type t_intersect_without(Type intersect, Type other) {
+        if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
+        set<rc<Class>> members = as<IntersectionClass>(*TYPE_LIST[intersect.id]).members;
+        members.erase(TYPE_LIST[other.id]);
+        return t_create(ref<IntersectionClass>(members));
+    }
+
     bool t_intersect_has(Type intersect, Type member) {
         if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
         return as<IntersectionClass>(*TYPE_LIST[intersect.id]).members.contains(TYPE_LIST[member.id]);
+    }
+
+    bool t_intersect_procedural(Type intersect) {
+        if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
+        for (const rc<Class>& c : as<IntersectionClass>(*TYPE_LIST[intersect.id]).members)
+            if (c->kind() != K_FUNCTION) return false;
+        return true;
+    }
+    
+    set<Type> t_intersect_members(Type intersect) {
+        if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
+        set<Type> members;
+        for (const rc<Class>& c : as<IntersectionClass>(*TYPE_LIST[intersect.id]).members)
+            members.insert(t_from(c->id()));
+        return members;
     }
 
     Type t_list_element(Type list) {

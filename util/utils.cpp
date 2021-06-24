@@ -1,9 +1,9 @@
 #include "utils.h"
 #include "stdlib.h"
 #include "io.h"
-// #ifdef __GNUC__
-// #include "execinfo.h"
-// #endif
+#ifdef __GNUC__
+#include "execinfo.h"
+#endif
 
 void* operator new(unsigned long n) {
     return malloc(n);
@@ -32,13 +32,13 @@ void __internal_panic(const char* file, int line, const char* msg) {
     println("A panic indicates some kind of internal compiler error occurred. ");
     println("If you came across this and aren't implementing the compiler, please"); 
     println("consider reporting it!");
-    // #ifdef __GNUC__
-    // println("");
-    // println("Backtrace:");
-    // void *trace[10];
-    // size_t size = backtrace(trace, 10);
-    // backtrace_symbols_fd(trace, size, 1); // stdout
-    // #endif
+    #ifdef __GNUC__
+    println("");
+    println("Backtrace:");
+    void *trace[10];
+    size_t size = backtrace(trace, 10);
+    backtrace_symbols_fd(trace, size, 1); // stdout
+    #endif
     exit(1);
 }
 

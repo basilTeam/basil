@@ -2,9 +2,11 @@
 #define BASIL_EVAL_H
 
 #include "util/rc.h"
+#include "util/either.h"
 #include "env.h"
 #include "value.h"
 #include "builtin.h"
+#include "forms.h"
 
 namespace basil {
     // Untracks root env. Should only be called during deinit!
@@ -20,9 +22,13 @@ namespace basil {
     // process made) and an iterator pointing to the term immediately
     // after the returned group.
     struct GroupResult {
-        rc<Env> env;
         Value value;
         list_iterator next;
+    };
+
+    // Used to provide all the necessary error information from a failed grouping.
+    struct GroupError {
+        vector<rc<Callable>> candidates;
     };
 
     // Don't call this unless you know what you're doing! It's only made publicly
@@ -36,7 +42,7 @@ namespace basil {
     // But it is initially provided one or two parameters from the caller, representing the
     // function name (for prefix forms) or the first argument and function name (for
     // infix forms).
-    optional<GroupResult> try_group(rc<Env> env, vector<Value>& params, rc<StateMachine> sm, 
+    either<GroupResult, GroupError> try_group(rc<Env> env, vector<Value>& params, FormKind fk, rc<StateMachine> sm, 
         list_iterator it, list_iterator end, 
         Associativity outerassoc, i64 outerprec);
 
@@ -54,17 +60,17 @@ namespace basil {
     // Don't call this unless you know what you're doing! Finds all groups within the
     // provided list term, and replaces the term with a list of those groups. Returns
     // the resulting environment.
-    rc<Env> group(rc<Env> env, Value& term);
+    void group(rc<Env> env, Value& term);
 
     // Don't call this unless you know what you're doing! Resolves the form of the
     // provided term. Returns the resulting environment.
-    rc<Env> resolve_form(rc<Env> env, Value& term);
+    void resolve_form(rc<Env> env, Value& term);
 
     // Invokes the provided function on the provided argument(s) in the given environment.
-    EvalResult call(rc<Env> env, Value func, const Value& args);
+    Value call(rc<Env> env, Value func_term, Value func, const Value& args);
 
     // Evaluates the code value 'term' within the environment 'env'.
-    EvalResult eval(rc<Env> env, Value& term);
+    Value eval(rc<Env> env, Value& term);
 }
 
 #endif

@@ -44,8 +44,17 @@ namespace basil {
         // directly.
         Env(rc<Env> parent);
     };
+
     // Extends the provided parent environment with an empty child environment.
     rc<Env> extend(rc<Env> parent);
+
+    // Looks up a symbol within the environment, returning a reference to the
+    // specific environment in which the name is defined. Returns a none optional
+    // if neither the provided environment or any of its parents defines the
+    // provided symbol.
+    optional<rc<Env>> locate(rc<Env> env, Symbol name);
 }
+
+void write(stream& io, rc<basil::Env> env);
 
 #endif

@@ -40,13 +40,13 @@ namespace basil {
 
     Value resolve_step(const Value& term) {
         Value term_copy = term;
-        auto new_env = resolve_form(root_env(), term_copy);
+        resolve_form(root_env(), term_copy);
         return term_copy;
     }
 
     Value eval_step(const Value& term) {
         Value term_copy = term;
-        Value result = eval(root_env(), term_copy).value;
+        Value result = eval(root_env(), term_copy);
         if (error_count()) print_errors(_stdout, nullptr), discard_errors();
         return result;
     }
@@ -102,14 +102,14 @@ namespace basil {
             }
 
             Value list = v_list(span(code.front().pos, code.back().pos), t_list(T_ANY), code);
-            EvalResult result = eval(global, list);
+            Value result = eval(global, list);
             if (error_count()) {
                 print_errors(_stdout, source);
                 discard_errors();
                 continue;
             }
 
-            println("= ", ITALICBLUE, result.value, RESET);
+            println("= ", ITALICBLUE, result, RESET);
             println("");
         }
     }
@@ -147,13 +147,13 @@ namespace basil {
 
         Value program = v_list(span(program_terms.front().pos, program_terms.back().pos), 
             t_list(T_ANY), program_terms);
-        EvalResult result = eval(global, program);
+        Value result = eval(global, program);
         if (error_count()) {
             print_errors(_stdout, source);
             discard_errors();
             return;
         }
-        println(result.value);
+        println(result);
     }
 
     // Runs the "help" mode of the compiler.

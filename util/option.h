@@ -95,24 +95,24 @@ struct optional<rc<T>> {
         return data;
     }
 
-    const T& operator*() const {
+    const rc<T>& operator*() const {
         if (!data) panic("Attempted to dereference empty optional!");
-        return *data;
+        return data;
     }
 
-    T& operator*() {
+    rc<T>& operator*() {
         if (!data) panic("Attempted to dereference empty optional!");
-        return *data;
+        return data;
     }
 
-    const T* operator->() const {
+    const rc<T>* operator->() const {
         if (!data) panic("Attempted to dereference empty optional!");
-        return data.operator->();
+        return &data;
     }
 
-    T* operator->() {
+    rc<T>* operator->() {
         if (!data) panic("Attempted to dereference empty optional!");
-        return data.operator->();
+        return &data;
     }
 };
 

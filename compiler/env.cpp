@@ -34,4 +34,15 @@ namespace basil {
         parent->children.push(env);
         return env;
     }
+
+    optional<rc<Env>> locate(rc<Env> env, Symbol name) {
+        auto it = env->values.find(name);
+        if (it != env->values.end()) return some<rc<Env>>(env);
+        else if (env->parent) return locate(env->parent, name);
+        else return none<rc<Env>>();
+    }
+}
+
+void write(stream& io, rc<basil::Env> env) {
+    write_pairs(io, env->values, "{", ": ", ", ", "}");
 }

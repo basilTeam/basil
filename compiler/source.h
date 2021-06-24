@@ -41,6 +41,8 @@ namespace basil {
             u32 line_end : 20;
             u32 col_end : 12;
 
+            Pos();
+            Pos(u32 line_start, u32 col_start, u32 line_end, u32 col_end);
             bool operator==(const Pos& other) const;
             bool operator!=(const Pos& other) const;
         };

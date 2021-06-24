@@ -234,8 +234,23 @@ namespace basil {
     // Returns whether the union type 'u' contains the provided member.
     bool t_union_has(Type u, Type member);
 
+    // Returns the intersection type resulting from adding 'other' to the members of.
+    // intersection type 'intersect'.
+    Type t_intersect_with(Type intersect, Type other);
+
+    // Returns the intersection type resulting from removing 'other' from the members of.
+    // intersection type 'intersect'.
+    Type t_intersect_without(Type intersect, Type other);
+
     // Returns whether the intersect type 'intersect' contains the provided member.
     bool t_intersect_has(Type intersect, Type member);
+
+    // Returns whether the provided intersect type is "procedural" - consisting only
+    // of function types.
+    bool t_intersect_procedural(Type intersect);
+
+    // Returns the set of member types from the provided intersection type.
+    set<Type> t_intersect_members(Type intersect);
 
     // Returns the element type of the provided list type.
     Type t_list_element(Type list);

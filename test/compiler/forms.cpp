@@ -16,8 +16,8 @@ TEST(term) {
 }
 
 TEST(prefix_callable) {
-    rc<Form> f1 = f_callable(0, ASSOC_RIGHT, P_SELF, P_VAR), 
-        f2 = f_callable(10, ASSOC_RIGHT, P_SELF, P_VAR, P_VAR);
+    rc<Form> f1 = f_callable(0, ASSOC_RIGHT, P_SELF, p_var("x")), 
+        f2 = f_callable(10, ASSOC_RIGHT, P_SELF, p_var("x"), p_var("y"));
 
     ASSERT_TRUE(f1->is_invokable()); // all of these should be invokable
     ASSERT_TRUE(f2->is_invokable());
@@ -56,7 +56,7 @@ TEST(prefix_callable) {
 }
 
 TEST(infix_callable) {
-    rc<Form> f1 = f_callable(40, ASSOC_LEFT, P_VAR, P_SELF, P_VAR);
+    rc<Form> f1 = f_callable(40, ASSOC_LEFT, p_var("x"), P_SELF, p_var("y"));
 
     ASSERT_TRUE(f1->is_invokable());
     ASSERT_EQUAL(f1->precedence, 40);

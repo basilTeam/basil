@@ -5,9 +5,6 @@
 #include "util/rc.h"
 
 namespace basil {
-    // Reports an error at the provided source position with the provided message.
-    void err(Source::Pos pos, const ustring& msg);
-
     // Returns the number of errors that have been reported so far.
     u32 error_count();
 
@@ -18,12 +15,26 @@ namespace basil {
 
     // Discards all errors.
     void discard_errors();
+
+    // Reports an error at the provided source position with the provided message.
+    void err(Source::Pos pos, const ustring& msg);
     
     // Reports an error at the provided source position with a message constructed from 
     // the remaining arguments.
     template<typename... Args>
     void err(Source::Pos pos, const Args&... args) {
         err(pos, format<ustring>(args...));
+    }
+    
+    // Reports a note associated with the most recent error, at the provided source 
+    // position with the provided message.
+    void note(Source::Pos pos, const ustring& msg);
+    
+    // Reports a note at the provided source position with a message constructed from 
+    // the remaining arguments.
+    template<typename... Args>
+    void note(Source::Pos pos, const Args&... args) {
+        note(pos, format<ustring>(args...));
     }
 }
 

@@ -11,7 +11,7 @@ CXXHEADERS := -I. -Iutil -Ijasmine -Icompiler -Itest
 SHAREDFLAGS := $(CXXHEADERS) -std=c++17 \
 	-ffunction-sections -fdata-sections -ffast-math -fno-rtti -fPIC \
 	-Wall -Werror -Wno-unused -Wno-comment -Wno-implicit-exception-spec-mismatch \
-	-DINCLUDE_UTF8_LOOKUP_TABLE 
+	-DINCLUDE_UTF8_LOOKUP_TABLE
 
 release: SRCS += compiler/main.cpp
 
@@ -24,7 +24,7 @@ basil: SHAREDFLAGS += -g3
 
 release: SHAREDFLAGS += -Os -DBASIL_RELEASE
 
-CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -nostdlib++ 
+CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -nostdlib++
 TESTFLAGS = $(SHAREDFLAGS)
 LDFLAGS := -Wl,--gc-sections
 
@@ -35,7 +35,7 @@ basil: $(OBJS) compiler/main.o librt.a
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o $@
 
 release: $(OBJS) compiler/main.o librt.a
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o basil
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o basil -lm
 	strip -g -R .gnu.version \
 			 -R .gnu.hash \
 			 -R .note.ABI-tag \
@@ -43,7 +43,7 @@ release: $(OBJS) compiler/main.o librt.a
 			 -R .eh_frame \
 			 -R .eh_frame_hdr \
 			 -R .comment \
-			 basil
+			 --strip-unneeded basil
 
 librt.a: runtime/core.o runtime/sys.o
 	ar r $@ $^

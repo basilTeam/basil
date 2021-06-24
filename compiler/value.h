@@ -8,12 +8,13 @@
 #include "util/vec.h"
 #include "type.h"
 #include "source.h"
-#include "forms.h"
 #include "errors.h"
 
 namespace basil {
     // Forward declaration.
     struct Builtin;
+    struct Form;
+    struct Env;
 
     struct String;
     struct List;
@@ -23,6 +24,7 @@ namespace basil {
     struct Named;
     struct Struct;
     struct Dict;
+    struct Intersect;
     struct Function;
     struct Alias;
     struct Macro;
@@ -42,24 +44,25 @@ namespace basil {
         rc<Form> form;
 
         union Data {
-            i64 i;              // A primitive int value, of any bit width.
-            float f32;          // A 32-bit primitive float value.
-            double f64;         // A 64-bit primitive float value.
-            Symbol sym;         // A primitive symbol value.
-            Type type;          // A primitive type value.
-            rune ch;            // A primitive UTF-8 character value.
-            bool b;             // A primitive boolean value.
-            rc<String> string;  // A string value.
-            rc<List> list;      // A list value.
-            rc<Tuple> tuple;    // A tuple value.
-            rc<Array> array;    // An array value.
-            rc<Union> u;        // A union value.
-            rc<Named> named;    // A named value.
-            rc<Struct> str;     // A struct value.
-            rc<Dict> dict;      // A dictionary value.
-            rc<Function> fn;    // A function value.
-            rc<Alias> alias;    // An alias value.
-            rc<Macro> macro;    // A macro value.
+            i64 i;                  // A primitive int value, of any bit width.
+            float f32;              // A 32-bit primitive float value.
+            double f64;             // A 64-bit primitive float value.
+            Symbol sym;             // A primitive symbol value.
+            Type type;              // A primitive type value.
+            rune ch;                // A primitive UTF-8 character value.
+            bool b;                 // A primitive boolean value.
+            rc<String> string;      // A string value.
+            rc<List> list;          // A list value.
+            rc<Tuple> tuple;        // A tuple value.
+            rc<Array> array;        // An array value.
+            rc<Union> u;            // A union value.
+            rc<Named> named;        // A named value.
+            rc<Struct> str;         // A struct value.
+            rc<Dict> dict;          // A dictionary value.
+            rc<Intersect> isect;    // An intersection value.
+            rc<Function> fn;        // A function value.
+            rc<Alias> alias;        // An alias value.
+            rc<Macro> macro;        // A macro value.
 
             Symbol undefined_sym; // Not used in operations. Stores the variable name associated
                                   // with an undefined value.
@@ -115,6 +118,7 @@ namespace basil {
         friend Value v_struct(Source::Pos, Type, const map<Symbol, Value>&);
         friend Value v_dict(Source::Pos, Type, const map<Value, Value>&);
         friend Value v_tail(const Value& list);
+        friend Value v_intersect(Source::Pos, Type, const map<Type, Value>& values);
         friend Value v_func(const Builtin& builtin);
         friend Value v_func(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_alias(Source::Pos pos, const Value& term);
@@ -177,6 +181,13 @@ namespace basil {
         map<Value, Value> elements;
 
         Dict(const map<Value, Value>& elements);
+    };
+
+    // Represents the associated data for a compile-time intersection.
+    struct Intersect {
+        map<Type, Value> values;
+
+        Intersect(const map<Type, Value>& values);
     };
 
     struct FormTuple {
@@ -314,6 +325,20 @@ namespace basil {
         return v_dict(pos, type, map_of<Value, Value>(args...));
     }
 
+    // Constructs a value of an intersection type.
+    Value v_intersect(Source::Pos pos, Type type, const map<Type, Value>& values);
+    template<typename ...Args>
+    Value v_intersect(Source::Pos pos, Type type, const Args&... args) {
+        return v_intersect(pos, type, map_of<Type, Value>(args...));
+    }
+
+    // Constructs an intersection value from a number of builtins.
+    Value v_intersect(const vector<Builtin*>& builtins);
+    template<typename ...Args>
+    Value v_intersect(const Args&... args) {
+        return v_intersect(vector_of<Builtin*>(args...));
+    }
+
     // Constructs a function value from a builtin.
     Value v_func(const Builtin& builtin);
 
@@ -438,7 +463,7 @@ namespace basil {
     Value v_map_list(const Func& func, const Value& list) {
         vector<Value> acc;
         for (const Value& v : iter_list(list)) acc.push(func(v));
-        return v_list(list.pos, infer_list(acc), F_TERM, acc);
+        return v_list(list.pos, infer_list(acc), acc);
     }
 
     // Filters the provided list through a predicate, returning a new list.
@@ -446,7 +471,7 @@ namespace basil {
     Value v_filter_list(const Pred& pred, const Value& list) {
         vector<Value> acc;
         for (const Value& v : iter_list(list)) if (pred(v)) acc.push(v);
-        return v_list(list.pos, infer_list(acc), F_TERM, acc);
+        return v_list(list.pos, infer_list(acc), acc);
     }
 
     // Folds the provided list left with the provided initial value and function.

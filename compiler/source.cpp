@@ -119,6 +119,13 @@ namespace basil {
     u32 Source::size() const {
         return lines.size();
     }
+
+    Source::Pos::Pos():
+        line_start(0), col_start(0), line_end(0), col_end(0) {}
+
+    Source::Pos::Pos(u32 line_start_in, u32 col_start_in, u32 line_end_in, u32 col_end_in):
+        line_start(line_start_in), col_start(col_start_in),
+        line_end(line_end_in), col_end(col_end_in) {}
     
     bool Source::Pos::operator==(const Source::Pos& other) const {
         return line_start == other.line_start

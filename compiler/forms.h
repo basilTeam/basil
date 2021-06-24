@@ -4,10 +4,10 @@
 #include "util/vec.h"
 #include "util/option.h"
 #include "type.h"
+#include "value.h"
 
 namespace basil {
     struct Env;
-    struct Value;
 
     enum FormKind {
         FK_TERM,
@@ -115,17 +115,32 @@ namespace basil {
         bool matches(const Value& value);
     };
 
-    // Since all variables and terms are the same, we use
-    // these constants instead of constructing them.
-    extern const Param P_VAR, // A variable parameter.
-                       P_QUOTED, // A quoted parameter.
-                       P_TERM, // A term parameter.
-                       P_VARIADIC, // A variadic parameter.
-                       P_QUOTED_VARIADIC, // A variadic quoted parameter.
-                       P_SELF; // The self parameter.
+     // The self parameter never changes, so we use a constant for it.
+    extern const Param P_SELF;
+
+    // Constructs a variable parameter.
+    Param p_var(Symbol name);
+    Param p_var(const char* name);
+
+    // Constructs a quoted parameter.
+    Param p_quoted(Symbol name);
+    Param p_quoted(const char* name);
+
+    // Constructs a term parameter.
+    Param p_term(Symbol name);
+    Param p_term(const char* name);
+
+    // Constructs a variadic parameter.
+    Param p_variadic(Symbol name);
+    Param p_variadic(const char* name);
+
+    // Constructs a quoted variadic parameter.
+    Param p_quoted_variadic(Symbol name);
+    Param p_quoted_variadic(const char* name);
 
     // Constructs a keyword parameter.
     Param p_keyword(Symbol name);
+    Param p_keyword(const char* name);
 
     // The form of all invokable terms. This includes both functions and macros.
     // Individual callables can either be infix or prefix. Prefix callables start
@@ -156,11 +171,13 @@ namespace basil {
         bool operator==(const Callable& other) const;
         bool operator!=(const Callable& other) const;
         u64 hash();
-    private:
+        
         // internal state used in the state machine
         u32 index;
         bool stopped;
         optional<u64> lazy_hash;
+        u32 advances; // number of times this state machine has advanced without error
+        optional<Value> wrong_value; // set to non-none when we encounter a mismatched value
         friend struct Overloaded;
     };
 
@@ -189,8 +206,8 @@ namespace basil {
         optional<bool> has_prefix, has_infix;
         optional<u64> lazy_hash;
 
-        friend optional<rc<Form>> f_overloaded(i64, const vector<rc<Form>>&);
-        friend optional<rc<Form>> f_add_overload(rc<Form>, rc<Form>);
+        friend rc<Form> f_overloaded(i64, const vector<rc<Form>>&);
+        friend rc<Form> f_add_overload(rc<Form>, rc<Form>);
     };
 
     enum Associativity {
@@ -241,6 +258,7 @@ namespace basil {
     };
 
     bool operator==(rc<Form> a, rc<Form> b);
+    bool operator!=(rc<Form> a, rc<Form> b);
 
     // The form of a single term. Terms represent constants, variables, and all sorts of
     // non-invokable values.
@@ -270,23 +288,18 @@ namespace basil {
     // each of the forms within it are added to the new overloaded form, but not
     // the overloaded form itself - in other words, overloaded forms only ever
     // contain callable forms.
-    // Returns a none optional if the resulting overloaded form would be
-    // ambiguous. Panics if a non-invokable form is provided.
-    optional<rc<Form>> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Form>>& overloads);
+    rc<Form> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Form>>& overloads);
     template<typename ...Args>
-    optional<rc<Form>> f_overloaded(i64 precedence, Associativity assoc, Args... args) {
+    rc<Form> f_overloaded(i64 precedence, Associativity assoc, Args... args) {
         return f_overloaded(precedence, assoc, vector_of<rc<Form>>(args...));
     }
-
-    // Adds the provided 'addend' form to an existing overloaded form. 
-    // Returns a none optional if adding addend would result in ambiguity,
-    // and panics if addend is non-invokable. Otherwise, modifies
-    // the existing overloaded form and returns its refcell.
-    optional<rc<Form>> f_add_overload(rc<Form> existing, rc<Form> addend);
 }
 
 u64 hash(const rc<basil::Form>& form);
 
+void write(stream& io, const basil::Param& param);
+void write(stream& io, const rc<basil::Form>& param);
+void write_with_self(stream& io, const basil::Value& self, const rc<basil::Callable>& callable);
 void write(stream& io, basil::ParamKind fk);
 void write(stream& io, basil::FormKind fk);
 

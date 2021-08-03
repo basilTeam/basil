@@ -19,25 +19,23 @@ bool key_equals(const T& a, const T& b) {
 
 u64 rotl(u64 u, u64 n);
 u64 rotr(u64 u, u64 n);
+
 u64 raw_hash(const void* t, uint64_t size);
 
 template<typename T>
-u64 hash(const T& t) {
-    return raw_hash((const u8*)&t, sizeof(T));
+u64 raw_hash(const T& t) {
+    return raw_hash(&t, sizeof(T));
 }
+
+template<typename T>
+u64 hash(const T& t);
 
 template<>
 u64 hash(const char* const& s);
 
-template<>
-u64 hash(const string& s);
-
-template<>
-u64 hash(const ustring& s);
-
 template<typename T>
 u64 key_hash(const T& a) {
-    return hash(a.first);
+    return ::hash(a.first);
 }
 
 template<typename T>
@@ -323,10 +321,12 @@ public:
         u64 i = h & _mask;
         while (true) {
             if (data[i].status == EMPTY) return end();
-            u64 dist = (i - h) & _mask;
-            u64 oh = hash(data[i].value());
-            u64 other_dist = (i - (oh & _mask)) & _mask;
-            if (other_dist < dist) return end();
+            if (data[i].status != GHOST) {
+                u64 dist = (i - h) & _mask;
+                u64 oh = hash(data[i].value());
+                u64 other_dist = (i - (oh & _mask)) & _mask;
+                if (other_dist < dist) return end();
+            }
             if (data[i].status == FILLED && equals(data[i].value(), t)) {
                 return const_iterator(data + i, data + _capacity);
             }
@@ -339,10 +339,12 @@ public:
         u64 i = h & _mask;
         while (true) {
             if (data[i].status == EMPTY) return end();
-            u64 dist = (i - h) & _mask;
-            u64 oh = hash(data[i].value());
-            u64 other_dist = (i - (oh & _mask)) & _mask;
-            if (other_dist < dist) return end();
+            if (data[i].status != GHOST) {
+                u64 dist = (i - h) & _mask;
+                u64 oh = hash(data[i].value());
+                u64 other_dist = (i - (oh & _mask)) & _mask;
+                if (other_dist < dist) return end();
+            }
             if (data[i].status == FILLED && equals(data[i].value(), t)) {
                 return iterator(data + i, data + _capacity);
             }

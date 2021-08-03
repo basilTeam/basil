@@ -60,6 +60,9 @@ namespace basil {
     // Runs the "run file" mode of the compiler.
     void run(const char* filename);
 
+    // Loads a file and returns the top-level environment before code generation.
+    optional<rc<Env>> load(const char* filename);
+
     // Runs the "help" mode of the compiler.
     void help(const char* cmd);
 }

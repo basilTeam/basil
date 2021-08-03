@@ -1,0 +1,34 @@
+def (xs? length) do:
+    if xs == () then 0 else 1 + (xs tail length)
+
+def (xs? drop n?) do:
+    match n with:
+        0 => xs
+        n? => xs tail drop n - 1
+    
+def (xs? take n?) do:
+    match n with:
+        0 => ()
+        n? => xs head :: xs tail take n - 1
+
+def (merge a? b?) do:
+    match (a, b) with:
+        (a?, ()) => a
+        ((), b?) => b
+        (a?, b?) => do:
+            if a head < b head then
+                a head :: (merge a tail b)
+            else
+                b head :: (merge a b tail)
+
+def (sort items?) do:
+    match items with:
+        () => ()
+        x? :: () => items
+        xs? => do:
+            n := xs length
+            left := xs take n / 2
+            right := xs drop n / 2
+            merge (sort left) (sort right)
+
+sort (list 4 7 5 2 3 0 1 9 8 6)

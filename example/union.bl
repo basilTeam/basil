@@ -1,0 +1,9 @@
+def (unpack x?) do:
+    match x with:
+        i? : Int => "int!"
+        s? : String => "string!"
+
+MyType := (Int | String)
+x := 1 : MyType
+
+unpack x

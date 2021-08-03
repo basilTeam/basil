@@ -1,0 +1,63 @@
+# Type declaration
+
+Rational := Rational of (Int, Int)
+
+# Rational constructor
+
+def (numer? // denom?) : (Int, Int) -> Rational do:
+    simplify (Rational of (numer, denom))
+
+# Rational simplification
+
+def (gcd a? b?) : (Int, Int) -> Int do:
+    if b == 0 then a else gcd b a % b
+
+def (simplify r?) : Rational -> Rational do:
+    match r with:
+        Rational of (rn?, rd?) => do:
+            divisor := gcd rn rd
+            Rational of (rn / divisor, rd / divisor)
+
+# Field accessors
+
+def (r? numer) : Rational -> Int do:
+    match r with:
+        Rational of (rn?, rd?) => rn
+
+def (r? denom) : Rational -> Int do:
+    match r with:
+        Rational of (rn?, rd?) => rd
+
+# Rational/Rational arithmetic
+
+def (a? + b?) : (Rational, Rational) -> Rational do:
+    (a numer) * (b denom) + (b numer) * (a denom) // (a denom) * (b denom)
+
+def (a? - b?) : (Rational, Rational) -> Rational do:
+    (a numer) * (b denom) + (b numer) * (a denom) // (a denom) * (b denom)
+
+def (a? * b?) : (Rational, Rational) -> Rational do:
+    (a numer) * (b numer) // (a denom) * (b denom)
+
+def (a? / b?) : (Rational, Rational) -> Rational do:
+    (a numer) * (b denom) // (a denom) * (b numer)
+
+# Rational/Int arithmetic
+
+def (a? + n?) : (Rational, Int) -> Rational do:
+    a + (n // 1)
+
+def (a? - n?) : (Rational, Int) -> Rational do:
+    a - (n // 1)
+
+def (a? * n?) : (Rational, Int) -> Rational do:
+    a * (n // 1)
+
+def (a? / n?) : (Rational, Int) -> Rational do:
+    a / (n // 1)
+
+# Conversion of Rational to Int
+
+def (r? to Int) : Rational -> Int do:
+    match r with:
+        Rational of (rn?, rd?) => rn / rd

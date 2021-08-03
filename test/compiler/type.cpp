@@ -33,15 +33,10 @@ TEST(list_and_void_coercion) {
     ASSERT_TRUE(T_VOID.coerces_to(ilist));  // void can coerce to any list type, but not in reverse
     ASSERT_TRUE(T_VOID.coerces_to(flist));
     ASSERT_FALSE(ilist.coerces_to(T_VOID));
-    
-    Type tlist = t_list(T_TYPE);
-    ASSERT_TRUE(tlist.coerces_to(T_TYPE)); // [type] can convert to type
-    ASSERT_FALSE(T_TYPE.coerces_to(tlist));
 
     Type alist = t_list(T_ANY);
     ASSERT_TRUE(ilist.coerces_to(alist)); // all lists can convert to [any]
     ASSERT_TRUE(flist.coerces_to(alist));
-    ASSERT_TRUE(tlist.coerces_to(alist));
 
     ASSERT_FALSE(alist.coerces_to(ilist)); // ...but not in reverse
 }

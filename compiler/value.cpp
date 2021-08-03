@@ -2,6 +2,7 @@
 #include "builtin.h"
 #include "env.h"
 #include "forms.h"
+#include "type.h"
 
 namespace basil {
     Value::Data::Data(Kind kind) {
@@ -25,6 +26,7 @@ namespace basil {
             case K_STRUCT: new (&str) rc<Struct>(); break;
             case K_DICT: new (&dict) rc<Dict>(); break;
             case K_INTERSECT: new (&isect) rc<Intersect>(); break;
+            case K_MODULE: new (&mod) rc<Module>(); break;
             case K_FUNCTION: new (&fn) rc<Function>(); break;
             default:
                 panic("Unsupported value kind!"); 
@@ -53,6 +55,7 @@ namespace basil {
             case K_STRUCT: new (&str) rc<Struct>(other.str); break;
             case K_DICT: new (&dict) rc<Dict>(other.dict); break;
             case K_INTERSECT: new (&isect) rc<Intersect>(other.isect); break;
+            case K_MODULE: new (&mod) rc<Module>(other.mod); break;
             case K_FUNCTION: new (&fn) rc<Function>(other.fn); break;
             default:
                 panic("Unsupported value kind!"); 
@@ -91,6 +94,7 @@ namespace basil {
             case K_STRUCT: data.str.~rc(); break;
             case K_DICT: data.dict.~rc(); break;
             case K_INTERSECT: data.isect.~rc(); break;
+            case K_MODULE: data.mod.~rc(); break;
             case K_FUNCTION: data.fn.~rc(); break;
             default: break; // trivial destructor
         }
@@ -118,6 +122,7 @@ namespace basil {
                 case K_STRUCT: data.str.~rc(); break;
                 case K_DICT: data.dict.~rc(); break;
                 case K_INTERSECT: data.isect.~rc(); break;
+                case K_MODULE: data.mod.~rc(); break;
                 case K_FUNCTION: data.fn.~rc(); break;
                 default: break; // trivial destructor
             }
@@ -141,6 +146,7 @@ namespace basil {
                 case K_STRUCT: data.str.~rc(); break;
                 case K_DICT: data.dict.~rc(); break;
                 case K_INTERSECT: data.isect.~rc(); break;
+                case K_MODULE: data.mod.~rc(); break;
                 case K_FUNCTION: data.fn.~rc(); break;
                 default: break; // trivial destructor
             }
@@ -155,56 +161,63 @@ namespace basil {
     }
     
     u64 Value::hash() const {
-        u64 kh = ::hash(type);
+        u64 kh = raw_hash(type);
         switch (type.kind()) {
-            case K_INT: return kh ^ ::hash(data.i);
-            case K_FLOAT: return kh ^ ::hash(data.f32);
-            case K_DOUBLE: return kh ^ ::hash(data.f64);
-            case K_SYMBOL: return kh ^ ::hash(data.sym);
-            case K_CHAR: return kh ^ ::hash(data.ch);
-            case K_BOOL: return kh ^ ::hash(data.b);
+            case K_INT: return kh ^ raw_hash(data.i);
+            case K_FLOAT: return kh ^ raw_hash(data.f32);
+            case K_DOUBLE: return kh ^ raw_hash(data.f64);
+            case K_SYMBOL: return kh ^ raw_hash(data.sym);
+            case K_CHAR: return kh ^ raw_hash(data.ch);
+            case K_BOOL: return kh ^ raw_hash(data.b);
             case K_VOID: return kh;
             case K_ERROR: return kh;
-            case K_UNDEFINED: return kh ^ ::hash(data.undefined_sym);
-            case K_STRING: return kh ^ ::hash(data.string->data);
-            case K_NAMED: return kh ^ ::hash(t_get_name(type)) ^ ::hash(data.named->value);
-            case K_UNION: return kh ^ ::hash(data.u->value.hash());
+            case K_UNDEFINED: return kh ^ raw_hash(data.undefined_sym);
+            case K_STRING: return kh ^ raw_hash(data.string->data);
+            case K_NAMED: return kh ^ raw_hash(t_get_name(type)) ^ data.named->value.hash();
+            case K_UNION: return kh ^ raw_hash(data.u->value.hash());
             case K_LIST: {
                 rc<List> l = data.list;
                 while (l) {
-                    kh ^= 9078847634459849863ul * ::hash(l->head);
+                    kh ^= 9078847634459849863ul * l->head.hash();
                     l = l->tail;
                 }
                 return kh;
             }
             case K_TUPLE: {
                 for (const Value& v : data.tuple->members)
-                    kh ^= 17506913336699353123ul * ::hash(v);
+                    kh ^= 17506913336699353123ul * v.hash();
                 return kh;
             }
             case K_ARRAY: {
                 for (const Value& v : data.array->elements)
-                    kh ^= 14514260704651213427ul * ::hash(v);
+                    kh ^= 14514260704651213427ul * v.hash();
                 return kh;
             }
             case K_STRUCT: {
                 for (const auto& [s, v] : data.str->fields) {
                     kh ^= 3643764085211794813ul * ::hash(s);
-                    kh ^= 4428768580518955441ul * ::hash(v);
+                    kh ^= 4428768580518955441ul * v.hash();
                 }
                 return kh;
             }
             case K_DICT: {
                 for (const auto& [k, v] : data.dict->elements) {
-                    kh ^= 9153145680466808213ul * ::hash(k);
-                    kh ^= 8665824272381522569ul * ::hash(v);
+                    kh ^= 9153145680466808213ul * k.hash();
+                    kh ^= 8665824272381522569ul * v.hash();
                 }
                 return kh;
             }
             case K_INTERSECT: {
                 for (const auto& [t, v] : data.isect->values) {
                     kh ^= 200878521973963957ul * ::hash(t);
-                    kh ^= 11923319286714586559ul * ::hash(v);
+                    kh ^= 11923319286714586559ul * v.hash();
+                }
+                return kh;
+            }
+            case K_MODULE: {
+                for (const auto& [k, v] : data.mod->env->values) {
+                    kh ^= 14221613862391592843ul * ::hash(k);
+                    kh ^= 12782913719168895739ul * v.hash();
                 }
                 return kh;
             }
@@ -239,6 +252,7 @@ namespace basil {
                 break;
             }
             case K_INTERSECT: write_values(io, data.isect->values, "(", " & ", ")"); break; // (1 & 2 & 3)
+            case K_MODULE: write(io, "#module"); break;
             case K_FUNCTION: write(io, "#procedure"); break;
             default:
                 panic("Unsupported value kind!"); 
@@ -316,6 +330,8 @@ namespace basil {
                 }
                 return copy_values.size() == 0; // our intersect had a matching type for every type in the other intersect
             }
+            case K_MODULE:
+                return data.mod->env.is(other.data.mod->env); // must be same environment
             case K_FUNCTION: 
                 return data.fn.is(other.data.fn); // only consider reference equality
             default:
@@ -337,7 +353,8 @@ namespace basil {
             case K_ERROR:
             case K_UNDEFINED:
             case K_FUNCTION:
-                return *this; // shallow copy is sufficient, no ref fields
+            case K_MODULE:
+                return *this; // shallow copy is sufficient for these kinds
             case K_STRING: return v_string(pos, data.string->data).with(form);
             case K_NAMED: return v_named(pos, type, data.named->value.clone()).with(form);
             case K_UNION: return v_union(pos, type, data.u->value.clone()).with(form);
@@ -407,6 +424,8 @@ namespace basil {
     Dict::Dict(const map<Value, Value>& elements_in): elements(elements_in) {}
 
     Intersect::Intersect(const map<Type, Value>& values_in): values(values_in) {}
+
+    Module::Module(rc<Env> env_in): env(env_in) {}
 
     bool FormTuple::operator==(const FormTuple& other) const {
         if (forms.size() != other.forms.size()) return false;
@@ -501,7 +520,7 @@ namespace basil {
             panic("Attempted to construct list with non-list type!");
         if (!head.type.coerces_to(t_list_element(type)))
             panic("Cannot construct list - provided head incompatible with chosen type!");
-        if (!tail.type.coerces_to(type)) 
+        if (!tail.type.coerces_to(type))
             panic("Cannot construct list - provided tail incompatible with chosen type!"); 
         v.data.list = ref<List>(coerce(head, t_list_element(type)), tail.type.of(K_VOID) ? nullptr : tail.data.list);
         return v;
@@ -566,8 +585,11 @@ namespace basil {
         Value v(pos, type, nullptr);
         if (!type.of(K_NAMED))
             panic("Attempted to construct named value with non-named type!");
-        if (!value.type.coerces_to(type))
+        if (!value.type.coerces_to(t_get_base(type))) {
+            println("value type = ", value.type);
+            println("base type = ", t_get_base(type));
             panic("Cannot construct named value - provided value is of an incompatible type!");
+        }
         v.data.named = ref<Named>(value);
         return v;
     }
@@ -619,6 +641,12 @@ namespace basil {
         }
         return v_intersect({}, t_intersect(value_types), values)
             .with(f_overloaded(value_forms[0]->precedence, value_forms[0]->assoc, value_forms));
+    }
+
+    Value v_module(Source::Pos pos, rc<Env> env) {
+        Value v(pos, T_MODULE, nullptr);
+        v.data.mod = ref<Module>(env);
+        return v;
     }
 
     Value v_func(const Builtin& builtin) {
@@ -1051,15 +1079,78 @@ namespace basil {
         }
     }
 
-    optional<map<Symbol, Value>> v_match(const Value& pattern, const Value& v) {
-        using Bindings = map<Symbol, Value>;
-        return none<Bindings>(); // no match found
+    Value coerce(const Value& src, Type target) {
+        if (src.type == target) return src; // no coercion needed
+
+        if (src.type.coerces_to_generic(target)) return src; // generic conversions don't require representational changes
+
+        if (target.of(K_TYPE)) switch (src.type.kind()) { // coercing to type
+            case K_ARRAY:
+                if (v_array_len(src) != 1) panic("Array being coerced to type has multiple elements!");
+                if (!v_array_at(src, 0).type.coerces_to(T_TYPE)) panic("Array being coerced to type has non-type element!");
+                return v_type(src.pos, t_list(coerce(v_array_at(src, 0), T_TYPE).data.type));
+            case K_TUPLE: {
+                vector<Type> elts;
+                for (const Value& v : v_tuple_elements(src)) {
+                    if (!v.type.coerces_to(T_TYPE)) panic("Tuple being coerced to type had a non-type element!");
+                    elts.push(coerce(v, T_TYPE).data.type);
+                }
+                return v_type(src.pos, t_tuple(elts));
+            }
+            case K_NAMED: {
+                const Value& b = src.data.named->value;
+                if (!b.type.coerces_to(T_TYPE)) panic("Named value being coerced to type did not contain type!");
+                return v_type(src.pos, t_named(t_get_name(src.type), coerce(b, T_TYPE).data.type));
+            }
+            default:
+                break;
+        }
+
+        if (target.of(K_TUPLE) && src.type.of(K_TUPLE)) { // tuple-to-tuple elementwise coercion
+            vector<Value> new_elements;
+            for (u32 i = 0; i < v_len(src); i ++) {
+                new_elements.push(coerce(v_at(src, i), t_tuple_at(target, i)));
+            }
+            return v_tuple(src.pos, target, new_elements);
+        }
+
+        if (src.type.of(K_INT)) {
+            if (target.of(K_FLOAT)) return v_float({}, float(src.data.i));
+            if (target.of(K_DOUBLE)) return v_double({}, double(src.data.i));
+        }
+        if (src.type.of(K_FLOAT)) {
+            if (target.of(K_DOUBLE)) return v_double({}, double(src.data.f32));
+        }
+
+        if (target.of(K_UNION) && t_union_has(target, src.type)) {
+            return v_union(src.pos, target, src);
+        }
+
+        panic("Attempted to perform unimplemented type conversion!");
+        return v_error({});
     }
 
-    Value coerce(const Value& src, Type target) {
-        if (target.of(K_ANY)) return src; // anything can freely convert to the 'any' type
-        if (src.type != target) panic("Implicit conversion rules are unimplemented!");
-        return src;
+    rc<Value> v_resolve_body(Value fn, FormTuple tup) {
+        tup.compute_hash();
+
+        auto& table = fn.data.fn->resolutions;
+        auto it = table.find(tup);
+        if (it == table.end()) {
+            table.put(tup, ref<Value>(fn.data.fn->body.clone()));
+            for (const auto& [k, v] : table) if (k == tup) return v;
+            return table.find(tup)->second;
+        }
+        else {
+            return it->second;
+        }
+    }
+
+    rc<Value> v_resolve_body(Value fn, const vector<rc<Form>>& args) {
+        u32 num_args = fn.data.fn->args.size();
+        FormTuple tup;
+        tup.forms = args;
+        for (rc<Form>& form : tup.forms) if (!form) form = F_TERM; // default to term
+        return v_resolve_body(fn, tup);
     }
 
     rc<Value> v_resolve_body(Value fn, const Value& args) {
@@ -1073,22 +1164,19 @@ namespace basil {
             tup.forms.push(v_tuple_at(args, i).form); // get forms for each arg
         }
         for (rc<Form>& form : tup.forms) if (!form) form = F_TERM; // default to term
-        tup.compute_hash();
 
-        auto it = table.find(tup);
-        if (it == table.end()) {
-            table.put(tup, ref<Value>(fn.data.fn->body.clone()));
-            for (const auto& [k, v] : table) if (k == tup) return v;
-            return table.find(tup)->second;
-        }
-        else {
-            return it->second;
-        }
+        return v_resolve_body(fn, tup);
     }
 }
 
+template<>
 u64 hash(const basil::FormTuple& forms) {
     return forms.hash;
+}
+
+template<>
+u64 hash(const basil::Value& value) {
+    return value.hash();
 }
 
 void write(stream& io, const basil::Value& value) {

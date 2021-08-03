@@ -4,7 +4,9 @@ namespace basil {
     struct Class;
 }
 
+template<>
 u64 hash(const rc<basil::Class>& tclass);
+
 void write(stream& io, const rc<basil::Class>& tclass);
 
 namespace basil {
@@ -43,7 +45,7 @@ namespace basil {
     Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION, S_ELLIPSIS, S_COMMA, S_DO;
+        S_QUESTION, S_ELLIPSIS, S_COMMA, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
 
     void init_symbols() {
         S_NONE = symbol_from("");
@@ -68,7 +70,12 @@ namespace basil {
         S_QUESTION = symbol_from("?");
         S_ELLIPSIS = symbol_from("...");
         S_COMMA = symbol_from(",");
+        S_PIPE = symbol_from("|");
         S_DO = symbol_from("do");
+        S_CONS = symbol_from("::");
+        S_WITH = symbol_from("with");
+        S_CASE_ARROW = symbol_from("=>");
+        S_OF = symbol_from("of");
     }
 
     const u64 KIND_HASHES[NUM_KINDS] = {
@@ -94,7 +101,8 @@ namespace basil {
         2948583097529606413ul,
         14239964922572717219ul,
         14100517225124763857ul,
-        3843382840898873837ul
+        3843382840898873837ul,
+        9920235303098296457ul
     };
 
     struct Class {
@@ -225,7 +233,7 @@ namespace basil {
         SingletonClass(Kind kind, const char* name_in): Class(kind), name(name_in) {}
 
         u64 lazy_hash() const override {
-            return ::hash(kind());
+            return raw_hash(kind());
         }
 
         void format(stream& io) const override {
@@ -247,7 +255,7 @@ namespace basil {
             Class(kind), name(name_in), floating(floating_in), size(size_in_bytes) {}
 
         u64 lazy_hash() const override {
-            return ::hash(kind()) * 544921574335967683ul ^ ::hash(size) * 4508536729671157399ul ^ ::hash(floating);
+            return raw_hash(kind()) * 544921574335967683ul ^ raw_hash(size) * 4508536729671157399ul ^ raw_hash(floating);
         };
 
         void format(stream& io) const override {
@@ -299,7 +307,7 @@ namespace basil {
             Class(K_NAMED), name(name_in), base(TYPE_LIST[base_in.id]) {}
 
         u64 lazy_hash() const override {
-            return base->hash() * 10762593286530943657ul ^ ::hash(name) * 11858331803272376449ul ^ ::hash(K_NAMED);
+            return base->hash() * 10762593286530943657ul ^ raw_hash(name) * 11858331803272376449ul ^ raw_hash(K_NAMED);
         }
 
         void format(stream& io) const override {
@@ -312,6 +320,16 @@ namespace basil {
             if (other.kind() == K_NAMED) {
                 return as<NamedClass>(other).name == name  
                     && base->coerces_to_generic(*as<NamedClass>(other).base);
+            }
+
+            return false;
+        }
+
+        bool coerces_to(const Class& other) const override {
+            if (Class::coerces_to(other)) return true;
+
+            if (other.kind() == K_TYPE) {
+                return base->coerces_to(*TYPE_LIST[T_TYPE.id]);
             }
 
             return false;
@@ -340,7 +358,7 @@ namespace basil {
             Class(K_LIST), element(TYPE_LIST[element_in.id]) {}
 
         u64 lazy_hash() const override {
-            return element->hash() * 6769132636657327813ul ^ ::hash(kind());
+            return element->hash() * 6769132636657327813ul ^ raw_hash(kind());
         }
 
         void format(stream& io) const override {
@@ -354,15 +372,6 @@ namespace basil {
                 return element->coerces_to_generic(*as<ListClass>(other).element);
             }
             
-            return false;
-        }
-
-        bool coerces_to(const Class& other) const override {
-            if (Class::coerces_to(other)) return true;
-
-            if (other.kind() == K_TYPE) 
-                return element->kind() == K_TYPE; // [type] can convert to type
-
             return false;
         }
 
@@ -386,7 +395,7 @@ namespace basil {
         }
 
         u64 lazy_hash() const override {
-            u64 base = ::hash(kind());
+            u64 base = raw_hash(kind());
             if (incomplete) base ^= 10347714113816317481ul;
             for (const auto& t : members) {
                 base ^= t->hash();
@@ -447,7 +456,7 @@ namespace basil {
 
             if (other.kind() == K_TYPE) {
                 for (u32 i = 0; i < members.size(); i ++) {
-                    if (members[i]->kind() != K_TYPE) return false;
+                    if (!members[i]->coerces_to(*TYPE_LIST[T_TYPE.id])) return false;
                 }
 
                 return true; // A tuple of only type elements can convert to 'type'.
@@ -491,8 +500,8 @@ namespace basil {
             Class(K_ARRAY), element(TYPE_LIST[element_in.id]), size(size_in), sized(true) {}
 
         u64 lazy_hash() const override {
-            return ::hash(kind()) ^ element->hash() * 8773895335238318147ul
-                ^ (sized ? ::hash(size) * 8954908842287060251ul : 11485220905872292697ul);
+            return raw_hash(kind()) ^ element->hash() * 8773895335238318147ul
+                ^ (sized ? raw_hash(size) * 8954908842287060251ul : 11485220905872292697ul);
         }
 
         void format(stream& io) const override {
@@ -520,6 +529,11 @@ namespace basil {
                     return !as<ArrayClass>(other).sized;
             }
 
+            if (other.kind() == K_TYPE) {
+                return element->coerces_to(*TYPE_LIST[T_TYPE.id])
+                    && sized && size == 1; // [type] can convert to type
+            }
+
             return false;
         }
 
@@ -544,11 +558,17 @@ namespace basil {
 
         UnionClass(const set<Type>& members_in):
             Class(K_UNION) {
-            for (Type t : members_in) members.insert(TYPE_LIST[t.id]);
+            for (Type t : members_in) {
+                if (t.of(K_UNION)) { // add all members of other unions, preventing nesting
+                    for (rc<Class> m : as<UnionClass>(*TYPE_LIST[t.id]).members)
+                        members.insert(m);
+                }
+                else members.insert(TYPE_LIST[t.id]);
+            }
         }
 
         u64 lazy_hash() const override {
-            u64 base = ::hash(kind());
+            u64 base = raw_hash(kind());
             for (const auto& m : members) {
                 base ^= 3958225336639215437ul * m->hash();
             }
@@ -629,7 +649,7 @@ namespace basil {
             Class(K_INTERSECT), members(members_in) {}
 
         u64 lazy_hash() const override {
-            u64 base = ::hash(kind());
+            u64 base = raw_hash(kind());
             for (const auto& m : members) {
                 base ^= 16873539230647500721ul * m->hash();
             }
@@ -679,7 +699,7 @@ namespace basil {
             Class(K_FUNCTION), arg(TYPE_LIST[arg_in.id]), ret(TYPE_LIST[ret_in.id]) {}
 
         u64 lazy_hash() const override {
-            return ::hash(kind()) ^ arg->hash() * 4858037243276500399ul ^ ret->hash() * 16668975004056768077ul;
+            return raw_hash(kind()) ^ arg->hash() * 4858037243276500399ul ^ ret->hash() * 16668975004056768077ul;
         }
 
         void format(stream& io) const override {
@@ -700,8 +720,8 @@ namespace basil {
         bool coerces_to(const Class& other) const override {
             if (Class::coerces_to(other)) return true;
 
-            if (other.kind() == K_TYPE) {
-                return ret->kind() == K_TYPE; // Functions that return type can be coerced to 'type'.
+            if (other.kind() == K_TYPE) { // Functions that return type can be coerced to 'type'.
+                return arg->coerces_to(*TYPE_LIST[T_TYPE.id]) && ret->kind() == K_TYPE;
             }
 
             return false;
@@ -728,10 +748,10 @@ namespace basil {
         }
 
         u64 lazy_hash() const override {
-            u64 base = ::hash(kind());
+            u64 base = raw_hash(kind());
             if (incomplete) base ^= 6659356980319522183ul;
             for (auto [s, t] : fields) {
-                base ^= ::hash(s) * 515562480546324473ul;
+                base ^= raw_hash(s) * 515562480546324473ul;
                 base ^= t->hash() * 16271366544726016991ul;
             }
             return base;
@@ -802,7 +822,7 @@ namespace basil {
             Class(K_DICT), key(TYPE_LIST[key_in.id]), value(TYPE_LIST[value_in.id]) {}
         
         u64 lazy_hash() const override {
-            return ::hash(kind()) ^ 1785136365411115207ul * key->hash() 
+            return raw_hash(kind()) ^ 1785136365411115207ul * key->hash() 
                 ^ 14219447378751898973ul * value->hash();
         }
 
@@ -858,7 +878,7 @@ namespace basil {
         MacroClass(i64 arity_in): Class(K_MACRO), arity(arity_in) {}
 
         u64 lazy_hash() const override {
-            return ::hash(kind()) * 5822540408738177351ul ^ ::hash(arity);
+            return raw_hash(kind()) * 5822540408738177351ul ^ raw_hash(arity);
         }
 
         void format(stream& io) const override {
@@ -885,18 +905,20 @@ namespace basil {
         TVarClass(Symbol name_in): TVarClass() { name = name_in; }
 
         u64 lazy_hash() const override {
-            return ::hash(kind()) * 3078465884631522967ul
-                ^ ::hash(id) * 8292421814661686869ul
-                ^ ::hash(name);
+            return raw_hash(kind()) * 3078465884631522967ul
+                ^ raw_hash(id) * 8292421814661686869ul
+                ^ raw_hash(name);
         }
 
         void format(stream& io) const override {
             write(io, name);
+            if (tvar_bindings[id] != T_UNDEFINED) write(io, "(", tvar_bindings[id], ")");
         }
 
         bool coerces_to_generic(const Class& other) const override {
             bool result = TYPE_LIST[tvar_bindings[id].id]->coerces_to(other);
-            if (result) tvar_bindings[id] = t_from(other.id()); // bind this tvar to the other type
+            if (result && other.kind() != K_ANY)   
+                tvar_bindings[id] = t_from(other.id()); // bind this tvar to the other type
             return result;
         }
 
@@ -926,7 +948,7 @@ namespace basil {
     }
 
     Type T_VOID, T_INT, T_FLOAT, T_DOUBLE, T_SYMBOL, 
-        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, 
+        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, T_MODULE,
         T_ANY, T_UNDEFINED;
 
     Type t_tuple_at(Type tuple, u32 i) {
@@ -1011,7 +1033,7 @@ namespace basil {
 
     Type t_get_base(Type named) {
         if (!named.of(K_NAMED)) panic("Expected named type!");
-        return t_from(as<NamedClass>(*TYPE_LIST[named.id]).id());
+        return t_from(as<NamedClass>(*TYPE_LIST[named.id]).base->id());
     }
 
     bool t_struct_is_complete(Type str) {
@@ -1083,20 +1105,26 @@ namespace basil {
         return as<TVarClass>(*TYPE_LIST[tvar.id]).name;
     }
 
+    void t_tvar_unbind(Type tvar) {
+        if (!tvar.is_tvar()) panic("Expected type variable!");
+        tvar_bindings[as<TVarClass>(*TYPE_LIST[tvar.id]).id] = T_UNDEFINED;
+    }
+
     void init_types() {
-        T_VOID = t_create(ref<VoidClass>(K_VOID, "void"));
-        T_INT = t_create(ref<NumberClass>(K_INT, "int", false, 8)); // 8-byte integral type
-        T_FLOAT = t_create(ref<NumberClass>(K_FLOAT, "float", true, 4)); // 4-byte floating-point type
-        T_DOUBLE = t_create(ref<NumberClass>(K_DOUBLE, "double", true, 8)); // 8-byte floating-point type
-        T_SYMBOL = t_create(ref<SingletonClass>(K_SYMBOL, "symbol"));
-        T_STRING = t_create(ref<SingletonClass>(K_STRING, "string"));
-        T_CHAR = t_create(ref<SingletonClass>(K_CHAR, "char"));
-        T_BOOL = t_create(ref<SingletonClass>(K_BOOL, "bool"));
-        T_TYPE = t_create(ref<SingletonClass>(K_TYPE, "type"));
-        T_ALIAS = t_create(ref<SingletonClass>(K_ALIAS, "alias"));
-        T_ERROR = t_create(ref<SingletonClass>(K_ERROR, "error"));
-        T_ANY = t_create(ref<SingletonClass>(K_ANY, "any"));
-        T_UNDEFINED = t_create(ref<UndefinedClass>(K_UNDEFINED, "undefined"));
+        T_VOID = t_create(ref<VoidClass>(K_VOID, "Void"));
+        T_INT = t_create(ref<NumberClass>(K_INT, "Int", false, 8)); // 8-byte integral type
+        T_FLOAT = t_create(ref<NumberClass>(K_FLOAT, "Float", true, 4)); // 4-byte floating-point type
+        T_DOUBLE = t_create(ref<NumberClass>(K_DOUBLE, "Double", true, 8)); // 8-byte floating-point type
+        T_SYMBOL = t_create(ref<SingletonClass>(K_SYMBOL, "Symbol"));
+        T_STRING = t_create(ref<SingletonClass>(K_STRING, "String"));
+        T_CHAR = t_create(ref<SingletonClass>(K_CHAR, "Char"));
+        T_BOOL = t_create(ref<SingletonClass>(K_BOOL, "Bool"));
+        T_TYPE = t_create(ref<SingletonClass>(K_TYPE, "Type"));
+        T_ALIAS = t_create(ref<SingletonClass>(K_ALIAS, "Alias"));
+        T_ERROR = t_create(ref<SingletonClass>(K_ERROR, "Error"));
+        T_MODULE = t_create(ref<SingletonClass>(K_MODULE, "Module"));
+        T_ANY = t_create(ref<SingletonClass>(K_ANY, "Any"));
+        T_UNDEFINED = t_create(ref<UndefinedClass>(K_UNDEFINED, "Undefined"));
     }
 
     void init_types_and_symbols() {
@@ -1109,18 +1137,22 @@ namespace basil {
     }
 }
 
+template<>
 u64 hash(const basil::Symbol& symbol) {
-    return hash<u32>(symbol.id);
+    return raw_hash<u32>(symbol.id);
 }
 
+template<>
 u64 hash(const basil::Type& type) {
     return basil::TYPE_LIST[type.id]->hash();
 }
 
+template<>
 u64 hash(const rc<basil::Class>& tclass) {
     return tclass->hash();
 }
 
+template<>
 u64 hash(const basil::Kind& kind) {
     return basil::KIND_HASHES[kind];
 }

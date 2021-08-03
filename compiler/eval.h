@@ -18,12 +18,13 @@ namespace basil {
 
     // Represents a grouped expression. Includes a value representing the 
     // expression (code, not data values) with a resolved form. Also
-    // includes the resulting environment (with any changes the resolution
-    // process made) and an iterator pointing to the term immediately
-    // after the returned group.
+    // includes an iterator pointing to the term immediately
+    // after the returned group, and the precedence of the rightmost
+    // applied operator.
     struct GroupResult {
         Value value;
         list_iterator next;
+        i64 precedence;
     };
 
     // Used to provide all the necessary error information from a failed grouping.

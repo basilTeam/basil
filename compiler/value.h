@@ -6,9 +6,21 @@
 #include "util/ustr.h"
 #include "util/rc.h"
 #include "util/vec.h"
+#include "util/hash.h"
 #include "type.h"
 #include "source.h"
 #include "errors.h"
+
+namespace basil {
+    struct FormTuple;
+    struct Value;
+}
+
+template<>
+u64 hash(const basil::FormTuple& forms);
+
+template<>
+u64 hash(const basil::Value& value);
 
 namespace basil {
     // Forward declaration.
@@ -28,6 +40,7 @@ namespace basil {
     struct Function;
     struct Alias;
     struct Macro;
+    struct Module;
 
     // Represents a compile-time value. Values have a few fundamental
     // properties. A value's type describes what kind of data it holds.
@@ -60,6 +73,7 @@ namespace basil {
             rc<Struct> str;         // A struct value.
             rc<Dict> dict;          // A dictionary value.
             rc<Intersect> isect;    // An intersection value.
+            rc<Module> mod;         // A module value.
             rc<Function> fn;        // A function value.
             rc<Alias> alias;        // An alias value.
             rc<Macro> macro;        // A macro value.
@@ -119,6 +133,7 @@ namespace basil {
         friend Value v_dict(Source::Pos, Type, const map<Value, Value>&);
         friend Value v_tail(const Value& list);
         friend Value v_intersect(Source::Pos, Type, const map<Type, Value>& values);
+        friend Value v_module(Source::Pos, rc<Env>);
         friend Value v_func(const Builtin& builtin);
         friend Value v_func(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_alias(Source::Pos pos, const Value& term);
@@ -188,6 +203,13 @@ namespace basil {
         map<Type, Value> values;
 
         Intersect(const map<Type, Value>& values);
+    };
+
+    // Represents the associated data for a compile-time module.
+    struct Module {
+        rc<Env> env;
+
+        Module(rc<Env> env);
     };
 
     struct FormTuple {
@@ -338,6 +360,9 @@ namespace basil {
     Value v_intersect(const Args&... args) {
         return v_intersect(vector_of<Builtin*>(args...));
     }
+
+    // Constructs a module from an environment.
+    Value v_module(Source::Pos pos, rc<Env> env);
 
     // Constructs a function value from a builtin.
     Value v_func(const Builtin& builtin);
@@ -565,10 +590,6 @@ namespace basil {
     // Delegates to v_tuple_at or v_array_at depending on the type of 'v'.
     Value v_at(const Value& v, u32 i);
 
-    // Attempts to match value v to a pattern. Returns a map of resulting
-    // variable bindings if successful, or a none optional otherwise.
-    optional<map<Symbol, Value>> v_match(const Value& pattern, const Value& v);
-
     // Coerces a value to the given target type, or returns an error value if coercion
     // is impossible.
     // Should not return an error if src.type.coerces_to(target) returns true.
@@ -578,9 +599,8 @@ namespace basil {
     // arguments. Specifically, this handles things like avoiding duplicate form
     // resolution.
     rc<Value> v_resolve_body(Value fn, const Value& args);
+    rc<Value> v_resolve_body(Value fn, const vector<rc<Form>>& args);
 }
-
-u64 hash(const basil::FormTuple& forms);
 
 void write(stream& io, const basil::Value& value);
 

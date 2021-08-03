@@ -36,6 +36,7 @@ namespace basil {
 
         // Represents an exclusive range of characters within a source file.
         struct Pos {
+            const char* filename;
             u32 line_start : 20;
             u32 col_start : 12;
             u32 line_end : 20;

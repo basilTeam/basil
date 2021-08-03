@@ -2,17 +2,22 @@
 #define BASIL_FORM_H
 
 #include "util/vec.h"
+#include "util/rc.h"
 #include "util/option.h"
 #include "type.h"
 #include "value.h"
+
+template<>
+u64 hash(const rc<basil::Form>& form);
 
 namespace basil {
     struct Env;
 
     enum FormKind {
-        FK_TERM,
-        FK_CALLABLE,
-        FK_OVERLOADED,
+        FK_TERM,        // Form for a non-applied, singular value. 
+        FK_CALLABLE,    // Form that can be applied, like a single function.
+        FK_OVERLOADED,  // Form of multiple callable forms, like an overloaded function.
+        FK_COMPOUND,    // Form containing multiple other forms, indexed by values, for things like modules.
         NUM_FORM_KINDS
     };
 
@@ -100,6 +105,7 @@ namespace basil {
         PK_VARIADIC, // Parameter can bind to any number of terms.
         PK_KEYWORD, // Parameter matches only the corresponding symbol. Part of the function signature.
         PK_TERM, // Parameter can bind to a single ungrouped term.
+        PK_TERM_VARIADIC, // Parameter can bind to any number of ungrouped terms.
         PK_QUOTED, // Parameter can bind to any single term, with grouping, but skips evaluation.
         PK_QUOTED_VARIADIC, // Parameter can bind to any number of terms, but skips evaluation for all of them.
         PK_SELF, // Parameter can bind to any single term. Used to specifically denote the function name.
@@ -130,6 +136,10 @@ namespace basil {
     Param p_term(Symbol name);
     Param p_term(const char* name);
 
+    // Constructs a term variadic parameter.
+    Param p_term_variadic(Symbol name);
+    Param p_term_variadic(const char* name);
+
     // Constructs a variadic parameter.
     Param p_variadic(Symbol name);
     Param p_variadic(const char* name);
@@ -141,6 +151,9 @@ namespace basil {
     // Constructs a keyword parameter.
     Param p_keyword(Symbol name);
     Param p_keyword(const char* name);
+
+    // Returns whether the provided ParamKind is variadic.
+    bool is_variadic(ParamKind pk);
 
     // The form of all invokable terms. This includes both functions and macros.
     // Individual callables can either be infix or prefix. Prefix callables start
@@ -210,6 +223,14 @@ namespace basil {
         friend rc<Form> f_add_overload(rc<Form>, rc<Form>);
     };
 
+    // Data type for the contents of a compound form.
+    struct Compound {
+        rc<Env> env;
+        map<Value, rc<Form>> members;
+
+        Compound(rc<Env> env, const map<Value, rc<Form>>& members);
+    };
+
     enum Associativity {
         ASSOC_LEFT, ASSOC_RIGHT
     };
@@ -224,6 +245,7 @@ namespace basil {
         Associativity assoc; // How this form associates with operators of the same precedence.
         rc<StateMachine> invokable; // A pointer to the invokable state machine associated with
                                     // this form. May be null!
+        rc<Compound> compound; // A pointer to the compound data associated with this form. May be null!
 
         // Constructs a Form equal to F_TERM.
         Form();
@@ -293,9 +315,11 @@ namespace basil {
     rc<Form> f_overloaded(i64 precedence, Associativity assoc, Args... args) {
         return f_overloaded(precedence, assoc, vector_of<rc<Form>>(args...));
     }
-}
 
-u64 hash(const rc<basil::Form>& form);
+    // Constructs a compound form from the provided subform mapping information.
+    // Compound forms are not applicable, so no associativity or precedence is necessary.
+    rc<Form> f_compound(rc<Env> env, const map<Value, rc<Form>>& members);
+}
 
 void write(stream& io, const basil::Param& param);
 void write(stream& io, const rc<basil::Form>& param);

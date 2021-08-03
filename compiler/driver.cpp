@@ -156,6 +156,55 @@ namespace basil {
         println(result);
     }
 
+    static map<const char*, rc<Env>> modules;
+
+    optional<rc<Env>> load(const char* filename) {
+        if (modules.find(filename) == modules.end()) {
+            rc<Source> source = ref<Source>(filename);
+            Source::View view(*source);
+            vector<Token> token_cache = lex_all(view);
+            TokenView tview(source, token_cache);
+            
+            rc<Env> global = extend(root_env());
+            vector<Value> program_terms;
+            program_terms.push(v_symbol({}, S_DO)); // wrap the whole program in a giant "do"
+
+            bool old_repl = is_repl(); // store whether we are in a repl
+            repl_mode = false; // prevents asking for user input in the module
+            while (tview) {
+                if (auto v = parse(tview)) {
+                    program_terms.push(*v);
+                }
+                if (error_count()) {
+                    print_errors(_stdout, source);
+                    discard_errors();
+                    repl_mode = old_repl; // restore previous repl state
+                    return none<rc<Env>>();
+                }
+            }
+            repl_mode = old_repl; // restore previous repl state
+            if (error_count()) {
+                print_errors(_stdout, source);
+                discard_errors();
+                return none<rc<Env>>();
+            }
+
+            Value program = v_list(span(program_terms.front().pos, program_terms.back().pos), 
+                t_list(T_ANY), program_terms);
+            Value result = eval(global, program);
+            if (error_count()) {
+                print_errors(_stdout, source);
+                discard_errors();
+                return none<rc<Env>>();
+            }
+
+            modules.put(filename, global); // store top-level environment
+
+            return some<rc<Env>>(global);
+        }
+        return modules[filename];
+    }
+
     // Runs the "help" mode of the compiler.
     void help(const char* cmd) {
         // todo

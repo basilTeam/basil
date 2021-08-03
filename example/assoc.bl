@@ -1,0 +1,23 @@
+def (K? to V?) : (Type, Type) -> Type do:
+    Map of [(K, V)]
+
+def (group pairs?) do:
+    match pairs with:
+        () => ()
+        x? :: y? :: xs? => (x, y) :: group xs
+
+def (map pairs...?) do:
+    Map of group pairs
+
+def (m? find-key k?) do:
+    match m with:
+        (k, v?) :: xs? => v
+        e? :: xs? => xs find-key k
+
+def (m? find k?) : (Any to Any, Any) -> Any do:
+    match m with:
+        Map of xs? => xs find-key k
+
+def (m? with entry?) : (Any to Any, (Any, Any)) -> Any do:
+    match m with:
+        Map of xs? => Map of (entry :: xs)

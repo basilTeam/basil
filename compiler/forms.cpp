@@ -11,6 +11,7 @@ namespace basil {
             case PK_VARIABLE:
             case PK_VARIADIC:
             case PK_TERM:
+            case PK_TERM_VARIADIC:
             case PK_QUOTED:
             case PK_QUOTED_VARIADIC:
             case PK_SELF:
@@ -48,6 +49,14 @@ namespace basil {
         return p_term(symbol_from(name));
     }
 
+    Param p_term_variadic(Symbol name) {
+        return Param{ name, PK_TERM_VARIADIC };
+    }
+
+    Param p_term_variadic(const char* name) {
+        return p_term_variadic(symbol_from(name));
+    }
+
     Param p_variadic(Symbol name) {
         return Param{ name, PK_VARIADIC };
     }
@@ -70,6 +79,17 @@ namespace basil {
 
     Param p_keyword(const char* name) {
         return p_keyword(symbol_from(name));
+    }
+
+    bool is_variadic(ParamKind pk) {
+        switch (pk) {
+            case PK_VARIADIC:
+            case PK_QUOTED_VARIADIC:
+            case PK_TERM_VARIADIC:
+                return true;
+            default:
+                return false;
+        }
     }
     
     Callable::Callable(const vector<Param>& parameters_in, const optional<FormCallback>& callback_in):
@@ -104,20 +124,19 @@ namespace basil {
     }
 
     bool Callable::precheck_term(const Value& term) {
-        return !is_finished() && (*parameters)[index].kind == PK_TERM;
+        return !is_finished() && ((*parameters)[index].kind == PK_TERM 
+            || (*parameters)[index].kind == PK_TERM_VARIADIC);
     }
 
     void Callable::advance(const Value& value) {
         if (is_finished()) {
             if (index == parameters->size() 
-                && (*parameters)[index - 1].kind != PK_VARIADIC
-                && (*parameters)[index - 1].kind != PK_QUOTED_VARIADIC)
+                && !is_variadic((*parameters)[index - 1].kind))
                 index = parameters->size() + 1; // advance past end so we don't continue to match
             return; // don't advance if we've already stopped
         }
         if ((*parameters)[index].matches(value)) {
-            if ((*parameters)[index].kind != PK_VARIADIC 
-                && (*parameters)[index].kind != PK_QUOTED_VARIADIC) 
+            if (!is_variadic((*parameters)[index].kind)) 
                 index ++; // don't advance if we're in a variadic
             advances ++; // count this advance
         }
@@ -133,7 +152,7 @@ namespace basil {
 
     optional<const Callable&> Callable::match() const {
         if (index == parameters->size() - 1 
-            && (parameters->back().kind == PK_VARIADIC || parameters->back().kind == PK_QUOTED_VARIADIC))
+            && is_variadic(parameters->back().kind))
             return some<const Callable&>(*this);
         return index == parameters->size() ? some<const Callable&>(*this) : none<const Callable&>();
     }
@@ -165,10 +184,10 @@ namespace basil {
             u64 h = 12877513369093186357ul;
             for (const auto& p : *parameters) {
                 h *= 16698397012925964971ul;
-                h ^= ::hash(p.kind);
+                h ^= raw_hash(p.kind);
                 if (p.kind == PK_KEYWORD) {
                     h *= 5169422403109494793ul;
-                    h ^= ::hash(p.name);
+                    h ^= raw_hash(p.name);
                 }
             }
             lazy_hash = some<u64>(h);
@@ -268,8 +287,11 @@ namespace basil {
         }
         return *lazy_hash;
     }
+    
+    Compound::Compound(rc<Env> env_in, const map<Value, rc<Form>>& members_in):
+        env(env_in), members(members_in) {}
 
-    Form::Form(): kind(FK_TERM), precedence(0), assoc(ASSOC_LEFT) {}
+    Form::Form(): kind(FK_TERM), precedence(INT64_MIN), assoc(ASSOC_LEFT) {}
 
     Form::Form(FormKind kind_in, i64 precedence_in, Associativity assoc_in): 
         kind(kind_in), precedence(precedence_in), assoc(assoc_in) {}
@@ -301,6 +323,12 @@ namespace basil {
                 return *(rc<Overloaded>)invokable == *(rc<Overloaded>)other.invokable;
             case FK_CALLABLE:
                 return *(rc<Callable>)invokable == *(rc<Callable>)other.invokable;
+            case FK_COMPOUND:
+                for (const auto& [k, v] : compound->members) {
+                    auto it = other.compound->members.find(k);
+                    if (it == other.compound->members.end() || it->second != v) return false; 
+                }
+                return true;
             case FK_TERM:
                 return true; // if the kind matched, we're good
             default:
@@ -314,12 +342,20 @@ namespace basil {
     }
 
     u64 Form::hash() const {
-        u64 kind_hash = ::hash(kind);
+        u64 kind_hash = raw_hash(kind);
         switch (kind) {
             case FK_CALLABLE:
                 return kind_hash * 14361106427190892639ul ^ ((rc<Callable>)invokable)->hash();
             case FK_OVERLOADED:
                 return kind_hash * 14114865678206345347ul ^ ((rc<Overloaded>)invokable)->hash();
+            case FK_COMPOUND:
+                for (const auto& [k, v] : compound->members) {
+                    kind_hash *= 12024490689113390177ul;
+                    kind_hash ^= k.hash();
+                    kind_hash *= 12541430991573364627ul;
+                    kind_hash ^= v->hash();
+                }
+                return kind_hash;
             default:
                 return kind_hash;
         }
@@ -399,13 +435,20 @@ namespace basil {
         }
         rc<Overloaded> invokable = ref<Overloaded>(callables);
         form->invokable = invokable;
-        return rc<Form>(form);
+        return form;
+    }
+
+    rc<Form> f_compound(rc<Env> env, const map<Value, rc<Form>>& members) {
+        rc<Form> form = ref<Form>(FK_COMPOUND, INT64_MIN, ASSOC_LEFT); // precedence and associativity are irrelevant here
+        form->compound = ref<Compound>(env, members);
+        return form;
     }
 
     const char* FK_NAMES[NUM_FORM_KINDS] = {
         "term",
         "callable",
-        "overloaded"
+        "overloaded",
+        "compound"
     };
 
     const char* PK_NAMES[NUM_PARAM_KINDS] = {
@@ -413,12 +456,14 @@ namespace basil {
         "variadic",
         "keyword",
         "term",
+        "term-variadic",
         "quoted",
         "quoted-variadic",
         "self"
     };
 }
 
+template<>
 u64 hash(const rc<basil::Form>& form) {
     return form->hash();
 }
@@ -450,6 +495,9 @@ void write(stream& io, const rc<basil::Form>& form) {
             first = false;
             write_seq(io, *callable->parameters, "(", " ", ")");
         }
+    }
+    else if (form->kind == basil::FK_COMPOUND) {
+        write_pairs(io, form->compound->members, "{", ": ", ", ", "}");
     }
 }
 

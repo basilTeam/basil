@@ -1,0 +1,17 @@
+def (low? to high?) do:
+    if low > high then () 
+    else low :: (low + 1) to high
+
+def (xs? filter f?) do:
+    match xs with:
+        () => ()
+        x? :: xs? => 
+            if (f x) then 
+                x :: (xs filter f)
+            else 
+                xs filter f
+ 
+def (sieve nums?) do:
+    match nums with:
+        () => ()
+        x? :: xs? => x :: sieve (xs filter (lambda (n?) do: n % x != 0))

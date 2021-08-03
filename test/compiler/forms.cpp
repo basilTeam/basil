@@ -1,6 +1,7 @@
 #include "forms.h"
 #include "value.h"
 #include "test.h"
+#include "env.h"
 
 using namespace basil;
 

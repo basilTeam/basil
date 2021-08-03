@@ -1,4 +1,5 @@
 #include "obj.h"
+#include "bc.h"
 #include "sym.h"
 #include "target.h"
 #include "stdio.h"
@@ -17,6 +18,18 @@ namespace jasmine {
 
     Object::~Object() {
         if (loaded_code) free_exec(loaded_code, buf.size());
+    }
+
+    const map<Symbol, u64>& Object::symbols() const {
+        return defs;
+    }
+
+    const map<u64, SymbolRef>& Object::references() const {
+        return refs;
+    }
+
+    const byte_buffer& Object::code() const {
+        return buf;
     }
 
     byte_buffer& Object::code() {
@@ -101,6 +114,10 @@ namespace jasmine {
         while (code_copy.size()) *writer++ = code_copy.read();
 
         resolve_refs();
+
+        u32 len = code().size();
+        for (int i = 0; i < len; i ++) code_copy.write(((u8*)loaded_code)[i]);
+        buf = code_copy;
 
         protect_exec(loaded_code, buf.size());
     }
@@ -258,6 +275,27 @@ namespace jasmine {
     Architecture Object::architecture() const {
         return arch;
     }
+    
+    Object Object::retarget(Architecture architecture) {
+        if (loaded_code) {
+            fprintf(stderr, "[ERROR] Cannot retarget already-loaded jasmine object.\n");
+            exit(1);
+        }
+        switch (arch) {
+            case JASMINE: switch (architecture) {
+                case X86_64:
+                    return jasmine_to_x86(*this);
+                default: 
+                    break;
+            }
+                break;
+            default:
+                break;
+        }
+        fprintf(stderr, "[ERROR] Tried to retarget to incompatible architecture.\n");
+        exit(1);
+        return Object(architecture);
+    }
 
     void* Object::find(Symbol symbol) const {
         if (!loaded_code) return nullptr;
@@ -322,6 +360,8 @@ namespace jasmine {
                     return 0;
                 }
             default:
+                fprintf(stderr, "Tried to emit ELF file for unsupported architecture.\n");
+                exit(1);
                 return 0;
         }
     }
@@ -485,4 +525,19 @@ namespace jasmine {
         while (elf.size()) fputc(elf.read(), file);
         fclose(file);
     }
+}
+
+template<>
+u64 hash(const jasmine::Symbol& symbol) {
+    return raw_hash(symbol);
+}
+
+template<>
+u64 hash(const jasmine::SymbolRef& symbol) {
+    return raw_hash(symbol);
+}
+
+template<>
+u64 hash(const u64& u) {
+    return raw_hash(u);
 }

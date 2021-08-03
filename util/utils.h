@@ -12,9 +12,9 @@ void operator delete[](void* ptr);
 #ifdef BASIL_RELEASE
 #define panic(msg)
 #else
-#define panic(msg) __internal_panic(__FILE__, __LINE__, msg)
+#define panic(msg) internal_panic(__FILE__, __LINE__, msg)
 #endif 
-void __internal_panic(const char* file, int line, const char* msg);
+void internal_panic(const char* file, int line, const char* msg);
 
 extern "C" void __cxa_pure_virtual();
 

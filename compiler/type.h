@@ -7,42 +7,8 @@
 #include "util/vec.h"
 
 namespace basil {
-    // Represents a unique name or identifier. Any two names with the same
-    // text data are enforced to have the same id.
-    struct Symbol {
-        u32 id;
-
-        // Initializes this symbol to the none symbol.
-        Symbol();
-
-        bool operator==(Symbol other) const;
-        bool operator!=(Symbol other) const;    
-
-        static const Symbol NONE;
-    private:
-        // Constructs a symbol with the given id. Hidden to force use of
-        // symbol_from and constants in lieu of constructing symbols on
-        // the fly.
-        explicit Symbol(u32 id);
-
-        friend Symbol symbol_from(const ustring& str);
-    };
-
-    // DO NOT MODIFY - these aren't const so they can be initialized 
-    // nonstatically.
-    // These variables represent certain common symbols automatically
-    // tracked by the compiler. They should be treated as constants.
-    extern Symbol S_NONE,
-        S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
-        S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION, S_ELLIPSIS, S_COMMA, S_DO;
-
-    // Returns the associated string for the provided symbol.
-    const ustring& string_from(Symbol sym);
-
-    // Returns the existing symbol bound to the given string if it exists,
-    // or constructs a new symbol if not.
-    Symbol symbol_from(const ustring& str);
+    struct Symbol;
+    struct Type;
 
     // A Kind represents a "type of types" - the broader class in which a
     // family of types is classified. More fine-grained primitive types like
@@ -73,8 +39,57 @@ namespace basil {
         K_MACRO,
         K_ALIAS,
         K_TVAR, 
+        K_MODULE,
         NUM_KINDS
     };
+}
+
+template<>
+u64 hash(const basil::Symbol& symbol);
+
+template<>
+u64 hash(const basil::Type& type);
+
+template<>
+u64 hash(const basil::Kind& kind);
+
+namespace basil {
+    // Represents a unique name or identifier. Any two names with the same
+    // text data are enforced to have the same id.
+    struct Symbol {
+        u32 id;
+
+        // Initializes this symbol to the none symbol.
+        Symbol();
+
+        bool operator==(Symbol other) const;
+        bool operator!=(Symbol other) const;    
+
+        static const Symbol NONE;
+    private:
+        // Constructs a symbol with the given id. Hidden to force use of
+        // symbol_from and constants in lieu of constructing symbols on
+        // the fly.
+        explicit Symbol(u32 id);
+
+        friend Symbol symbol_from(const ustring& str);
+    };
+
+    // DO NOT MODIFY - these aren't const so they can be initialized 
+    // nonstatically.
+    // These variables represent certain common symbols automatically
+    // tracked by the compiler. They should be treated as constants.
+    extern Symbol S_NONE,
+        S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
+        S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
+        S_QUESTION, S_ELLIPSIS, S_COMMA, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
+
+    // Returns the associated string for the provided symbol.
+    const ustring& string_from(Symbol sym);
+
+    // Returns the existing symbol bound to the given string if it exists,
+    // or constructs a new symbol if not.
+    Symbol symbol_from(const ustring& str);
 
     extern const u64 KIND_HASHES[NUM_KINDS];
 
@@ -219,7 +234,7 @@ namespace basil {
     Type t_var(Symbol name);
 
     extern Type T_VOID, T_INT, T_FLOAT, T_DOUBLE, T_SYMBOL, 
-        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, 
+        T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, T_MODULE,
         T_ANY, T_UNDEFINED;
 
     // Returns the ith member type of the provided tuple type.
@@ -302,6 +317,9 @@ namespace basil {
 
     // Returns the currently-bound type of the provided type variable.
     Type t_tvar_concrete(Type tvar);
+
+    // Resets the provided type variable.
+    void t_tvar_unbind(Type tvar);
     
     // Performs initialization for this source file. Sets up the symbol
     // and type tables, and initializes all static variables.
@@ -310,10 +328,6 @@ namespace basil {
     // Releases all internal memory being held.
     void free_types();
 }
-
-u64 hash(const basil::Symbol& symbol);
-u64 hash(const basil::Type& type);
-u64 hash(const basil::Kind& kind);
 
 void write(stream& io, const basil::Symbol& symbol);
 void write(stream& io, const basil::Type& type);

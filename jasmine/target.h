@@ -10,7 +10,8 @@ enum Architecture : u8 {
     X86_64 = 1,
     AMD64 = 1,
     X86 = 2,
-    AARCH64 = 3
+    AARCH64 = 3,
+    JASMINE = 4, // architecture for jasmine bytecode
 };
 
 #if defined(__amd64) || defined(__amd64__) || defined(__x86_64) || defined(__x86_64__)

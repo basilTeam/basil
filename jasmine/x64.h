@@ -25,6 +25,8 @@ namespace x64 {
         INVALID = 255
     };
 
+    extern const char* REGISTER_NAMES[16];
+
     enum Scale : u8 {
         SCALE1 = 0,
         SCALE2 = 1,

@@ -35,6 +35,9 @@ namespace jasmine {
         Object(const Object&) = delete;
         Object& operator=(const Object&) = delete;
 
+        const map<Symbol, u64>& symbols() const;
+        const map<u64, SymbolRef>& references() const;
+        const byte_buffer& code() const;
         byte_buffer& code();
         u64 size() const;
         void define(Symbol symbol);
@@ -44,6 +47,7 @@ namespace jasmine {
         void read(const char* path);
         void writeELF(const char* path);
         Architecture architecture() const;
+        Object retarget(Architecture architecture);
 
         void* find(Symbol symbol) const;
         
@@ -53,5 +57,14 @@ namespace jasmine {
         }
     };
 }
+
+template<>
+u64 hash(const jasmine::Symbol& symbol);
+
+template<>
+u64 hash(const jasmine::SymbolRef& symbol);
+
+template<>
+u64 hash(const u64& u);
 
 #endif

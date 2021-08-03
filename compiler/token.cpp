@@ -158,11 +158,11 @@ namespace basil {
     optional<Token> lex(Source::View& view) {
         Token result{view.pos(), S_NONE, TK_NONE};
         rune ch = view.peek();
+        bool has_leading_space = false;
+        while (ch != '\n' && is_space(ch)) view.read(), ch = view.peek(); // consume leading spaces (but not newlines)
         while (ch == '#') { // comments
             while (ch && ch != '\n') view.read(), ch = view.peek();
         }
-        bool has_leading_space = false;
-        while (ch != '\n' && is_space(ch)) view.read(), ch = view.peek(); // consume leading spaces (but not newlines)
         
         if (!ch) {
             return none<Token>();
@@ -225,7 +225,7 @@ namespace basil {
                 while (is_digit(ch)) end = view.pos(), acc += view.read(), ch = view.peek();
             }
             // whether it's an integer or float constant, we should be done reading the numeric portion
-            if (is_opener(ch) || is_letter(ch))
+            if ((is_opener(ch) && ch != '\\') || is_letter(ch))
                 result = Token{span(begin, end), symbol_from(acc), floating ? TK_FLOATCOEFF : TK_INTCOEFF};
             else if (is_separator(ch) 
                 || (ch == ':' && is_block_colon(view))) // block colons are special, since : is not a separator but it can terminate numbers

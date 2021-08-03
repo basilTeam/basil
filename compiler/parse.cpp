@@ -4,6 +4,7 @@
 namespace basil {
     struct ParseContext {
         u32 prev_indent, indent;
+        optional<TokenKind> enclosing;
     };
 
     // converts a symbol to an integer constant
@@ -43,7 +44,7 @@ namespace basil {
             }
         }
         double denom = 1;
-        while (denom < acc) denom *= 10; // find correct power of 10 for fractional part
+        while (denom <= acc) denom *= 10; // find correct power of 10 for fractional part
         return i + (acc / denom); 
     }
 
@@ -53,7 +54,7 @@ namespace basil {
     Value parse_enclosed(Source::Pos begin, TokenKind closer, TokenView& view, ParseContext ctx) {
         vector<Value> values;
         while (!out_of_input(view) && view.peek().kind != closer) {
-            values.push(parse_suffix(view, ctx));
+            values.push(parse_expr(view, ctx));
             while (view.peek().kind == TK_NEWLINE) view.read(); // consume blank lines
         }
         if (view.peek().kind != closer) {
@@ -69,7 +70,10 @@ namespace basil {
     Value parse_indented(Value opener, TokenView& view, ParseContext ctx) {
         vector<Value> values;
         values.push(opener);
-        while (!out_of_input(view) && ((view.peek().kind == TK_NEWLINE && !is_repl()) || view.peek().pos.col_start > ctx.prev_indent)) {
+        while (!out_of_input(view) 
+            && ((view.peek().kind == TK_NEWLINE && !is_repl()) 
+                || view.peek().pos.col_start > ctx.prev_indent)) {
+            if (ctx.enclosing && view.peek().kind == *ctx.enclosing) break; // we've hit the end of some outer block
             if (view.peek().kind != TK_NEWLINE) values.push(parse_expr(view, ctx));
             else {
                 view.read();
@@ -136,16 +140,23 @@ namespace basil {
                     next
                 );
             }
-            case TK_LPAREN: return parse_enclosed(pos, TK_RPAREN, view, ctx);
+            case TK_LPAREN: 
+                return parse_enclosed(pos, TK_RPAREN, view, 
+                    ParseContext{ctx.prev_indent, ctx.indent, some<TokenKind>(TK_RPAREN)}
+                );
             case TK_LSQUARE: {
-                Value enclosed = parse_enclosed(pos, TK_RSQUARE, view, ctx);
+                Value enclosed = parse_enclosed(pos, TK_RSQUARE, view, 
+                    ParseContext{ctx.prev_indent, ctx.indent, some<TokenKind>(TK_RSQUARE)}
+                );
                 return v_cons(enclosed.pos, t_list(T_ANY),  // [x y z] => (array x y z)
                     v_symbol(pos, S_ARRAY),
                     enclosed
                 );
             }
             case TK_LBRACE: {
-                Value enclosed = parse_enclosed(pos, TK_RBRACE, view, ctx); // {x y z} => (dict x y z)
+                Value enclosed = parse_enclosed(pos, TK_RBRACE, view, 
+                    ParseContext{ctx.prev_indent, ctx.indent, some<TokenKind>(TK_RBRACE)}
+                ); // {x y z} => (dict x y z)
                 return v_cons(enclosed.pos, t_list(T_ANY),
                     v_symbol(pos, S_DICT),
                     enclosed
@@ -170,10 +181,12 @@ namespace basil {
         while (view && view.peek().kind == TK_ACCESS) {
             Source::Pos pos = view.peek().pos;
             view.read(); // consume access bracket
-            Value indices = parse_enclosed(pos, TK_RSQUARE, view, ctx);
+            Value indices = parse_enclosed(pos, TK_RSQUARE, view, 
+                ParseContext{ctx.prev_indent, ctx.indent, some<TokenKind>(TK_RSQUARE)}
+            );
             primary = v_list(span(primary.pos, indices.pos), t_list(T_ANY), // foo[bar] = (at foo (array bar))
-                v_symbol(indices.pos, S_AT),
                 primary,
+                v_symbol(indices.pos, S_AT),
                 v_cons(indices.pos, t_list(T_ANY),
                     v_symbol(indices.pos, S_ARRAY),
                     indices
@@ -192,7 +205,7 @@ namespace basil {
             if (view && view.peek().kind == TK_NEWLINE) { // consider indented block
                 while (view.peek().kind == TK_NEWLINE) view.read(); // consume all leading newlines
                 if (!out_of_input(view) && view.peek().pos.col_start > ctx.indent)
-                    return parse_indented(suffixed, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start)});
+                    return parse_indented(suffixed, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start), ctx.enclosing});
                 else {
                     err(view.peek().pos, 
                         "Expected indented block, but line isn't indented past the previous non-empty line. Prev indent = ", ctx.indent, ", cur indent = ", view.peek().pos.col_start);
@@ -203,6 +216,7 @@ namespace basil {
                 vector<Value> values;
                 values.push(suffixed);
                 while (view && view.peek().kind != TK_NEWLINE) {
+                    if (ctx.enclosing && view.peek().kind == *ctx.enclosing) break; // we've hit the end of some outer block
                     Value v = parse_expr(view, ctx);
                     if (v.pos.line_start > suffixed.pos.line_end) break; // stop if we're on a different line
                     values.push(v);
@@ -226,6 +240,6 @@ namespace basil {
             else break;
         }
 
-        return some<Value>(parse_expr(view, ParseContext{0, indent})); // start with indentation of first token
+        return some<Value>(parse_expr(view, ParseContext{0, indent, none<TokenKind>()})); // start with indentation of first token
     }
 }

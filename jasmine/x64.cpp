@@ -3,9 +3,7 @@
 #include "stdlib.h"
 
 namespace x64 {
-    using namespace jasmine;
-
-    static const char* register_names[] = {
+    const char* REGISTER_NAMES[] = {
         "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
         "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
     };
@@ -15,9 +13,9 @@ namespace x64 {
     };
 
     // the object machine code is written to
-    static Object* target = nullptr;
+    static jasmine::Object* target = nullptr;
 
-    void writeto(Object& buf) {
+    void writeto(jasmine::Object& buf) {
         target = &buf;
     }
 
@@ -187,12 +185,12 @@ namespace x64 {
         return false;
     }
 
-    RefType relative(Size size) {
+    jasmine::RefType relative(Size size) {
         switch (size) {
-            case BYTE: return REL8;
-            case WORD: return REL16_LE;
-            case DWORD: return REL32_LE;
-            case QWORD: return REL64_LE;
+            case BYTE: return jasmine::REL8;
+            case WORD: return jasmine::REL16_LE;
+            case DWORD: return jasmine::REL32_LE;
+            case QWORD: return jasmine::REL64_LE;
             default: {
                 fprintf(stderr, "[ERROR] Invalid size for relative reference.\n");
                 exit(1);
@@ -200,12 +198,12 @@ namespace x64 {
         }
     }
 
-		RefType absolute(Size size) {
+		jasmine::RefType absolute(Size size) {
         switch (size) {
-            case BYTE: return ABS8;
-            case WORD: return ABS16_LE;
-            case DWORD: return ABS32_LE;
-            case QWORD: return ABS64_LE;
+            case BYTE: return jasmine::ABS8;
+            case WORD: return jasmine::ABS16_LE;
+            case DWORD: return jasmine::ABS32_LE;
+            case QWORD: return jasmine::ABS64_LE;
             default: {
                 fprintf(stderr, "[ERROR] Invalid size for absolute reference.\n");
                 exit(1);
@@ -467,6 +465,10 @@ namespace x64 {
     void verify_buffer() {
         if (!target) { // requires that a buffer exist to write to
             fprintf(stderr, "[ERROR] Cannot assemble; no target buffer set.\n");
+            exit(1);
+        }
+        if (target->architecture() != X86_64) {
+            fprintf(stderr, "[ERROR] Target buffer is not targeting the x86_64 architecture.");
             exit(1);
         }
     }
@@ -1159,12 +1161,12 @@ namespace x64 {
         target->code().write<u8>(0x0f, 0x05);
     }
 
-    void label(Symbol symbol) {
+    void label(jasmine::Symbol symbol) {
         target->define(symbol);
     }
 
     void label(const char* symbol) {
-        label(local(symbol));
+        label(jasmine::local(symbol));
     }
 
     void jmp(const Arg& dest, Size size) {

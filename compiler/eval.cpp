@@ -26,6 +26,13 @@ namespace basil {
         }
     }
 
+    GroupResult backtrack_group(rc<Env> env, Value term, Value op, list_iterator it, list_iterator end,
+        Associativity outerassoc, i64 outerprec);
+    void backtrack(rc<Env> env, Value& back, const GroupResult& gr, 
+        list_iterator& begin, list_iterator end);
+    GroupResult retry_group(rc<Env> env, const GroupResult& outer_group, 
+        list_iterator it, list_iterator end);
+
     either<GroupResult, GroupError> try_group(rc<Env> env, vector<Value>&& params, FormKind fk, rc<StateMachine> sm,
         list_iterator it, list_iterator end,
         Associativity outerassoc, i64 outerprec) {
@@ -50,9 +57,25 @@ namespace basil {
             }
             else { // other matches
                 GroupResult gr = next_group(env, it, end, outerassoc, outerprec);
-                it = gr.next;
-                params.push(gr.value);
-                sm->advance(gr.value);
+                if (gr.value.form->has_infix_case() && params.size() > 0
+                    && (gr.value.form->precedence > outerprec 
+                    || (gr.value.form->precedence == outerprec && outerassoc == ASSOC_RIGHT))) { 
+                    // if we get an argument that is infix but not applied to anything, we need to consider
+                    // backtracking
+                    it = gr.next;
+                    backtrack(env, params.back(), gr, it, end);
+                }
+                else { // otherwise, we continue past this group
+                    it = gr.next;
+                    while (gr.value.form->has_prefix_case() && it != end) {
+                        GroupResult ogr = retry_group(env, gr, it, end);
+                        it = ogr.next; // retrying didn't make progress, so we exit
+                        if (ogr.value.type != T_ERROR) gr = ogr;
+                        else break;
+                    }
+                    params.push(gr.value);
+                    sm->advance(params.back());
+                }
             }
             if (auto match = sm->match()) {
                 best = it, best_match = match, n = params.size();
@@ -76,7 +99,8 @@ namespace basil {
             resolve_form(env, result);
             return GroupResult{
                 result,
-                best
+                best,
+                outerprec
             };
         }
 
@@ -208,6 +232,105 @@ namespace basil {
         };
     }
 
+    GroupResult backtrack_group(rc<Env> env, Value term, Value op, list_iterator it, list_iterator end,
+        Associativity outerassoc, i64 outerprec) {
+        do { // loop until we fail to find a suitable infix operator
+            resolve_form(env, op);
+            if (op.form->has_infix_case() && 
+                (op.form->precedence > outerprec 
+                 || (outerassoc == ASSOC_RIGHT && op.form->precedence == outerprec))) { // try infix application
+
+                vector<Value> params;
+                params.push(op); // add op and term to params
+                params.push(term);
+
+                rc<StateMachine> sm = op.form->start();
+                sm->advance(term); // move past lhs
+                sm->advance(op); // move past op
+                list_iterator it_copy = it; // we don't want to actually move 'it'
+                auto gr = try_group(env, static_cast<vector<Value>&&>(params), op.form->kind, sm, 
+                    it_copy, end, op.form->assoc, op.form->precedence);
+
+                if (gr.is_left()) { // if grouping succeeded
+                    resolve_form(env, gr.left().value);
+                    term = gr.left().value;
+                    it = gr.left().next;
+                }
+                else {
+                    report_group_error(gr.right(), op, params);
+                    break; // next term must not have been in a suitable spot, so we exit
+                }
+            }
+            else break; // next term is not a suitable infix operator, or had lower precedence
+
+            if (it != end) op = *it;
+        } while (it != end);
+
+        return GroupResult{
+            term,
+            it
+        };
+    }
+
+    void backtrack(rc<Env> env, Value& back, const GroupResult& gr, 
+        list_iterator& begin, list_iterator end) {
+        // we only apply when !back.form, since we don't want to interfere with parenthesized lists
+        if (!back.form && back.type.of(K_LIST) && 
+            (gr.value.form->precedence > v_head(back).form->precedence
+             || (gr.value.form->precedence == v_head(back).form->precedence 
+                 && v_head(back).form->assoc == ASSOC_RIGHT))) {
+            // if our new operator has higher precedence than the outermost expr, we delve deeper
+            list_iterable iter = iter_list(back);
+            list_iterator one = iter.begin(), two = iter.begin();
+            two ++;
+            while (two != iter.end()) one ++, two ++; // find end of list. this is slow...
+            backtrack(env, *one, gr, begin, end); 
+        }
+        else {
+            // if the outermost expr has higher precedence, or if we found a constant, we try to
+            // apply our new operator
+            GroupResult bg = backtrack_group(env, back, gr.value, begin, end, gr.value.form->assoc, I64_MIN);
+            back = bg.value;
+            begin = bg.next;
+        }
+    }
+
+    GroupResult retry_group(rc<Env> env, const GroupResult& outer_group, 
+        list_iterator it, list_iterator end) {
+        if (it == end) panic("Tried to retry grouping when no elements remain in list!");
+        vector<Value> params;
+        Value term = outer_group.value;
+        params.push(term); // include term as a param
+
+        rc<StateMachine> sm = term.form->start();
+        sm->advance(term); // move past first term
+        list_iterator it_copy = it; // we don't want to actually move 'it'
+        auto gr = try_group(env, static_cast<vector<Value>&&>(params), term.form->kind, sm, 
+            it_copy, end, term.form->assoc, term.form->precedence);
+
+        if (gr.is_left()) { // if grouping succeeded
+            resolve_form(env, gr.left().value);
+            return gr.left();
+        }
+        else if (params.size() == 1) { // if we didn't match any other parameters
+            ++ it; // leave the term in place, not applied to anything
+            return GroupResult {
+                v_error({}), // we use v_error here to signify that grouping failed
+                it,          // ...but we still want the new value of 'it'
+                0
+            };
+        }
+        else {
+            report_group_error(gr.right(), term, params);
+            ++ it; // advance just past this term
+            return GroupResult {
+                v_error({}),
+                it,
+                0
+            };
+        }
+    }
+
     void group(rc<Env> env, Value& term) {
         vector<Value> results; // all the values in this group
         results.clear();
@@ -218,8 +341,8 @@ namespace basil {
             GroupResult gr = next_group(env, begin, end, ASSOC_RIGHT, I64_MIN); // assume lowest precedence at first
             
             resolve_form(env, gr.value); // resolve new group's form
-            results.push(gr.value);
             begin = gr.next;
+            results.push(gr.value);
         }
 
         if (results.size() == 0) panic("Somehow found no groups within list!");
@@ -281,7 +404,7 @@ namespace basil {
             case K_LIST: { // the spooky one...
                 if (v_tail(term).type == T_VOID) { // single-element list
                     if (!v_head(term).form) resolve_form(env, v_head(term));
-                    term.form = F_TERM; // always treat single-element lists as expressions
+                    term.form = to_prefix(v_head(term).form); // always treat single-element lists as expressions
                     return;
                 }
 
@@ -296,7 +419,47 @@ namespace basil {
                         term.form = (*callback)(env, term); // apply callback and finish resolving
                         return;
                     }
-                    else term.form = F_TERM; // default to F_TERM if the callable has no special callback
+                    else if (v_head(term).type.of(K_SYMBOL)) {
+                        auto lookup = env->find(v_head(term).data.sym);
+                        if (lookup && lookup->type.of(K_FUNCTION) && !lookup->data.fn->builtin
+                            && lookup->form->kind == FK_CALLABLE) {
+                            vector<rc<Form>> args;
+                            rc<Callable> form = (rc<Callable>)v_head(term).form->start();
+                            bool on_variadic = false;
+
+                            for (Value& arg : iter_list(v_tail(term))) { // visit each argument
+                                if (form->current_param() && form->current_param()->kind == PK_SELF) // skip self parameter
+                                    form->advance(v_void({}));
+
+                                if (form->is_finished()) {
+                                    break; // fallthrough, defaulting to term form
+                                }
+
+                                form->precheck_keyword(arg); // leave variadics for keyword if possible
+
+                                if (!is_variadic(form->current_param()->kind) && on_variadic) {
+                                    args.push(F_TERM); // variadics are always terms
+                                }
+                                if (is_variadic(form->current_param()->kind)) {
+                                    on_variadic = true;
+                                }
+                                else if (form->current_param()->kind == PK_TERM) { // terms are always terms
+                                    args.push(F_TERM);
+                                }
+                                else {
+                                    args.push(arg.form ? arg.form : F_TERM); // push form, defaulting to term
+                                }
+                                form->advance(arg);
+                            }
+                            if (on_variadic) args.push(F_TERM);
+
+                            term.form = v_resolve_body(*lookup, args)->form;
+                            if (!term.form) term.form = F_TERM; // default to term
+                            return;
+                        }
+                        // fallthrough
+                    }
+                    term.form = F_TERM; // default to F_TERM if the callable has no special callback or was unresolved
                 }
                 else term.form = F_TERM; // default to F_TERM if the first element is not callable
                 return;
@@ -334,18 +497,134 @@ namespace basil {
         return root;
     }
 
+    void expand_splices(rc<Env> env, Value& term) {
+        if (term.type.of(K_LIST)) {
+            auto iterable = iter_list(term);
+            auto it = iterable.begin();
+            while (it != iterable.end()) {
+                if (it->form) expand_splices(env, *it); // recursively expand splices for parsed blocks
+                if (it->type.of(K_LIST) && v_head(*it).type == T_SYMBOL && v_head(*it).data.sym == S_SPLICE) {
+                    vector<Value> to_splice;
+                    for (Value v : iter_list(v_tail(*it))) // evaluate tail
+                        to_splice.push(eval(env, v));
+                    list_iterator next = it; // store previous next
+                    next ++;
+
+                    List* l = it.list; // splice in values
+                    for (i64 i = i64(to_splice.size()) - 1; i >= 0; i --)
+                        l->tail = ref<List>(to_splice[i], l->tail);
+                    it = next;
+                }
+                else it ++;
+            }
+        }
+    }
+
     static int call_count = 0;
 
-    Value call(rc<Env> env, Value func_term, Value func, const Value& args) {
+    // stores information for reporting an overload mismatch error
+    struct OverloadError {
+        Type overload;
+        u32 index;
+    };
+
+    either<i64, OverloadError> overload_priority(Type fn_args, Type args) {
+        u32 len = fn_args.of(K_TUPLE) ? t_tuple_len(fn_args) : 1; // number of arguments
+
+        // we prioritize each argument by a certain value, based on how good of a match it is.
+        // exact matches are best, followed by generic matches (e.g. Int -> T?), followed by
+        // matches that require coercion (e.g. Int -> Float), followed by union matches
+        // (e.g. (Int | String) -> Int). union matches are only permitted if we found in advance
+        // that the union has a valid value for every overload.
+
+        const i64 UNION_PRIORITY = 1, // the priority of a union argument being coerced to one of its members
+                  COERCE_PRIORITY = len + 1, // priority of an argument that needs coercion
+                  GENERIC_PRIORITY = COERCE_PRIORITY * COERCE_PRIORITY, // priority of an argument coerced to a generic
+                  EQUAL_PRIORITY = GENERIC_PRIORITY * COERCE_PRIORITY; // priority of an argument with the right type
+
+        i64 priority = 0;
+        for (u32 i = 0; i < len; i ++) {
+            Type fn_arg = len == 1 ? fn_args : t_tuple_at(fn_args, i); // get desired arg at position
+            Type arg = len == 1 ? args : t_tuple_at(args, i); // get provided arg at position    
+            
+            if (arg == fn_arg) // if arg matches exactly
+                priority += EQUAL_PRIORITY;
+            else if (arg.coerces_to_generic(fn_arg)) // if arg matches generic target
+                priority += GENERIC_PRIORITY;
+            else if (arg.coerces_to(fn_arg)) // if arg can coerce to target
+                priority += COERCE_PRIORITY; 
+            else if (arg.of(K_UNION) && fn_arg.coerces_to(arg)) // if arg is valid union containing target
+                priority += UNION_PRIORITY; 
+            else return OverloadError{ fn_arg, i }; // this argument is incompatible; we can't use this overload
+        }
+
+        return priority;
+    }
+
+    Value call(rc<Env> env, Value func_term, Value func, const Value& args_in) {
+        Value args = args_in;
         if (func.type.of(K_INTERSECT)) {
             vector<Value> valid;
             // println("func form = ", func.form);
             for (const auto& [t, v] : func.data.isect->values) {
                 // println("  value form = ", v.form);
-                if (v.form == func_term.form) valid.push(v);
+                if (v.form == func_term.form && t.of(K_FUNCTION)) valid.push(v);
             }
             if (valid.size() == 0) panic("Somehow found no overloads matching resolved form!");
-            func = valid[0];
+
+            if (valid.size() > 1) { // do overload resolution
+                vector<either<i64, OverloadError>> priorities;
+
+                for (const auto& fn : valid) { // compute priorities for each case
+                    priorities.push(overload_priority(t_arg(fn.type), args.type)); 
+                }
+            
+                i64 max_priority = -1; // compute max priority
+                for (int i = 0; i < priorities.size(); i ++) {
+                    if (priorities[i].is_left()) {
+                        max_priority = priorities[i].left() > max_priority 
+                            ? priorities[i].left() : max_priority;
+                    }
+                }
+
+                if (max_priority == -1) { // all functions were errors
+                    err(args.pos, "Incompatible arguments for function '", func_term, "'.");
+                    for (u32 i = 0; i < priorities.size(); i ++) {
+                        Value arg = args.type.of(K_TUPLE) ? v_at(args, priorities[i].right().index) : args;
+                        note(valid[i].pos, "Candidate function found of type '", valid[i].type, "', but ",
+                            "given incompatible argument '", arg, "' of type '", arg.type, "'.");
+                    }
+                    return v_error({});
+                }
+
+                u32 out = 0; // remove all cases with less than max priority
+                for (u32 i = 0; i < valid.size(); i ++) {
+                    if (priorities[i].is_left() && priorities[i].left() == max_priority)
+                        valid[out ++] = valid[i];
+                }
+                while (valid.size() > out) valid.pop();
+
+                if (valid.size() == 0) 
+                    panic("Somehow got no valid function, even though max_priority > -1!");
+                if (valid.size() > 1) { // conflict
+                    err(args.pos, "Ambiguous call to overloaded function '", func_term, "'.");
+                    for (u32 i = 0; i < valid.size(); i ++) {
+                        note(valid[i].pos, "Candidate function found of type '", valid[i].type, "'.");
+                    }
+                    return v_error({});
+                }
+
+                func = valid[0];
+            }
+            else if (valid.size() == 1) func = valid[0];
+
+            if (!args.type.coerces_to(t_arg(func.type))) {
+                panic("Somehow ended up with incompatible arguments for overloaded function!");
+            }
+
+            args = coerce(args, t_arg(func.type));
+            
+            if (args.type == T_ERROR) return v_error({});
         }
         else if (func.type.of(K_FUNCTION)) {
             if (!args.type.coerces_to(t_arg(func.type))) {
@@ -353,6 +632,9 @@ namespace basil {
                     t_arg(func.type), "', got '", args.type, "'.");
                 return v_error({});
             }
+            else args = coerce(args, t_arg(func.type));
+
+            if (args.type == T_ERROR) return v_error({});
         }
         else panic("Tried to call non-callable value!");
 
@@ -402,13 +684,14 @@ namespace basil {
                     err(term.pos, "Undefined variable '", term.data.sym, "'.");
                     return v_error(term.pos);
                 }
+                if (var->type == T_TYPE && var->data.type.is_tvar())
+                    return v_type(var->pos, t_tvar_concrete(var->data.type));
                 return *var;
             }
             case K_LIST: { // non-empty lists eval to the results of applying functions
                 if (error_count()) return v_error({}); // return error value if form resolution went awry
 
-                // TODO: expand splices
-                // TODO: expand macros
+                // expand_splices(env, term);
 
                 Value head = eval(env, v_head(term)); // evaluate first term
 
@@ -422,16 +705,21 @@ namespace basil {
                     rc<Callable> form = (rc<Callable>)v_head(term).form->start();
 
                     // we basically re-run the form over the argument list here to figure out where to evaluate
-                    for (Value& arg : iter_list(v_tail(term))) { // evaluate each argument
-                        while (form->current_param() && form->current_param()->kind == PK_SELF) // skip self parameter
+                    for (Value& arg : iter_list(v_tail(term))) { // visit each argument
+                        if (form->current_param() && form->current_param()->kind == PK_SELF) // skip self parameter
                             form->advance(v_void({}));
-                        
+
+                        if (form->is_finished()) {
+                            err(arg.pos, "Too many parameters provided to function '", v_head(term), "': ",
+                                "found term '", arg, "' after last matching parameter.");
+                            return v_error({});
+                        }
+
                         form->precheck_keyword(arg); // leave variadics for keyword if possible
 
                         // if we were building a variadic list, and aren't on a variadic anymore,
                         // we clear the varargs and push them as a list onto the arg array
-                        if (form->current_param()->kind != PK_VARIADIC 
-                            && form->current_param()->kind != PK_QUOTED_VARIADIC
+                        if (!is_variadic(form->current_param()->kind)
                             && varargs.size() > 0) {
                             args.push(v_list(
                                 span(varargs.front().pos, varargs.back().pos),
@@ -442,10 +730,12 @@ namespace basil {
                         }
                         if (form->current_param() &&  // skip evaluation
                             (form->current_param()->kind == PK_TERM 
+                             || form->current_param()->kind == PK_TERM_VARIADIC
                              || form->current_param()->kind == PK_QUOTED 
                              || form->current_param()->kind == PK_QUOTED_VARIADIC)) {
 
-                            if (form->current_param()->kind == PK_QUOTED_VARIADIC) varargs.push(arg);
+                            if (form->current_param()->kind == PK_QUOTED_VARIADIC
+                                || form->current_param()->kind == PK_TERM_VARIADIC) varargs.push(arg);
                             else args.push(arg);
                         }
                         else if (form->current_param()->kind != PK_KEYWORD) { // evaluate but ignore keywords
@@ -470,6 +760,7 @@ namespace basil {
                         err(term.pos, "Procedure must be called on one or more arguments; zero given.");
                         return v_error({});
                     }
+                    for (const Value& v : args) if (v.type == T_ERROR) return v_error({}); // propagate errors
 
                     Value args_value = args.size() == 1 ? args[0]
                         : v_tuple(term.pos, infer_tuple(args), args);

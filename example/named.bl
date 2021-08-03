@@ -1,0 +1,10 @@
+Expr := T?
+Expr := IntConst of Int
+      | Add of (Expr, Expr)
+
+Expr := ref T?
+Expr := ref union:
+    IntConst of Int
+    Add of (Expr, Expr)
+
+Expr := new IntConst of 1

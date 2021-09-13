@@ -1,0 +1,31 @@
+def rand0 x? =
+    def a = 32767
+    a * x * 17
+
+def collatz0 x? =
+    if x % 2 == 0 then
+        collatz0 x / 2
+    else
+        collatz0 3x + 1
+
+def x? squared0 =
+    def y = x
+    def z = y
+    y * z
+
+def foo0 x? =
+    (x squared0) + (x squared0)
+
+def bar0 x? = 
+    rand0 (collatz0 x)
+
+def baz0 x? y? z? = 
+    def x = bar0 x * y
+    def y = rand0 z
+    def z = foo0 y
+    x + y + z
+
+def quux0 = 10002
+def xyzzy0 = 26391
+def quuz0 = foo0 quux0
+baz0 quux0 xyzzy0 quuz0

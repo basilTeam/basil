@@ -28,11 +28,11 @@ namespace jasmine {
         return refs;
     }
 
-    const byte_buffer& Object::code() const {
+    const bytebuf& Object::code() const {
         return buf;
     }
 
-    byte_buffer& Object::code() {
+    bytebuf& Object::code() {
         return buf;
     }
 
@@ -110,7 +110,7 @@ namespace jasmine {
     void Object::load() {
         loaded_code = alloc_exec(buf.size());
         u8* writer = (u8*)loaded_code;
-        byte_buffer code_copy = buf;
+        bytebuf code_copy = buf;
         while (code_copy.size()) *writer++ = code_copy.read();
 
         resolve_refs();
@@ -129,7 +129,7 @@ namespace jasmine {
             exit(1);
         }
         
-        byte_buffer b;
+        bytebuf b;
         b.write("#!jasmine\n", 10);
 
         b.write<u8>(JASMINE_VERSION); // version major
@@ -137,7 +137,7 @@ namespace jasmine {
         b.write("\xf0\x9f\xa6\x9d", 4); // friendly flamingo
 
         b.write(little_endian<u64>(buf.size())); // length of code
-        byte_buffer code_copy = buf;
+        bytebuf code_copy = buf;
         while (code_copy.size()) b.write(code_copy.read()); // copy over code
 
         u32 internal_id = 0;
@@ -191,7 +191,7 @@ namespace jasmine {
         }
         char symbol[1024];
 
-        byte_buffer b;
+        bytebuf b;
         int ch;
         while ((ch = fgetc(file)) != EOF) b.write<u8>(ch);
         u8 shebang[10];
@@ -308,7 +308,7 @@ namespace jasmine {
         u32 type; 
         u64 flags; 
         u32 name_index;
-        byte_buffer* buf;
+        bytebuf* buf;
         u32 entry_size;
         u32 link = 0, info = 0;
     };
@@ -419,7 +419,7 @@ namespace jasmine {
             exit(1);
         }
 
-        byte_buffer elf;
+        bytebuf elf;
         elf.write((char)0x7f, 'E', 'L', 'F');
         elf.write<u8>(0x02); // ELFCLASS64
         elf.write<u8>((EndianOrder)host_order.value == EndianOrder::UTIL_LITTLE_ENDIAN ?
@@ -441,7 +441,7 @@ namespace jasmine {
         elf.write<u16>(6); // num sections
         elf.write<u16>(1); // section header strings are section 0
 
-        byte_buffer strtab, symtab;
+        bytebuf strtab, symtab;
         strtab.write('\0');
         symtab.write<u64>(0); // reserved symbol 0
         symtab.write<u64>(0);
@@ -475,7 +475,7 @@ namespace jasmine {
         }
 
         resolve_ELF_addends();
-        byte_buffer rel;
+        bytebuf rel;
         for (auto& entry : refs) {
             u64 sym = entry.first;
             rel.write<u64>(sym + entry.second.field_offset);
@@ -485,10 +485,10 @@ namespace jasmine {
             rel.write<u64>(info);
         }
 
-        byte_buffer shstrtab, shdrs;
+        bytebuf shstrtab, shdrs;
         vector<pair<string, ELFSectionHeader>> sections;
         shstrtab.write('\0');
-        byte_buffer empty;
+        bytebuf empty;
         sections.push({ "", { 0, 0, 0, &empty, 0 } });
         sections.push({ ".shstrtab", { 3, ELF_SHF_STRINGS, 0, &shstrtab, 0 } });
         sections.push({ ".strtab", { 3, ELF_SHF_STRINGS, 0, &strtab, 0 } });
@@ -528,16 +528,11 @@ namespace jasmine {
 }
 
 template<>
-u64 hash(const jasmine::Symbol& symbol) {
-    return raw_hash(symbol);
+u64 hash(const u64& u) {
+    return raw_hash(u);
 }
 
 template<>
 u64 hash(const jasmine::SymbolRef& symbol) {
     return raw_hash(symbol);
-}
-
-template<>
-u64 hash(const u64& u) {
-    return raw_hash(u);
 }

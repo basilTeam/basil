@@ -40,3 +40,8 @@ namespace jasmine {
         return (const char*)table.symbol_names[symbol.id].raw();
     }
 }
+
+template<>
+u64 hash(const jasmine::Symbol& symbol) {
+    return raw_hash(symbol);
+}

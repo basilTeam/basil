@@ -250,7 +250,7 @@ TEST(function_coercion) {
 
     Type f = t_func(T_INT, T_TYPE), g = t_func(T_TYPE, T_INT);
 
-    ASSERT_TRUE(f.coerces_to(T_TYPE)); // function types that return types can be coerced to types themselves
+    ASSERT_FALSE(f.coerces_to(T_TYPE)); // function types should not be coercible to type alone
     ASSERT_FALSE(g.coerces_to(T_TYPE));
 }
 

@@ -1,0 +1,44 @@
+ref Expr = 
+    | IntConst of Int
+    | Add of (Expr, Expr)
+    | Sub of (Expr, Expr)
+    | Mul of (Expr, Expr)
+    | Div of (Expr, Expr)
+    | Var of Symbol
+    | Set of (Symbol, Expr)
+    | Do  of [Expr]
+ref Env of Int[Symbol]
+
+def interp (expr? : Expr) (env? : Env) : Int =
+    match expr with:
+        IntConst of i? => i
+        Add of (l?, r?) => (interp l env) + (interp r env)
+        Sub of (l?, r?) => (interp l env) - (interp r env) 
+        Mul of (l?, r?) => (interp l env) * (interp r env) 
+        Div of (l?, r?) => (interp l env) / (interp r env)
+        Var of s? => env[s]
+        Set of (s?, e?) => do:
+            env[s] = interp e env
+            env[s]
+        Do  of (exprs?) => exprs fold 0 (lambda prev? expr? = interp expr env)
+
+def program exprs...? : Expr =
+    new Do of exprs
+
+interp program:
+    new Set of (:x, new IntConst of 1)
+    new Set of (:y, new IntConst of 2)
+    new Add of (new Var of :x, new Var of :y)
+
+for x :in [1 2 3] :while y < 10 :until x > 2 do:
+    y = y + 2
+
+def main () : Int = 
+    def start : Time = now ()
+    def acc = 0
+    for :each i :from 0 :to 1000000 do:
+        acc += interp program:
+            new Set of (:x, new IntConst of 1)
+            new Set of (:y, new IntConst of 2)
+            new Add of (new Var of :x, new Var of :y)
+    display: "Evaluating 1M programs took " (now ()) - start " seconds."

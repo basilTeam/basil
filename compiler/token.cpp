@@ -35,9 +35,9 @@ namespace basil {
         u32 i = tokens.size(); // move to the end of the current token list
 
         Source::View view = source->expand_line(io);
-        while (view.peek()) {
-            if (auto tok = lex(view)) tokens.push(*tok);
-            else return false; // fail if token error occurs
+        vector<Token> new_tokens = lex_all(view);
+        for (const Token& t : new_tokens) {
+            tokens.push(t);
         }
 
         return true;
@@ -245,12 +245,12 @@ namespace basil {
                     return none<Token>();
                 case '+': // prefix plus
                     end = view.pos(), acc += view.read(), ch = view.peek();
-                    if (is_letter(ch) || is_opener(ch)) 
+                    if (is_letter(ch) || is_digit(ch) || is_opener(ch)) 
                         skip_symbol = true, result = Token{span(begin, end), S_PLUS, TK_PLUS};
                     break;
                 case '-': // prefix minus
                     end = view.pos(), acc += view.read(), ch = view.peek();
-                    if (is_letter(ch) || is_opener(ch)) 
+                    if (is_letter(ch) || is_digit(ch) || is_opener(ch)) 
                         skip_symbol = true, result = Token{span(begin, end), S_MINUS, TK_MINUS};
                     break;
                 case ':': // prefix quote or block colon  
@@ -296,7 +296,16 @@ namespace basil {
             if (t) tokens.push(*t);
         }
 
-        return tokens;
+        vector<Token> augmented;
+        for (u32 i = 0; i < tokens.size(); i ++) {
+            augmented.push(tokens[i]);
+            if (tokens[i].kind == TK_SYMBOL && 
+                (tokens[i].contents == S_ASSIGN || tokens[i].contents == S_CASE_ARROW || tokens[i].contents == S_OF)) {
+                augmented.push(Token{ tokens[i].pos, S_COLON, TK_BLOCK });
+            }
+        }
+
+        return augmented;
     }
 }
 

@@ -8,28 +8,45 @@ u64 rotr(u64 u, u64 n) {
 	return (u >> n) | ((u << (64 - n)) & (-1 & ~(-1 << n)));
 }
 
-u64 raw_hash(const void* t, uint64_t size) {
-	u64 h = 13830991727719723691ul;
+// MurmurHash, 64-bit version, unaligned by Austin Appleby (https://sites.google.com/site/murmurhash/)
+// The source has been slightly modified, using basil typedefs, and a fixed seed (a 64-bit prime).
 
-	const u64* words = (const u64*)t;
-    u32 i = 0;
-	for (; i < size / 8; ++ i) {
-	    uint64_t u = *words * 4695878395758459391ul;
-		h -= u;
-	    h ^= (h >> 23);
-	    ++ words;
+u64 raw_hash(const void* input, u64 size){
+	const u64 m = 0xc6a4a7935bd1e995;
+	const u32 r = 47;
+
+	u64 h = 7576351903513440497ul ^ (size * m);
+
+	const u64* data = (const u64*)input;
+	const u64* end = data + (size / 8);
+
+	while(data != end) {
+		u64 k = *data ++;
+		k *= m; 
+		k ^= k >> r; 
+		k *= m; 
+		h ^= k;
+		h *= m; 
 	}
-	
-	const u8* bytes = (const u8*)words;
-	i *= 8;
-	for (; i < size; ++ i) {
-	    uint64_t u = *bytes * 4695878395758459391ul;
-		h -= u;
-	    h ^= (h >> 23);
-	    ++ bytes;
-	}
-	return h ^ (h << 37);
-}
+
+	const u8* data2 = (const u8*)data;
+	switch(size & 7) {
+	case 7: h ^= u64(data2[6]) << 48;
+	case 6: h ^= u64(data2[5]) << 40;
+	case 5: h ^= u64(data2[4]) << 32;
+	case 4: h ^= u64(data2[3]) << 24;
+	case 3: h ^= u64(data2[2]) << 16;
+	case 2: h ^= u64(data2[1]) << 8;
+	case 1: h ^= u64(data2[0]);
+	        h *= m;
+	};
+ 
+	h ^= h >> r;
+	h *= m;
+	h ^= h >> r;
+
+	return h;
+} 
 
 template<>
 u64 hash(const char* const& s) {
@@ -46,5 +63,5 @@ u64 hash(const string& s) {
 
 template<>
 u64 hash(const ustring& s) {
-    return ::hash<const char*>(s.raw());
+    return raw_hash((const u8*)s.raw(), s.bytes());
 }

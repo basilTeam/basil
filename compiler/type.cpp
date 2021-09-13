@@ -45,7 +45,7 @@ namespace basil {
     Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION, S_ELLIPSIS, S_COMMA, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
+        S_QUESTION, S_ELLIPSIS, S_COMMA, S_ASSIGN, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
 
     void init_symbols() {
         S_NONE = symbol_from("");
@@ -70,6 +70,7 @@ namespace basil {
         S_QUESTION = symbol_from("?");
         S_ELLIPSIS = symbol_from("...");
         S_COMMA = symbol_from(",");
+        S_ASSIGN = symbol_from("=");
         S_PIPE = symbol_from("|");
         S_DO = symbol_from("do");
         S_CONS = symbol_from("::");
@@ -102,7 +103,8 @@ namespace basil {
         14239964922572717219ul,
         14100517225124763857ul,
         3843382840898873837ul,
-        9920235303098296457ul
+        9920235303098296457ul,
+        7206390394945354127ul
     };
 
     struct Class {
@@ -162,7 +164,7 @@ namespace basil {
         Type t = *this;
         while (k == K_TVAR) { // look at underlying type until we find a non-tvar
             t = t_tvar_concrete(t);
-            k = TYPE_LIST[id]->kind();
+            k = TYPE_LIST[t.id]->kind();
         }
         return k;
     }
@@ -185,6 +187,48 @@ namespace basil {
 
     bool Type::coerces_to_generic(Type other) const {
         return TYPE_LIST[id]->coerces_to_generic(*TYPE_LIST[other.id]);
+    }
+
+    static u32 nonbinding = 0;
+
+    // to avoid reimplementing coerces_to and coerces_to_generic (there's already
+    // more than enough duplication between those two...) in nonbinding forms, we
+    // instead track the depth of nonbinding calls using this static variable,
+    // and refer to it within TVarClass::coerces_to.
+
+    bool Type::nonbinding_coerces_to(Type other) const {
+        nonbinding ++;
+        bool result = coerces_to(other);
+        nonbinding --;
+        return result;
+    }
+
+    bool Type::nonbinding_coerces_to_generic(Type other) const {
+        nonbinding ++;
+        bool result = coerces_to_generic(other);
+        nonbinding --;
+        return result;
+    }
+
+    bool t_soft_eq(Type a, Type b) {
+        if (a.is_tvar()) a = t_concrete(a);
+        if (b.is_tvar()) b = t_concrete(b);
+        return a.id == b.id; // we can do reference equality after eliminating tvars
+    }
+
+    static bool t_soft_eq(const Class& a, const Class& b) {
+        return t_soft_eq(t_from(a.id()), t_from(b.id()));
+    }
+
+    static void t_dedup(vector<rc<Class>>& types) {
+        for (u32 i = 0; i < types.size(); i ++) {
+            for (u32 j = i + 1; j < types.size(); j ++) {
+                if (t_soft_eq(*types[i], *types[j])) {
+                    types[j --] = types.back(), types.pop();
+                    continue;
+                }
+            }
+        }
     }
 
     bool Type::operator==(Type other) const {
@@ -638,14 +682,15 @@ namespace basil {
     }
 
     struct IntersectionClass : public Class {
-        set<rc<Class>> members;
+        vector<rc<Class>> members;
 
-        IntersectionClass(const set<Type>& members_in):
+        IntersectionClass(const vector<Type>& members_in):
             Class(K_INTERSECT) {
-            for (Type t : members_in) members.insert(TYPE_LIST[t.id]);
+            for (Type t : members_in) members.push(TYPE_LIST[t.id]);
+            t_dedup(members);
         }
 
-        IntersectionClass(const set<rc<Class>>& members_in):
+        IntersectionClass(const vector<rc<Class>>& members_in):
             Class(K_INTERSECT), members(members_in) {}
 
         u64 lazy_hash() const override {
@@ -664,30 +709,45 @@ namespace basil {
             if (Class::coerces_to(other)) return true;
 
             if (other.kind() == K_INTERSECT) {
-                auto copy_other_members = as<IntersectionClass>(other).members;
-                for (const auto& m : members) {
-                    copy_other_members.erase(m);
+                for (const auto& m : as<IntersectionClass>(other).members) {
+                    bool found = false;
+                    for (const auto& n : members) {
+                        if (t_soft_eq(*m, *n)) { // we use soft equality to support type vars
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (!found) return false; // we don't contain a member of the target
                 }
-                return copy_other_members.size() == 0; // Coercion possible if target's members are a subset of ours.
+                return true; // we contain every member of the target
             }
-            return members.find(TYPE_LIST[other._id]) != members.end(); // Can coerce to any member.
+            else for (const auto& m : members) {
+                if (t_soft_eq(*m, other)) return true; // we contain the target
+            }
+            return false;
         }
 
         bool operator==(const Class& other) const override {
             if (other.kind() != K_INTERSECT
                 || as<IntersectionClass>(other).members.size() != members.size())
                 return false;
-
-            // At this point we know the size of both types' member sets is the same.
-            auto copy_members = members;
-            for (const auto& m : as<IntersectionClass>(other).members) {
-                copy_members.erase(m);
+            
+            // at this point we know the size of both types' member sets is the same.
+            for (const auto& m : members) {
+                bool found = false;
+                for (const auto& n : as<IntersectionClass>(other).members) {
+                    if (t_soft_eq(*m, *n)) { // we use soft equality to support type vars
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) return false;
             }
-            return copy_members.size() == 0; // Member sets must have had the same elements.
+            return true;
         }
     };
 
-    Type t_intersect(const set<Type>& members) {
+    Type t_intersect(const vector<Type>& members) {
         if (members.size() < 1) panic("Cannot create intersection type with zero members!");
         return t_create(ref<IntersectionClass>(members));
     }
@@ -719,10 +779,6 @@ namespace basil {
 
         bool coerces_to(const Class& other) const override {
             if (Class::coerces_to(other)) return true;
-
-            if (other.kind() == K_TYPE) { // Functions that return type can be coerced to 'type'.
-                return arg->coerces_to(*TYPE_LIST[T_TYPE.id]) && ret->kind() == K_TYPE;
-            }
 
             return false;
         }
@@ -892,6 +948,12 @@ namespace basil {
     };
 
     static vector<Type> tvar_bindings;
+    static vector<vector<Type>> tvar_isects;
+    static set<u64> tvar_isecting;
+
+    static u32 is_isect_mode = 0;
+
+    void bind_tvar(u32 id, Type type);
 
     struct TVarClass : public Class {
         u32 id;
@@ -900,6 +962,7 @@ namespace basil {
         TVarClass(): Class(K_TVAR), id(tvar_bindings.size()),
             name(symbol_from(::format<ustring>("#", id))) { // use #<id> for default name
             tvar_bindings.push(T_UNDEFINED); // start out as 'undefined'
+            tvar_isects.push({}); // reserve an isect vector whenever we need it
         }
 
         TVarClass(Symbol name_in): TVarClass() { name = name_in; }
@@ -917,8 +980,17 @@ namespace basil {
 
         bool coerces_to_generic(const Class& other) const override {
             bool result = TYPE_LIST[tvar_bindings[id].id]->coerces_to(other);
-            if (result && other.kind() != K_ANY)   
-                tvar_bindings[id] = t_from(other.id()); // bind this tvar to the other type
+            if (!nonbinding // we refer to the nonbinding variable used in nonbinding Type member functions
+                && result && other.kind() != K_ANY) {
+                Type ot = t_from(other.id());
+                if (is_isect_mode && tvar_bindings[id] != ot) { // build an intersection set instead of binding directly
+                    tvar_isecting.insert(id);
+                    tvar_isects[id].push(ot);
+                }
+                else if (!is_isect_mode) {
+                    bind_tvar(id, ot); // bind this tvar to the other type
+                }
+            } 
             return result;
         }
 
@@ -935,8 +1007,87 @@ namespace basil {
         return t_create(ref<TVarClass>(name));
     }
 
+    void t_tvar_enable_isect() {
+        is_isect_mode ++;
+    }
+
+    void t_tvar_disable_isect() {
+        if (is_isect_mode == 0) panic("Cannot disable isect mode - it is already disabled!");
+        is_isect_mode --;
+        if (is_isect_mode == 0) {
+            vector<Type> types;
+            for (u32 tvar : tvar_isecting) {
+                if (tvar_isects[tvar].size() == 1)
+                    bind_tvar(tvar, tvar_isects[tvar][0]);
+                else {
+                    types.clear();
+                    for (Type t : tvar_isects[tvar]) types.push(t);
+                    bind_tvar(tvar, t_intersect(types));
+                    tvar_isects[tvar].clear();
+                }
+            }
+            tvar_isecting.clear();
+        }
+    }
+
+    void bind_tvar(u32 id, Type type) {
+        Type it = type;
+        while (it.is_tvar()) {
+            if (as<TVarClass>(*TYPE_LIST[it.id]).id == id) return; // can't create cyclic graph
+            it = tvar_bindings[as<TVarClass>(*TYPE_LIST[it.id]).id];
+        }
+        tvar_bindings[id] = type;
+    }
+    
+    // Represents runtime types.
+    struct RuntimeClass : public Class {
+        rc<Class> base;
+
+        RuntimeClass(Type base_in):
+            Class(K_RUNTIME), base(TYPE_LIST[base_in.id]) {}
+
+        u64 lazy_hash() const override {
+            return base->hash() * 9757042299901199593ul ^ raw_hash(K_NAMED);
+        }
+
+        void format(stream& io) const override {
+            write(io, "runtime(", base, ")");
+        }
+
+        bool coerces_to_generic(const Class& other) const override {
+            if (Class::coerces_to_generic(other)) return true;
+
+            if (other.kind() == K_RUNTIME) {
+                return base->coerces_to_generic(*as<RuntimeClass>(other).base);
+            }
+
+            return false;
+        }
+
+        bool coerces_to(const Class& other) const override {
+            if (Class::coerces_to(other)) return true;
+
+            if (other.kind() == K_RUNTIME) {
+                return base->coerces_to(*as<RuntimeClass>(other).base);
+            }
+
+            return false;
+        }
+
+        bool operator==(const Class& other) const override {
+            return other.kind() == K_RUNTIME 
+                && *base == *as<RuntimeClass>(other).base;
+        }
+    };
+
+    Type t_runtime(Type base) {
+        if (base.of(K_RUNTIME)) return base;
+        return t_create(ref<RuntimeClass>(base));
+    }
+
     bool Class::coerces_to_generic(const Class& other) const {
-        if (other.kind() == K_TVAR) return other.coerces_to_generic(*this);
+        if (other.kind() == K_TVAR && !t_is_concrete(t_from(other.id())))
+            if (other.coerces_to_generic(*this)) return true;
         return *this == other 
             || other.kind() == K_ANY
             || other.kind() == K_ERROR;
@@ -944,6 +1095,7 @@ namespace basil {
 
     bool Class::coerces_to(const Class& other) const {
         return coerces_to_generic(other)
+            || (other.kind() == K_RUNTIME && TYPE_LIST[_id]->coerces_to(*as<RuntimeClass>(other).base))
             || (other.kind() == K_UNION && as<UnionClass>(other).members.contains(TYPE_LIST[_id]));
     }
 
@@ -973,21 +1125,28 @@ namespace basil {
 
     Type t_intersect_with(Type intersect, Type other) {
         if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
-        set<rc<Class>> members = as<IntersectionClass>(*TYPE_LIST[intersect.id]).members;
-        members.insert(TYPE_LIST[other.id]);
+        vector<rc<Class>> members = as<IntersectionClass>(*TYPE_LIST[intersect.id]).members;
+        bool found = false;
+        for (const auto& m : members) if (t_soft_eq(t_from(m->id()), other)) found = true;
+        if (!found) members.push(TYPE_LIST[other.id]);
+        
         return t_create(ref<IntersectionClass>(members));
     }
 
     Type t_intersect_without(Type intersect, Type other) {
         if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
-        set<rc<Class>> members = as<IntersectionClass>(*TYPE_LIST[intersect.id]).members;
-        members.erase(TYPE_LIST[other.id]);
+        vector<rc<Class>> members = as<IntersectionClass>(*TYPE_LIST[intersect.id]).members;
+        for (auto& m : members) if (t_soft_eq(t_from(m->id()), other)) {
+            m = members.back();
+            members.pop();
+            break;
+        }
         return t_create(ref<IntersectionClass>(members));
     }
 
     bool t_intersect_has(Type intersect, Type member) {
         if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
-        return as<IntersectionClass>(*TYPE_LIST[intersect.id]).members.contains(TYPE_LIST[member.id]);
+        return intersect.nonbinding_coerces_to(member);
     }
 
     bool t_intersect_procedural(Type intersect) {
@@ -997,11 +1156,11 @@ namespace basil {
         return true;
     }
     
-    set<Type> t_intersect_members(Type intersect) {
+    vector<Type> t_intersect_members(Type intersect) {
         if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
-        set<Type> members;
+        vector<Type> members;
         for (const rc<Class>& c : as<IntersectionClass>(*TYPE_LIST[intersect.id]).members)
-            members.insert(t_from(c->id()));
+            members.push(t_from(c->id()));
         return members;
     }
 
@@ -1100,6 +1259,10 @@ namespace basil {
         else return t;
     }
 
+    Type t_concrete(Type type) {
+        return type.is_tvar() ? t_tvar_concrete(type) : type;
+    }
+
     Symbol t_tvar_name(Type tvar) {
         if (!tvar.is_tvar()) panic("Expected type variable!");
         return as<TVarClass>(*TYPE_LIST[tvar.id]).name;
@@ -1107,7 +1270,187 @@ namespace basil {
 
     void t_tvar_unbind(Type tvar) {
         if (!tvar.is_tvar()) panic("Expected type variable!");
-        tvar_bindings[as<TVarClass>(*TYPE_LIST[tvar.id]).id] = T_UNDEFINED;
+        bind_tvar(as<TVarClass>(*TYPE_LIST[tvar.id]).id, T_UNDEFINED);
+    }
+
+    Type t_runtime_base(Type t) {
+        if (!t.of(K_RUNTIME)) return t;
+        return t_from(as<RuntimeClass>(*TYPE_LIST[t.id]).base->id());
+    }
+
+    void t_unbind(Type t) {
+        switch (t.is_tvar() ? K_TVAR : t.kind()) {
+            case K_TVAR:
+                bind_tvar(as<TVarClass>(*TYPE_LIST[t.id]).id, T_UNDEFINED);
+                return;
+            case K_RUNTIME:
+                return t_unbind(t_runtime_base(t));
+            case K_LIST: return t_unbind(t_list_element(t));
+            case K_FUNCTION: return t_unbind(t_arg(t)), t_unbind(t_ret(t));
+            case K_DICT: return t_unbind(t_dict_key(t)), t_unbind(t_dict_value(t));
+            case K_NAMED: return t_unbind(t_get_base(t));
+            case K_UNION: {
+                for (rc<Class> cl : as<UnionClass>(*TYPE_LIST[t.id]).members) 
+                    t_unbind(t_from(cl->id()));
+                return;
+            }
+            case K_INTERSECT: {
+                for (rc<Class> cl : as<IntersectionClass>(*TYPE_LIST[t.id]).members) 
+                    t_unbind(t_from(cl->id()));
+                return;
+            }
+            case K_STRUCT: {
+                for (const auto& [f, t] : as<StructClass>(*TYPE_LIST[t.id]).fields) 
+                    t_unbind(t_from(t->id()));
+                return;
+            }
+            case K_TUPLE: {
+                for (u32 i = 0; i < t_tuple_len(t); i ++) t_unbind(t_tuple_at(t, i));
+                return;
+            }
+            case K_ARRAY: return t_unbind(t_array_element(t));
+            default: return;
+        }
+    }
+    
+    bool t_is_concrete(Type t) {
+        switch (t.is_tvar() ? K_TVAR : t.kind()) {
+            case K_SYMBOL:
+            case K_INT:
+            case K_FLOAT:
+            case K_STRING:
+            case K_VOID:
+            case K_CHAR:
+            case K_BOOL:
+            case K_TYPE:
+            case K_DOUBLE:
+            case K_MODULE:
+            case K_ALIAS:
+            case K_MACRO:
+            case K_ERROR:
+                return true;
+            case K_ANY:
+            case K_UNDEFINED:
+                return false;
+            case K_TVAR:
+                return t_is_concrete(t_tvar_concrete(t));
+            case K_RUNTIME:
+                return t_is_concrete(t_runtime_base(t));
+            case K_LIST: return t_is_concrete(t_list_element(t));
+            case K_FUNCTION: return t_is_concrete(t_arg(t)) && t_is_concrete(t_ret(t));
+            case K_DICT: return t_is_concrete(t_dict_key(t)) && t_is_concrete(t_dict_value(t));
+            case K_NAMED: return t_is_concrete(t_get_base(t));
+            case K_UNION: {
+                bool result = true;
+                for (rc<Class> cl : as<UnionClass>(*TYPE_LIST[t.id]).members) 
+                    result = result && t_is_concrete(t_from(cl->id()));
+                return result;
+            }
+            case K_INTERSECT: {
+                bool result = true;
+                for (rc<Class> cl : as<IntersectionClass>(*TYPE_LIST[t.id]).members) 
+                    result = result && t_is_concrete(t_from(cl->id()));
+                return result;
+            }
+            case K_STRUCT: {
+                if (!t_struct_is_complete(t)) return false;
+                bool result = true;
+                for (const auto& [f, t] : as<StructClass>(*TYPE_LIST[t.id]).fields) 
+                    result = result && t_is_concrete(t_from(t->id()));
+                return result;
+            }
+            case K_TUPLE: {
+                if (!t_tuple_is_complete(t)) return false;
+                bool result = true;
+                for (u32 i = 0; i < t_tuple_len(t); i ++) result = result && t_is_concrete(t_tuple_at(t, i));
+                return result;
+            }
+            case K_ARRAY: return t_is_concrete(t_array_element(t));
+            default:
+                return false;
+        }
+    }
+
+    Type t_lower(Type t) {
+        switch (t.is_tvar() ? K_TVAR : t.kind()) {
+            case K_SYMBOL:
+            case K_INT:
+            case K_FLOAT:
+            case K_STRING:
+            case K_VOID:
+            case K_CHAR:
+            case K_BOOL:
+            case K_TVAR:
+            case K_TYPE:
+            case K_DOUBLE:
+            case K_UNDEFINED:
+                return t;
+            case K_MODULE:
+            case K_ALIAS:
+            case K_MACRO:
+            case K_ERROR:
+                return T_ERROR;
+            case K_ANY:
+                return t_var();
+            case K_RUNTIME:
+                return t_runtime_base(t);
+            case K_LIST: {
+                Type elt = t_lower(t_list_element(t));
+                return elt == T_ERROR ? elt : t_list(elt);
+            }
+            case K_FUNCTION: {
+                Type arg = t_lower(t_arg(t)), ret = t_lower(t_ret(t));
+                return arg == T_ERROR || ret == T_ERROR ? T_ERROR : t_func(arg, ret);
+            }
+            case K_DICT: {
+                Type key = t_lower(t_dict_key(t)), val = t_lower(t_dict_value(t));
+                return key == T_ERROR || val == T_ERROR ? T_ERROR : t_dict(key, val);
+            }
+            case K_NAMED: {
+                Type elt = t_lower(t_get_base(t));
+                return elt == T_ERROR ? elt : t_named(t_get_name(t), elt);
+            }
+            case K_UNION: {
+                set<Type> types;
+                for (rc<Class> cl : as<UnionClass>(*TYPE_LIST[t.id]).members) {
+                    types.insert(t_lower(t_from(cl->id())));
+                }
+                if (types.contains(T_ERROR)) return T_ERROR;
+                return t_union(types);
+            }
+            case K_INTERSECT: {
+                vector<Type> types;
+                for (rc<Class> cl : as<IntersectionClass>(*TYPE_LIST[t.id]).members) {
+                    types.push(t_lower(t_from(cl->id())));
+                    if (types.back() == T_ERROR) return T_ERROR;
+                }
+                return t_intersect(types);
+            }
+            case K_STRUCT: {
+                map<Symbol, Type> fields;
+                for (const auto& [f, t] : as<StructClass>(*TYPE_LIST[t.id]).fields) {
+                    Type l = t_lower(t_from(t->id()));
+                    if (l == T_ERROR) return T_ERROR;
+                    fields.put(f, l);
+                }
+                return t_struct_is_complete(t) ? t_struct(fields) : t_incomplete_struct(fields);
+            }
+            case K_TUPLE: {
+                vector<Type> members;
+                for (u32 i = 0; i < t_tuple_len(t); i ++) {
+                    members.push(t_lower(t_tuple_at(t, i)));
+                    if (members.back() == T_ERROR) return T_ERROR;
+                }
+                return t_tuple_is_complete(t) ? t_tuple(members) : t_incomplete_tuple(members);
+            }
+            case K_ARRAY: {
+                Type elt = t_lower(t_array_element(t));
+                if (elt == T_ERROR) return T_ERROR;
+                return t_array_is_sized(t) ? t_array(elt, t_array_size(t)) : t_array(elt);
+            }
+            default:
+                return T_ERROR;
+        }
     }
 
     void init_types() {

@@ -44,7 +44,7 @@ TEST(variables) {
     ASSERT_EQUAL(b, v_symbol(a.pos, symbol_from("::")));
     ASSERT_EQUAL(c, v_symbol(a.pos, symbol_from("y")));
     ASSERT_EQUAL(d, v_symbol(a.pos, symbol_from("=")));
-    ASSERT_EQUAL(e, v_symbol(a.pos, symbol_from("z_w")));
+    ASSERT_EQUAL(e, v_list(a.pos, t_list(T_ANY), v_symbol(a.pos, symbol_from("z_w"))));
 }
 
 TEST(enclosing) {

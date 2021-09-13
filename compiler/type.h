@@ -40,6 +40,7 @@ namespace basil {
         K_ALIAS,
         K_TVAR, 
         K_MODULE,
+        K_RUNTIME,
         NUM_KINDS
     };
 }
@@ -82,7 +83,7 @@ namespace basil {
     extern Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION, S_ELLIPSIS, S_COMMA, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
+        S_QUESTION, S_ELLIPSIS, S_COMMA, S_ASSIGN, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
 
     // Returns the associated string for the provided symbol.
     const ustring& string_from(Symbol sym);
@@ -134,9 +135,22 @@ namespace basil {
         // otherwise be inappropriate due to performance reasons.
         bool coerces_to_generic(Type other) const;
 
+        // Returns whether this type can coerce to the provided target type,
+        // but does *not* bind any type variables in the process - type variables
+        // are exclusively treated like their base type.
+        bool nonbinding_coerces_to(Type other) const;
+
+        // Like 'nonbinding_coerces_to' but for strictly generic coercion.
+        bool nonbinding_coerces_to_generic(Type other) const;
+
         // Formats the type associated with this id to the provided stream.
         void format(stream& io) const;
 
+        // Soft type equality/inequality. Types must be structurally equal
+        // for this to return true, but type variables are equal to their
+        // bound type.
+        // If you want to do strict equality, check is_tvar() and/or make the
+        // type concrete first.
         bool operator==(Type other) const;
         bool operator!=(Type other) const;
     private:
@@ -195,10 +209,10 @@ namespace basil {
     }
 
     // Constructs an intersection type with the provided member types.
-    Type t_intersect(const set<Type>& members);
+    Type t_intersect(const vector<Type>& members);
     template<typename ...Args>
     Type t_intersect(Args... args) {
-        return basil::t_intersect(set_of<Type>(args...));
+        return basil::t_intersect(vector_of<Type>(args...));
     }
 
     // Constructs a function type with the given argument and return types.
@@ -233,6 +247,9 @@ namespace basil {
     // Returns a fresh type variable, identified with the provided name.
     Type t_var(Symbol name);
 
+    // Constructs a runtime type with the given base type.
+    Type t_runtime(Type base);
+
     extern Type T_VOID, T_INT, T_FLOAT, T_DOUBLE, T_SYMBOL, 
         T_STRING, T_CHAR, T_BOOL, T_TYPE, T_ALIAS, T_ERROR, T_MODULE,
         T_ANY, T_UNDEFINED;
@@ -265,7 +282,7 @@ namespace basil {
     bool t_intersect_procedural(Type intersect);
 
     // Returns the set of member types from the provided intersection type.
-    set<Type> t_intersect_members(Type intersect);
+    vector<Type> t_intersect_members(Type intersect);
 
     // Returns the element type of the provided list type.
     Type t_list_element(Type list);
@@ -318,9 +335,42 @@ namespace basil {
     // Returns the currently-bound type of the provided type variable.
     Type t_tvar_concrete(Type tvar);
 
-    // Resets the provided type variable.
-    void t_tvar_unbind(Type tvar);
-    
+    // Returns the concrete base of a type variable, or the provided type if
+    // it's not a type variable.
+    Type t_concrete(Type t);
+
+    // Changes type variable coercion to "intersection mode". In this mode,
+    // type variable coercion does not rebind the variable if it coerces.
+    // Instead, it builds a set of available coercion targets for the variable.
+    // This call and t_tvar_disable_isect can be called in a nested fashion!
+    void t_tvar_enable_isect();
+
+    // Turns off type variable "intersection mode" coercion. As a result,
+    // any type variables with created sets are bound to intersections of
+    // those sets.
+    void t_tvar_disable_isect();
+
+    // If the provided type is a runtime type, returns its base; otherwise
+    // returns the original type.
+    Type t_runtime_base(Type t);
+
+    // Resets the provided type's or any of its type variable members' bindings
+    // to undefined.
+    void t_unbind(Type t);
+
+    // Returns whether the provided type is concrete - lacking any undefined or
+    // 'any' members.
+    bool t_is_concrete(Type t);
+
+    // Returns a runtime-compatible form of the provided type, substituting
+    // unbound type variables for dynamic types.
+    Type t_lower(Type t);
+
+    // Returns whether type a is equal to type b, taking into account type
+    // variables. For example, a type variable bound to Int will be equal to Int
+    // with this method, but not using operator==.
+    bool t_soft_eq(Type a, Type b);
+
     // Performs initialization for this source file. Sets up the symbol
     // and type tables, and initializes all static variables.
     void init_types_and_symbols();

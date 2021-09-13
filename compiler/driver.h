@@ -5,6 +5,10 @@
 #include "eval.h"
 #include "token.h"
 
+#define BASIL_MAJOR_VERSION 1
+#define BASIL_MINOR_VERSION 0
+#define BASIL_PATCH_VERSION 0
+
 namespace basil {
     // Initializes all necessary state for the compiler.
     void init();
@@ -18,6 +22,8 @@ namespace basil {
         NUM_PRINT_FLAGS
     };
 
+    optional<ustring> locate_source(const char* path);
+
     rc<Source> load_step(const char* const& str);
     vector<Token> lex_step(rc<Source> source);
     Value parse_step(const vector<Token>& tokens);
@@ -30,13 +36,13 @@ namespace basil {
     }
 
     template<typename T, typename F>
-    auto compile_single(const T& input, F func) {
+    auto compile(const T& input, F func) {
         return func(input);
     }
 
     template<typename T, typename F, typename ...Args>
     auto compile(const T& input, F func, Args... funcs) {
-        auto val = compile_single(input, func);
+        auto val = compile(input, func);
         return compile(val, funcs...);
     }
 
@@ -62,9 +68,6 @@ namespace basil {
 
     // Loads a file and returns the top-level environment before code generation.
     optional<rc<Env>> load(const char* filename);
-
-    // Runs the "help" mode of the compiler.
-    void help(const char* cmd);
 }
 
 #endif

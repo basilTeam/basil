@@ -27,6 +27,7 @@ namespace basil {
     struct Builtin;
     struct Form;
     struct Env;
+    struct AST;
 
     struct String;
     struct List;
@@ -41,6 +42,7 @@ namespace basil {
     struct Alias;
     struct Macro;
     struct Module;
+    struct Runtime;
 
     // Represents a compile-time value. Values have a few fundamental
     // properties. A value's type describes what kind of data it holds.
@@ -77,6 +79,7 @@ namespace basil {
             rc<Function> fn;        // A function value.
             rc<Alias> alias;        // An alias value.
             rc<Macro> macro;        // A macro value.
+            rc<Runtime> rt;         // A runtime value.
 
             Symbol undefined_sym; // Not used in operations. Stores the variable name associated
                                   // with an undefined value.
@@ -124,21 +127,23 @@ namespace basil {
         friend Value v_undefined(Source::Pos, Symbol, rc<Form>);
         friend Value v_string(Source::Pos, const ustring&);
         friend Value v_cons(Source::Pos, Type, const Value&, const Value&);
-        friend Value v_list(Source::Pos, Type, const vector<Value>&);
-        friend Value v_tuple(Source::Pos, Type, const vector<Value>&);
-        friend Value v_array(Source::Pos, Type, const vector<Value>&);
+        friend Value v_list(Source::Pos, Type, vector<Value>&&);
+        friend Value v_tuple(Source::Pos, Type, vector<Value>&&);
+        friend Value v_array(Source::Pos, Type, vector<Value>&&);
         friend Value v_union(Source::Pos, Type, const Value&);
         friend Value v_named(Source::Pos, Type, const Value&);
-        friend Value v_struct(Source::Pos, Type, const map<Symbol, Value>&);
-        friend Value v_dict(Source::Pos, Type, const map<Value, Value>&);
+        friend Value v_struct(Source::Pos, Type, map<Symbol, Value>&&);
+        friend Value v_dict(Source::Pos, Type, map<Value, Value>&&);
         friend Value v_tail(const Value& list);
-        friend Value v_intersect(Source::Pos, Type, const map<Type, Value>& values);
+        friend Value v_intersect(Source::Pos, Type, map<Type, Value>&& values);
         friend Value v_module(Source::Pos, rc<Env>);
         friend Value v_func(const Builtin& builtin);
         friend Value v_func(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
+        friend Value v_func(Source::Pos, Symbol, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_alias(Source::Pos pos, const Value& term);
         friend Value v_macro(const Builtin& builtin);
         friend Value v_macro(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
+        friend Value v_runtime(Source::Pos, Type, rc<AST>);
     };
 
     // Represents the associated data for a compile-time string.
@@ -220,15 +225,51 @@ namespace basil {
         bool operator==(const FormTuple& other) const;
     };
 
+    // An instantiation of a function for a particular type.
+    struct FnInst {
+        Type args;
+        rc<Env> env;
+        rc<AST> func;
+
+        FnInst(Type args, rc<Env> env, rc<AST> func);
+    };
+
+    struct InstTable;
+
+    // Instantiates a runtime function body from the given base for the provided arguments.
+    rc<FnInst> monomorphize(const Function& fn, InstTable& table, rc<Env> env, rc<Value> base, Type args_type);
+
+    // Stores all the instantiations of a function for a particular
+    // form tuple.
+    struct InstTable {
+        rc<Env> env;
+        rc<Value> base;
+        map<Type, rc<FnInst>> insts;
+        map<Type, u32> is_inst;
+
+        InstTable(rc<Env> local, rc<Value> base_in);
+
+        // Returns true if this function resolution is currently instantiating a function for
+        // the provided args_type. If this is the case, we've reached a recursive call within
+        // the compiling function, and shouldn't eval it - we'll just do a runtime call to the 
+        // function stub instead.
+        bool is_instantiating(Type args_type) const;
+
+        rc<FnInst> inst(const Function& fn, Type args_type);
+    };
+
     // Represents the associated data for a function.
     struct Function {
-        optional<const Builtin&> builtin;
-        rc<Env> env;
-        vector<Symbol> args;
-        Value body;
-        map<FormTuple, rc<Value>> resolutions;
+        optional<const Builtin&> builtin; // builtin behavior, if necessary
 
-        Function(optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
+        optional<Symbol> name; // the name of the function, if we can figure it out
+        rc<Env> env; // the local environment of the function
+        vector<Symbol> args; // names of the non-keyword arguments of the function
+        Value body; // body expression of the base function (as declared, prior to form resolution)
+        map<FormTuple, rc<InstTable>> resolutions; // stores instantiations by form
+
+        Function(optional<Symbol> name, optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
+        rc<FnInst> inst(Type args_type, const Value& args);
     };
 
     // Represents the associated data for an alias.
@@ -246,6 +287,13 @@ namespace basil {
         Value body;
 
         Macro(optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
+    };
+
+    // Represents the associated data for a runtime type.
+    struct Runtime {
+        rc<AST> ast;
+
+        Runtime(rc<AST> ast);
     };
 
     // Constructs an integer value.
@@ -307,24 +355,24 @@ namespace basil {
     Value v_cons(Source::Pos pos, Type type, const Value& head, const Value& tail);
 
     // Constructs a list of the provided values.
-    Value v_list(Source::Pos pos, Type type, const vector<Value>& values);
+    Value v_list(Source::Pos pos, Type type, vector<Value>&& values);
     template<typename ...Args>
     Value v_list(Source::Pos pos, Type type, Args... args) {
         return v_list(pos, type, vector_of<Value>(args...));
     }
 
     // Constructs a tuple of the provided values.
-    Value v_tuple(Source::Pos pos, Type type, const vector<Value>& values);
+    Value v_tuple(Source::Pos pos, Type type, vector<Value>&& values);
     template<typename ...Args>
     Value v_tuple(Source::Pos pos, Type type, Args... args) {
         return v_tuple(pos, type, vector_of<Value>(args...));
     }
 
     // Constructs an array of the provided values.
-    Value v_array(Source::Pos pos, Type type, const vector<Value>& values);
+    Value v_array(Source::Pos pos, Type type, vector<Value>&& values);
     template<typename ...Args>
     Value v_array(Source::Pos pos, Type type, const Args&... args) {
-        return v_array(pos, type, args...);
+        return v_array(pos, type, vector_of<Value>(args...));
     }
 
     // Constructs a value of a union type.
@@ -334,28 +382,28 @@ namespace basil {
     Value v_named(Source::Pos pos, Type type, const Value& value);
 
     // Constructs a value of a struct type.
-    Value v_struct(Source::Pos pos, Type type, const map<Symbol, Value>& fields);
+    Value v_struct(Source::Pos pos, Type type, map<Symbol, Value>&& fields);
     template<typename ...Args>
     Value v_struct(Source::Pos pos, Type type, const Args&... args) {
         return v_struct(pos, type, map_of<Symbol, Value>(args...));
     }
 
     // Constructs a value of a dictionary type.
-    Value v_dict(Source::Pos pos, Type type, const map<Value, Value>& entries);
+    Value v_dict(Source::Pos pos, Type type, map<Value, Value>&& entries);
     template<typename ...Args>
     Value v_dict(Source::Pos pos, Type type, const Args&... args) {
         return v_dict(pos, type, map_of<Value, Value>(args...));
     }
 
     // Constructs a value of an intersection type.
-    Value v_intersect(Source::Pos pos, Type type, const map<Type, Value>& values);
+    Value v_intersect(Source::Pos pos, Type type, map<Type, Value>&& values);
     template<typename ...Args>
     Value v_intersect(Source::Pos pos, Type type, const Args&... args) {
         return v_intersect(pos, type, map_of<Type, Value>(args...));
     }
 
     // Constructs an intersection value from a number of builtins.
-    Value v_intersect(const vector<Builtin*>& builtins);
+    Value v_intersect(vector<Builtin*>&& builtins);
     template<typename ...Args>
     Value v_intersect(const Args&... args) {
         return v_intersect(vector_of<Builtin*>(args...));
@@ -370,6 +418,9 @@ namespace basil {
     // Constructs a function value from a body and env.
     Value v_func(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body);
 
+    // Constructs a named function value from a body and env.
+    Value v_func(Source::Pos pos, Symbol name, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body);
+
     // Constructs an alias value from a term.
     Value v_alias(Source::Pos pos, const Value& term);
 
@@ -378,6 +429,9 @@ namespace basil {
 
     // Constructs a macro value from a body and env.
     Value v_macro(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body);
+
+    // Constructs a runtime value from an AST node.
+    Value v_runtime(Source::Pos pos, Type type, rc<AST> ast);
 
     // Constant iterator for traversing list values.
     struct const_list_iterator {
@@ -590,16 +644,22 @@ namespace basil {
     // Delegates to v_tuple_at or v_array_at depending on the type of 'v'.
     Value v_at(const Value& v, u32 i);
 
+    // Attempts to lower a value known at compile-time to a runtime type, or returns an
+    // error value if the value is invalid at runtime.
+    // Will not do any type coercion, so ensure that the 'src' provided is already of the
+    // exact correct type.
+    Value lower(rc<Env> env, const Value& src);
+
     // Coerces a value to the given target type, or returns an error value if coercion
     // is impossible.
     // Should not return an error if src.type.coerces_to(target) returns true.
-    Value coerce(const Value& src, Type target);
+    Value coerce(rc<Env> env, const Value& src, Type target);
 
     // Returns the most appropriate body term for the function, given the provided
     // arguments. Specifically, this handles things like avoiding duplicate form
     // resolution.
-    rc<Value> v_resolve_body(Value fn, const Value& args);
-    rc<Value> v_resolve_body(Value fn, const vector<rc<Form>>& args);
+    rc<InstTable> v_resolve_body(Function& fn, const Value& args);
+    rc<InstTable> v_resolve_body(Function& fn, const vector<rc<Form>>& args);
 }
 
 void write(stream& io, const basil::Value& value);

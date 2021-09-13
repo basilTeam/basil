@@ -1,17 +1,25 @@
-def (low? to high?) do:
-    if low > high then () 
-    else low :: (low + 1) to high
 
-def (xs? filter f?) do:
+def low? .. high? = # constructs inclusive range [low, high]
+    if low > high then () 
+    else low :: low + 1 .. high
+
+def xs? filter f? = # removes elements that fail predicate 'f'
     match xs with:
         () => ()
         x? :: xs? => 
-            if (f x) then 
+            if f x then 
                 x :: (xs filter f)
             else 
-                xs filter f
+                xs filter f 
+
+def indivisible n? = # constructs check that x is not divisible by n
+    lambda x? = 
+        x % n != 0
  
-def (sieve nums?) do:
-    match nums with:
-        () => ()
-        x? :: xs? => x :: sieve (xs filter (lambda (n?) do: n % x != 0))
+def sieve n? = # performs sieve of eratosthenes on range [2, n]
+    def sieve-helper nums? = 
+        match nums with:
+            () => ()
+            x? :: xs? => x :: sieve-helper (xs filter (indivisible x))
+    sieve-helper 2 .. n
+

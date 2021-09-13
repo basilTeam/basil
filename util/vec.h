@@ -4,22 +4,24 @@
 #include "defs.h"
 #include "slice.h"
 
-template<typename T>
+template<typename T, u32 N>
 class vector {
     u8* data;
     u32 _size, _capacity;
+    u8 fixed[N * sizeof(T)];
 
     void free(u8* array) {
         if (array) {
             T* tptr = (T*)array;
             for (u32 i = 0; i < _size; i ++) tptr[i].~T();
-            delete[] array;
+            if (array != fixed) delete[] array;
         }
     }
 
     void init(u32 size) {
         _size = 0, _capacity = size;
-        data = new u8[_capacity * sizeof(T)];
+        if (_capacity <= N) data = fixed;
+        else data = new u8[_capacity * sizeof(T)];
     }
 
     void copy(const T* ts, u32 n) {
@@ -50,12 +52,12 @@ class vector {
         u32 oldsize = _size;
         init(_capacity * 2);
         copy((const T*)old, oldsize);
-        free(old);
+        if (old != fixed) free(old);
     }
 
 public:
     vector() {
-        init(16);
+        init(N);
     }
 
     vector(const const_slice<T>& init): vector() {
@@ -72,6 +74,10 @@ public:
     }
 
     vector(vector&& other): data(other.data), _size(other._size), _capacity(other._capacity) {
+        if (other.data == other.fixed) {
+            data = fixed;
+            copy((const T*)other.data, _size);
+        }
         other.data = nullptr;
     }
 
@@ -90,6 +96,7 @@ public:
             data = other.data;
             _size = other.size;
             _capacity = other._capacity;
+            if (other.data == other.fixed) data = fixed, copy((const T*)other.data, _size);
             other.data = nullptr;
         }
         return *this;

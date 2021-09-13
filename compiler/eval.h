@@ -67,6 +67,60 @@ namespace basil {
     // provided term. Returns the resulting environment.
     void resolve_form(rc<Env> env, Value& term);
 
+    // Holds metadata used in reporting an overload resolution error.
+    struct OverloadError {
+        bool ambiguous; // True if the error describes conflicting overloads.
+        vector<pair<Type, u32>> mismatches;
+    };
+
+    // Resolves an overloaded function call, given a list of valid overload types
+    // and a list of the types of its parameters. Runtime types and type variables 
+    // generally behave like their underlying types for the purposes of this 
+    // function.
+    // Returns a valid type from overloads if resolution succeeds, or an OverloadError
+    // instance otherwise.
+    either<Type, OverloadError> resolve_call(rc<Env> env, const vector<Type>& overloads, Type args);
+
+    // Stores measurements about function call 
+    struct PerfInfo {
+        struct PerfFrame {
+            Value call_term;
+            u32 count;
+            bool comptime;
+        };
+
+        u32 max_depth, max_count;
+        vector<PerfFrame> counts;
+        bool exceeded;
+        PerfInfo();
+
+        // Open a perf frame for a function call.
+        void begin_call(const Value& term, u32 base_cost);
+
+        // End call and add its cost to the enclosing call's cost.
+        void end_call();
+
+        // End call without incrementing the perf count.
+        void end_call_without_add();
+
+        void set_max_depth(u32 max_depth);
+        void set_max_count(u32 max_count);
+
+        // Get the perf count of the top open frame.
+        u32 current_count() const;
+
+        void make_comptime();
+        bool is_comptime() const;
+
+        // Return whether the max depth was exceeded within a function call.
+        // Also unsets the flag denoting exceeded depth - callers should 
+        // always handle this case immediately.
+        bool depth_exceeded();
+    };
+
+    // Get a reference to the global perf info instance.
+    PerfInfo& get_perf_info();
+
     // Invokes the provided function on the provided argument(s) in the given environment.
     Value call(rc<Env> env, Value func_term, Value func, const Value& args);
 

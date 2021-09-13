@@ -21,7 +21,7 @@ namespace jasmine {
 
     class Object {
         Architecture arch;
-        byte_buffer buf;
+        bytebuf buf;
         map<Symbol, u64> defs;
         map<u64, SymbolRef> refs;
         void* loaded_code;
@@ -37,8 +37,8 @@ namespace jasmine {
 
         const map<Symbol, u64>& symbols() const;
         const map<u64, SymbolRef>& references() const;
-        const byte_buffer& code() const;
-        byte_buffer& code();
+        const bytebuf& code() const;
+        bytebuf& code();
         u64 size() const;
         void define(Symbol symbol);
         void reference(Symbol symbol, RefType type, i8 field_offset);
@@ -57,9 +57,6 @@ namespace jasmine {
         }
     };
 }
-
-template<>
-u64 hash(const jasmine::Symbol& symbol);
 
 template<>
 u64 hash(const jasmine::SymbolRef& symbol);

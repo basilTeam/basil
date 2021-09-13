@@ -1,0 +1,6 @@
+if true then
+    def foo x? y? = x + y
+else 
+    def foo x? bar y? = x - y
+
+foo 1 bar 2

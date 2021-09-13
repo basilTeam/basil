@@ -9,11 +9,12 @@
 class ustring {
     u8* data;
     u32 _size, _count, _capacity;
-    u8 buf[12];
+    u8 buf[44];
 
     void free();
     void init(u32 size);
-    void copy(const u8* s, u32 n);
+    void copy_raw(const u8* s, u32 n);
+    void copy(const u8* s, u32 count, u32 n);
     void grow();
     i32 cmp(const u8* s) const;
 public:

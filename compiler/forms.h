@@ -155,6 +155,9 @@ namespace basil {
     // Returns whether the provided ParamKind is variadic.
     bool is_variadic(ParamKind pk);
 
+    // Returns whether the provided ParamKind is automatically evaluated.
+    bool is_evaluated(ParamKind pk);
+
     // The form of all invokable terms. This includes both functions and macros.
     // Individual callables can either be infix or prefix. Prefix callables start
     // with a keyword parameter, and infix callables have their first keyword 

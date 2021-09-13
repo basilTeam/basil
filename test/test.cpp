@@ -1,4 +1,5 @@
 #include "test.h"
+#include "compiler/errors.h"
 
 test_node* test_list;
 
@@ -16,12 +17,14 @@ int main(int argc, char** argv) {
         n ++;
         try {
             node.callback();
+            if (basil::error_count()) throw exc_message{"Encountered compiler errors!"};
             println("...passed!");
             c ++;
         } catch (const exc_message& msg) {
             println("...failed!");
             println(">\t", msg.msg);
             println("");
+            if (basil::error_count()) basil::print_errors(_stdout, nullptr);
         }
     }
     println("");

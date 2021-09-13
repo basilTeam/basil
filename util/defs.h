@@ -2,7 +2,6 @@
 #define BASIL_DEFS_H
 
 #include "stdint.h"
-#include "utils.h"
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -20,6 +19,8 @@ typedef int64_t i64;
 // ubuntu and mac color codes, from 
 // https://stackoverflow.com/questions/9158150/colored-output-in-c/
 #define RESET   "\033[0m"
+#define BOLD    "\033[1m"
+#define ITALIC  "\033[3m"
 #define BLACK   "\033[30m"      /* Black */
 #define GRAY   "\033[1;30m"      /* Black */
 #define RED     "\033[31m"      /* Red */
@@ -48,7 +49,7 @@ typedef int64_t i64;
 
 // hash.h
 
-template<typename T>
+template<typename T, int N = 8>
 class set;
 
 template<typename K, typename V>
@@ -90,7 +91,9 @@ struct rune;
 
 // vec.h
 
-template<typename T>
+template<typename T, u32 N = 8>
 class vector;
+
+#include "utils.h"
 
 #endif

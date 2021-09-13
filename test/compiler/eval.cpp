@@ -39,6 +39,7 @@ TEST(variables) {
     env->def(symbol_from("y"), v_int({}, 2));
     ASSERT_EQUAL(eval(env, y), v_int({}, 2)); // after defining y, we should get the right value and no additional error
     ASSERT_EQUAL(error_count(), 1);
+    discard_errors();
 }
 
 TEST(simple_prefix_group) {

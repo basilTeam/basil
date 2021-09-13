@@ -1,0 +1,13 @@
+def sum (xs? : [Int]) : Int =
+    match xs with:
+        x? :: () => x
+        x? :: xs? => x + sum xs
+
+def sum* xs...? = sum xs
+
+def fib (x? : Int) : Int =
+    match x with:
+        0 => 0
+        1 => 1
+        x? => sum* fib x - 1 fib x - 2
+

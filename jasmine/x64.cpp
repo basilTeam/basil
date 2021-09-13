@@ -718,7 +718,7 @@ namespace x64 {
             if (disp > -129 && disp < 128) modrm |= 0b01000000; // 8-bit offset
             else if (disp < -0x80000000l || disp > 0x7fffffffl) {
                 fprintf(stderr, "[ERROR] Cannot represent memory offset %lx "
-                    "in 32 bits.\n", disp);
+                    "in 32 bits.\n", (long int)disp);
                 exit(1);
             }
             else modrm |= 0b10000000; // 32-bit offset
@@ -937,7 +937,7 @@ namespace x64 {
             u8 opcode = 0xc0;
             if (src_size != BYTE) {
                     fprintf(stderr, "[ERROR] Cannot shift by more than -128 - 127, "
-                            "given %ld.\n", val);
+                            "given %ld.\n", (long int)val);
                     exit(1);
             }
             if (dest_size != BYTE) opcode += 1; // use 0xc1 for larger dests

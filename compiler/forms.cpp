@@ -91,6 +91,10 @@ namespace basil {
                 return false;
         }
     }
+
+    bool is_evaluated(ParamKind pk) {
+        return pk == PK_VARIABLE || pk == PK_VARIADIC;
+    }
     
     Callable::Callable(const vector<Param>& parameters_in, const optional<FormCallback>& callback_in):
         parameters(ref<vector<Param>>(parameters_in)), callback(callback_in), index(0), stopped(false) {}
@@ -113,7 +117,7 @@ namespace basil {
     bool Callable::precheck_keyword(const Value& keyword) {
         if (is_finished()) return false;
         if ((*parameters)[index].kind == PK_KEYWORD) return (*parameters)[index].matches(keyword);
-        if (((*parameters)[index].kind == PK_VARIADIC || (*parameters)[index].kind == PK_QUOTED_VARIADIC)
+        if (is_variadic((*parameters)[index].kind)
             && index < parameters->size() - 1
             && (*parameters)[index + 1].kind == PK_KEYWORD
             && (*parameters)[index + 1].matches(keyword)) {
@@ -261,7 +265,10 @@ namespace basil {
     }
 
     rc<StateMachine> Overloaded::clone() {
-        return ref<Overloaded>(*this);
+        vector<rc<Callable>> subforms;
+        // subforms.clear();
+        for (auto& overload : overloads) subforms.push(overload->clone());
+        return ref<Overloaded>(subforms);
     }
 
     bool Overloaded::operator==(const Overloaded& other) const {
@@ -471,10 +478,11 @@ u64 hash(const rc<basil::Form>& form) {
 void write(stream& io, const basil::Param& param) {
     switch (param.kind) {
         case basil::PK_VARIABLE: write(io, ITALICWHITE, param.name, RESET, "?"); break;
-        case basil::PK_QUOTED: write(io, ITALICWHITE, param.name, RESET, "?"); break;
-        case basil::PK_TERM: write(io, ITALICWHITE, param.name, RESET, "?"); break;
+        case basil::PK_QUOTED: write(io, ITALICWHITE, ":", param.name, RESET, "?"); break;
+        case basil::PK_TERM: write(io, ITALICWHITE, ";", param.name, RESET, "?"); break;
         case basil::PK_VARIADIC: write(io, ITALICWHITE, param.name, RESET, "...?"); break;
         case basil::PK_QUOTED_VARIADIC: write(io, ITALICWHITE, param.name, RESET, "...?"); break;
+        case basil::PK_TERM_VARIADIC: write(io, ITALICWHITE, param.name, RESET, "...?"); break;
         case basil::PK_KEYWORD: write(io, param.name); break;
         case basil::PK_SELF: write(io, "<self>"); break;
         default: break;

@@ -1,0 +1,12 @@
+# Some simple mutually-recursive functions.
+
+def f x? = 
+    if x == 0 then "f"
+    else g x - 1
+
+def g x? =
+    if x == 0 then "g"
+    else f x - 1
+
+f 10
+

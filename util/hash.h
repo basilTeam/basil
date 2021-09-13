@@ -38,7 +38,7 @@ u64 key_hash(const T& a) {
     return ::hash(a.first);
 }
 
-template<typename T>
+template<typename T, int N>
 class set {
     enum bucket_status : u8 {
         EMPTY, GHOST, FILLED
@@ -101,10 +101,11 @@ class set {
     u32 _size, _capacity, _mask;
     bool (*equals)(const T&, const T&);
     u64 (*hash)(const T&);
+    bucket fixed[N];
 
     void init(u32 size) {
         _size = 0, _capacity = size;
-        data = new bucket[size];
+        data = _capacity <= N ? fixed : new bucket[size];
     }
 
     void swap(T& a, T& b) {
@@ -114,7 +115,7 @@ class set {
     }
 
     void free() {
-        delete[] data;
+        if (_capacity > N) delete[] data;
     }
 
     void copy(const bucket* bs) {
@@ -131,7 +132,7 @@ class set {
         for (u32 i = 0; i < oldsize; ++ i) {
             if (old[i].status == FILLED) insert(old[i].value());
         }
-        delete[] old;
+        if (oldsize > N) delete[] old;
     }
 
 public:
@@ -151,6 +152,7 @@ public:
         _size = other._size, _mask = other._mask;
         copy(other.data);
     }
+
 
     set& operator=(const set& other) {
         if (this != &other) {
@@ -393,7 +395,7 @@ public:
         pair<K, V> dummy = { key, V() };
         auto it = set<pair<K, V>>::find(dummy);
         if (it == set<pair<K, V>>::end()) {
-            return *(const V*)nullptr;
+            panic("Tried to access nonexistent map key!");
         }
         return set<pair<K, V>>::find(dummy)->second;
     }

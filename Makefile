@@ -24,7 +24,7 @@ basil: SHAREDFLAGS += -g3
 
 release: SHAREDFLAGS += -Os -DBASIL_RELEASE
 
-CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -nostdlib++
+CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -fno-threadsafe-statics -nostdlib++
 TESTFLAGS = $(SHAREDFLAGS)
 LDFLAGS := -Wl,--gc-sections
 

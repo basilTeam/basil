@@ -16,7 +16,7 @@ void ustring::init(u32 size) {
     *data = '\0';
 }
 
-void ustring::copy(const u8* s, u32 n) {
+void ustring::copy_raw(const u8* s, u32 n) {
     u8* dptr = data;
     while (*s && n) {
         const u8* next = (const u8*)utf8_forward((const char*)s);
@@ -27,11 +27,19 @@ void ustring::copy(const u8* s, u32 n) {
     *dptr = '\0';
 }
 
+void ustring::copy(const u8* s, u32 count, u32 n) {
+    _count = count;
+    u8* dptr = data;
+    while (*s && n) *(dptr ++) = *(s ++), ++ _size, -- n;
+    *dptr = '\0';
+}
+
 void ustring::grow() {
     u8* old = data;
     auto size = _size;
+    auto count = _count;
     init(_capacity * 2);
-    copy(old, size);
+    copy(old, count, size);
     if (_capacity / 2 > 12) delete[] old;
 }
 
@@ -57,12 +65,12 @@ ustring::ustring(const char* cstr): ustring() {
 
 ustring::ustring(const const_slice<u8>& range) {
     init(range.size() + 1);
-    copy(&range.front(), range.size());
+    copy_raw(&range.front(), range.size());
 }
 
 ustring::ustring(const string& str) {
     init(str.capacity());
-    copy(str.raw(), str.size());
+    copy_raw(str.raw(), str.size());
 }
 
 ustring::ustring(buffer& buf): ustring() {
@@ -71,7 +79,7 @@ ustring::ustring(buffer& buf): ustring() {
 
 ustring::ustring(const ustring& other) {
     init(other.capacity());
-    copy(other.data, other._size);
+    copy(other.data, other._count, other._size);
 }
 
 ustring::ustring(ustring&& other):
@@ -83,7 +91,7 @@ ustring& ustring::operator=(const ustring& other) {
     if (this != &other) {
         free();
         init(other._capacity);
-        copy(other.data, other._size);
+        copy(other.data, other._count, other._size);
     }
     return *this;
 }

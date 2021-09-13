@@ -2,6 +2,7 @@
 #define JASMINE_SYMBOL_H
 
 #include "utils.h"
+#include "hash.h"
 
 namespace jasmine {
     enum SymbolLinkage : u8 {
@@ -19,5 +20,8 @@ namespace jasmine {
     Symbol local(const char* name);
     const char* name(Symbol symbol);
 }
+
+template<>
+u64 hash(const jasmine::Symbol& symbol);
 
 #endif

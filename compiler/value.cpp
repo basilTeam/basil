@@ -3,6 +3,8 @@
 #include "env.h"
 #include "forms.h"
 #include "type.h"
+#include "ast.h"
+#include "eval.h"
 
 namespace basil {
     Value::Data::Data(Kind kind) {
@@ -28,6 +30,7 @@ namespace basil {
             case K_INTERSECT: new (&isect) rc<Intersect>(); break;
             case K_MODULE: new (&mod) rc<Module>(); break;
             case K_FUNCTION: new (&fn) rc<Function>(); break;
+            case K_RUNTIME: new (&rt) rc<Runtime>(); break;
             default:
                 panic("Unsupported value kind!"); 
                 break;
@@ -57,6 +60,7 @@ namespace basil {
             case K_INTERSECT: new (&isect) rc<Intersect>(other.isect); break;
             case K_MODULE: new (&mod) rc<Module>(other.mod); break;
             case K_FUNCTION: new (&fn) rc<Function>(other.fn); break;
+            case K_RUNTIME: new (&rt) rc<Function>(other.rt); break;
             default:
                 panic("Unsupported value kind!"); 
                 break;
@@ -96,6 +100,7 @@ namespace basil {
             case K_INTERSECT: data.isect.~rc(); break;
             case K_MODULE: data.mod.~rc(); break;
             case K_FUNCTION: data.fn.~rc(); break;
+            case K_RUNTIME: data.rt.~rc(); break;
             default: break; // trivial destructor
         }
     }
@@ -124,6 +129,7 @@ namespace basil {
                 case K_INTERSECT: data.isect.~rc(); break;
                 case K_MODULE: data.mod.~rc(); break;
                 case K_FUNCTION: data.fn.~rc(); break;
+                case K_RUNTIME: data.rt.~rc(); break;
                 default: break; // trivial destructor
             }
             type = other.type;
@@ -148,6 +154,7 @@ namespace basil {
                 case K_INTERSECT: data.isect.~rc(); break;
                 case K_MODULE: data.mod.~rc(); break;
                 case K_FUNCTION: data.fn.~rc(); break;
+                case K_RUNTIME: data.rt.~rc(); break;
                 default: break; // trivial destructor
             }
             type = other.type;
@@ -175,6 +182,7 @@ namespace basil {
             case K_STRING: return kh ^ raw_hash(data.string->data);
             case K_NAMED: return kh ^ raw_hash(t_get_name(type)) ^ data.named->value.hash();
             case K_UNION: return kh ^ raw_hash(data.u->value.hash());
+            case K_RUNTIME: return kh ^ 5679053960214674339ul * ::hash(u64(data.rt->ast.raw())); // pointer hash
             case K_LIST: {
                 rc<List> l = data.list;
                 while (l) {
@@ -254,6 +262,7 @@ namespace basil {
             case K_INTERSECT: write_values(io, data.isect->values, "(", " & ", ")"); break; // (1 & 2 & 3)
             case K_MODULE: write(io, "#module"); break;
             case K_FUNCTION: write(io, "#procedure"); break;
+            case K_RUNTIME: write(io, "#runtime[", data.rt->ast, " : ", ((rc<AST>)data.rt->ast)->type(root_env()), "]"); break;
             default:
                 panic("Unsupported value kind!"); 
                 break;
@@ -334,6 +343,8 @@ namespace basil {
                 return data.mod->env.is(other.data.mod->env); // must be same environment
             case K_FUNCTION: 
                 return data.fn.is(other.data.fn); // only consider reference equality
+            case K_RUNTIME:
+                return data.rt.is(other.data.rt);
             default:
                 panic("Unsupported value kind!"); 
                 return true;
@@ -362,32 +373,35 @@ namespace basil {
                 vector<Value> elts;
                 rc<List> l = data.list;
                 while (l) elts.push(l->head.clone()), l = l->tail;
-                return v_list(pos, type, elts).with(form);
+                return v_list(pos, type, move(elts)).with(form);
             }
             case K_TUPLE: {
                 vector<Value> elts;
                 for (const Value& v : data.tuple->members) elts.push(v.clone());
-                return v_tuple(pos, type, elts).with(form);
+                return v_tuple(pos, type, move(elts)).with(form);
             }
             case K_ARRAY: {
                 vector<Value> elts;
                 for (const Value& v : data.array->elements) elts.push(v.clone());
-                return v_array(pos, type, elts).with(form);
+                return v_array(pos, type, move(elts)).with(form);
             }
             case K_STRUCT: {
                 map<Symbol, Value> fields;
                 for (const auto& [s, v] : data.str->fields) fields[s] = v.clone();
-                return v_struct(pos, type, fields).with(form);
+                return v_struct(pos, type, move(fields)).with(form);
             }
             case K_DICT: {
                 map<Value, Value> elements;
                 for (const auto& [k, v] : data.dict->elements) elements[k.clone()] = v.clone();
-                return v_dict(pos, type, elements).with(form);    
+                return v_dict(pos, type, move(elements)).with(form);    
             }
             case K_INTERSECT: {
                 map<Type, Value> values;
                 for (const auto& [t, v] : data.isect->values) values[t] = v.clone();
-                return v_intersect(pos, type, values).with(form);    
+                return v_intersect(pos, type, move(values)).with(form);    
+            }
+            case K_RUNTIME: {
+                return v_runtime(pos, type, data.rt->ast->clone());
             }
             default:
                 panic("Unsupported value kind!"); 
@@ -427,6 +441,8 @@ namespace basil {
 
     Module::Module(rc<Env> env_in): env(env_in) {}
 
+    Runtime::Runtime(rc<AST> ast_in): ast(ast_in) {}
+
     bool FormTuple::operator==(const FormTuple& other) const {
         if (forms.size() != other.forms.size()) return false;
         for (u32 i = 0; i < forms.size(); i ++) if (*forms[i] != *other.forms[i]) return false;
@@ -442,9 +458,105 @@ namespace basil {
         hash = h;
     }
     
-    Function::Function(optional<const Builtin&> builtin_in, rc<Env> env_in, 
+    FnInst::FnInst(Type args_in, rc<Env> env_in, rc<AST> func_in):
+        args(args_in), env(env_in), func(func_in) {}
+
+    rc<FnInst> monomorphize(const Function& fn, InstTable& table, rc<Env> env, rc<Value> base, Type args_type_in) {
+        Type args_type = t_lower(args_type_in);
+        if (args_type == T_ERROR) {
+            err(base->pos, "Could not compile function - provided arguments type '", args_type_in, "' cannot be compiled.");
+            return nullptr;
+        }
+        // println("monomorphizing ", *fn.name, " on ", args_type);
+        rc<Env> local = env->clone();
+        for (u32 i = 0; i < fn.args.size(); i ++) {
+            Type argt = (i == 0 && !args_type.of(K_TUPLE)) ? args_type : t_tuple_at(args_type, i);
+            local->def(fn.args[i], v_runtime(base->pos, t_runtime(argt), ast_unknown(base->pos, argt)));
+        }
+
+        Type stub_type = t_func(args_type, t_var());
+        if (fn.name) {
+            Value stub = v_runtime(base->pos, t_runtime(stub_type), ast_func_stub(base->pos, stub_type, *fn.name));
+            local->def(*fn.name, stub);
+            // we want to make this available for mutually recursive calls, so we add it to the table
+            // (it'll be replaced later, upon successful compilation of this function)
+            table.insts.put(args_type, ref<FnInst>(args_type, local, stub.data.rt->ast)); 
+        }
+        rc<Value> cloned_base = base->clone();
+        Value evaled_body = eval(local, *cloned_base);
+        if (evaled_body.type == T_ERROR) return nullptr;
+        Value lowered = lower(local, evaled_body);
+        if (lowered.type == T_ERROR) return nullptr;
+
+        rc<AST> body_ast = lowered.data.rt->ast;
+        if (!t_ret(stub_type).coerces_to(body_ast->type(local))) { // if the body is incompatible with the type signature
+            err(base->pos, "Incompatible function body: expected expression of type '", t_ret(stub_type), 
+                "', but found '", body_ast->type(local), "' instead.");
+            return nullptr;
+        }
+        Type fntype = fn.name ? t_func(args_type, t_concrete(t_ret(stub_type))) 
+            : t_func(args_type, body_ast->type(local));
+
+        return ref<FnInst>(
+            args_type,
+            local,
+            ast_func(base->pos, fntype, local, fn.name, body_ast)
+        );
+    }
+    
+    InstTable::InstTable(rc<Env> local, rc<Value> base_in):
+        env(local), base(base_in) {}
+
+    bool InstTable::is_instantiating(Type args_type) const {
+        return is_inst.contains(args_type) && is_inst[args_type] > 0;
+    }
+
+    rc<FnInst> InstTable::inst(const Function& fn, Type args_type) {
+        auto it = insts.find(args_type);
+        if (it != insts.end()) {
+            return it->second;
+        }
+        else {
+            // instantiating lets other invocations of this method know that they're
+            // happening inside of an active compilation - so we don't compile them
+            // within this method.
+            // this avoids infinite loops where a function instantiates itself
+            // within itself
+            is_inst[args_type] ++;
+            auto morph = monomorphize(fn, *this, env, base, args_type);
+            if (!morph) return nullptr;
+            insts.put(args_type, morph);
+            is_inst[args_type] --;
+            auto i = insts.find(args_type)->second;
+            
+            // println("instantiated ", ITALICBLUE, fn.name ? *fn.name : symbol_from("<lambda>"), args_type.of(K_TUPLE) ? "" : "(",
+            //     args_type, args_type.of(K_TUPLE) ? "" : ")", RESET, " as ", ITALICBLUE, *i->func->begin(), RESET);
+            return insts.find(args_type)->second;
+        }
+    }
+    
+    Function::Function(optional<Symbol> name_in, optional<const Builtin&> builtin_in, rc<Env> env_in, 
         const vector<Symbol>& args_in, const Value& body_in):
-        builtin(builtin_in), env(env_in), args(args_in), body(body_in) {}
+        builtin(builtin_in), name(name_in), env(env_in), args(args_in), body(body_in) {}
+
+    rc<InstTable> v_resolve_body(Function& fn, FormTuple tup) {
+        tup.compute_hash();
+
+        auto& table = fn.resolutions;
+        auto it = table.find(tup);
+        if (it == table.end()) {
+            table.put(tup, ref<InstTable>(fn.env->clone(), fn.body.clone()));
+            return table.find(tup)->second;
+        }
+        else {
+            return it->second;
+        }
+    }
+
+    rc<FnInst> Function::inst(Type args_type, const Value& v) {
+        auto inst_table = v_resolve_body(*this, v);
+        return inst_table->inst(*this, args_type);
+    }
 
     Alias::Alias(const Value& term_in): term(term_in) {}
 
@@ -517,24 +629,27 @@ namespace basil {
     Value v_cons(Source::Pos pos, Type type, const Value& head, const Value& tail) {
         Value v(pos, type, nullptr);
         if (!type.of(K_LIST)) 
-            panic("Attempted to construct list with non-list type!");
+            panic("Attempted to construct list with non-list type'", type, "'!");
         if (!head.type.coerces_to(t_list_element(type)))
-            panic("Cannot construct list - provided head incompatible with chosen type!");
+            panic("Cannot construct list - provided head '", head.type, 
+                "' incompatible with list type '", type, "'!");
         if (!tail.type.coerces_to(type))
-            panic("Cannot construct list - provided tail incompatible with chosen type!"); 
-        v.data.list = ref<List>(coerce(head, t_list_element(type)), tail.type.of(K_VOID) ? nullptr : tail.data.list);
+            panic("Cannot construct list - provided tail '", tail.type, 
+                "' incompatible with list type '", type, "'!"); 
+        v.data.list = ref<List>(head, tail.type.of(K_VOID) ? nullptr : tail.data.list);
         return v;
     }
 
-    Value v_list(Source::Pos pos, Type type, const vector<Value>& values) {
+    Value v_list(Source::Pos pos, Type type, vector<Value>&& values) {
         if (values.size() == 0) return v_void(pos);
 
         Value v(pos, type, nullptr);
         if (!type.of(K_LIST))
-            panic("Attempted to construct list with non-list type!");
+            panic("Attempted to construct list with non-list type '", type, "'!");
         for (const Value& v : values) 
             if (!v.type.coerces_to(t_list_element(type)))
-                panic("Cannot construct list - at least one vector element incompatible with list type!");
+                panic("Cannot construct list - found vector element '", v.type, 
+                    "' incompatible with list type '", type, "'!");
         
         rc<List> l = nullptr;
         for (i64 i = i64(values.size()) - 1; i >= 0; i --) // larger signed index to avoid overflow
@@ -543,40 +658,42 @@ namespace basil {
         return v;
     }
 
-    Value v_tuple(Source::Pos pos, Type type, const vector<Value>& values) {
+    Value v_tuple(Source::Pos pos, Type type, vector<Value>&& values) {
         Value v(pos, type, nullptr);
-        if (!type.of(K_TUPLE))
-            panic("Attempted to construct tuple with non-tuple type!");
-        if (t_tuple_len(type) != values.size())
-            panic("Cannot construct tuple - number of provided values differs from tuple type size!");
-        for (u32 i = 0; i < values.size(); i ++) {
-            if (!values[i].type.coerces_to(t_tuple_at(type, i)))
-                panic("Cannot construct tuple - at least one vector element incompatible with member type!");
-        }
-        v.data.tuple = ref<Tuple>(values);
+        // if (!type.of(K_TUPLE))
+        //     panic("Attempted to construct tuple with non-tuple type '", type, "'!");
+        // if (t_tuple_len(type) != values.size())
+        //     panic("Cannot construct tuple - number of provided values (", values.size(), 
+        //         ") differs from tuple type size (", t_tuple_len(type), ")!");
+        // for (u32 i = 0; i < values.size(); i ++) {
+        //     if (!values[i].type.coerces_to(t_tuple_at(type, i)))
+        //         panic("Cannot construct tuple - at least one vector element incompatible with member type!");
+        // }
+        v.data.tuple = ref<Tuple>(move(values));
         return v;
     }
     
-    Value v_array(Source::Pos pos, Type type, const vector<Value>& values) {
+    Value v_array(Source::Pos pos, Type type, vector<Value>&& values) {
         Value v(pos, type, nullptr);
         if (!type.of(K_ARRAY))
-            panic("Attempted to construct array with non-array type!");
+            panic("Attempted to construct array with non-array type '", type, "'!");
         if (t_array_is_sized(type) && t_array_size(type) != values.size())
             panic("Cannot construct array - number of provided values differs from array type size!");
         for (u32 i = 0; i < values.size(); i ++) {
             if (!values[i].type.coerces_to(t_array_element(type)))
                 panic("Cannot construct array - at least one vector element incompatible with element type!");
         }
-        v.data.array = ref<Array>(values);
+        v.data.array = ref<Array>(move(values));
         return v;
     }
     
     Value v_union(Source::Pos pos, Type type, const Value& value) {
         Value v(pos, type, nullptr);
         if (!type.of(K_UNION))
-            panic("Attempted to construct union with non-union type!");
+            panic("Attempted to construct union with non-union type '", type, "'!");
         if (!value.type.coerces_to(type))
-            panic("Cannot construct union - provided value is not a valid union member!");
+            panic("Cannot construct union - provided value of type '", value.type, 
+                "' is not a member of union type '", type, "'!");
         v.data.u = ref<Union>(value);
         return v;
     }
@@ -584,17 +701,17 @@ namespace basil {
     Value v_named(Source::Pos pos, Type type, const Value& value) {
         Value v(pos, type, nullptr);
         if (!type.of(K_NAMED))
-            panic("Attempted to construct named value with non-named type!");
+            panic("Attempted to construct named value with non-named type '", type, "'!");
         if (!value.type.coerces_to(t_get_base(type))) {
-            println("value type = ", value.type);
-            println("base type = ", t_get_base(type));
+            // println("value type = ", value.type);
+            // println("base type = ", t_get_base(type));
             panic("Cannot construct named value - provided value is of an incompatible type!");
         }
         v.data.named = ref<Named>(value);
         return v;
     }
     
-    Value v_struct(Source::Pos pos, Type type, const map<Symbol, Value>& fields) {
+    Value v_struct(Source::Pos pos, Type type, map<Symbol, Value>&& fields) {
         Value v(pos, type, nullptr);
         if (!type.of(K_STRUCT))
             panic("Attempted to construct struct value with non-struct type!");
@@ -603,11 +720,11 @@ namespace basil {
         Type t = infer_struct(fields);
         if (!t.coerces_to(type)) 
             panic("Cannot construct struct - inferred type from fields is incompatible with desired type!");
-        v.data.str = ref<Struct>(fields);
+        v.data.str = ref<Struct>(move(fields));
         return v;
     }
 
-    Value v_dict(Source::Pos pos, Type type, const map<Value, Value>& entries) {
+    Value v_dict(Source::Pos pos, Type type, map<Value, Value>&& entries) {
         Value v(pos, type, nullptr);
         if (!type.of(K_DICT))
             panic("Attempted to construct dict value with non-dictionary type!");
@@ -617,11 +734,11 @@ namespace basil {
             if (!v.type.coerces_to(t_dict_value(type)))
                 panic("Cannot construct dict - at least one pair has an incompatible value type!");
         }
-        v.data.dict = ref<Dict>(entries);
+        v.data.dict = ref<Dict>(move(entries));
         return v;
     }
 
-    Value v_intersect(Source::Pos pos, Type type, const map<Type, Value>& values) {
+    Value v_intersect(Source::Pos pos, Type type, map<Type, Value>&& values) {
         Value v(pos, type, nullptr);
         if (!type.of(K_INTERSECT))
             panic("Attempted to construct intersection value with non-intersection type!");
@@ -629,7 +746,7 @@ namespace basil {
         return v;
     }
 
-    Value v_intersect(const vector<Builtin*>& builtins) {
+    Value v_intersect(vector<Builtin*>&& builtins) {
         vector<rc<Form>> value_forms;
         set<Type> value_types;
         map<Type, Value> values;
@@ -639,7 +756,9 @@ namespace basil {
             value_types.insert(b->type);
             values.put(b->type, v_func(*b));
         }
-        return v_intersect({}, t_intersect(value_types), values)
+        vector<Type> value_type_vec;
+        for (Type t : value_types) value_type_vec.push(t);
+        return v_intersect({}, t_intersect(value_type_vec), move(values))
             .with(f_overloaded(value_forms[0]->precedence, value_forms[0]->assoc, value_forms));
     }
 
@@ -653,7 +772,7 @@ namespace basil {
         Value v({}, builtin.type, builtin.form);
         if (!builtin.type.of(K_FUNCTION))
             panic("Attempted to create function value with non-function builtin!");
-        v.data.fn = ref<Function>(some<const Builtin&>(builtin), nullptr, vector_of<Symbol>(), v_void({}));
+        v.data.fn = ref<Function>(none<Symbol>(), some<const Builtin&>(builtin), nullptr, vector_of<Symbol>(), v_void({}));
         return v;
     }
 
@@ -661,7 +780,15 @@ namespace basil {
         Value v(pos, type, nullptr);
         if (!type.of(K_FUNCTION))
             panic("Attempted to construct function value with non-function type!");
-        v.data.fn = ref<Function>(none<const Builtin&>(), env, args, body);
+        v.data.fn = ref<Function>(none<Symbol>(), none<const Builtin&>(), env, args, body);
+        return v;
+    }
+
+    Value v_func(Source::Pos pos, Symbol name, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body) {
+        Value v(pos, type, nullptr);
+        if (!type.of(K_FUNCTION))
+            panic("Attempted to construct function value with non-function type!");
+        v.data.fn = ref<Function>(some<Symbol>(name), none<const Builtin&>(), env, args, body);
         return v;
     }
 
@@ -684,6 +811,14 @@ namespace basil {
         if (!type.of(K_MACRO))
             panic("Attempted to construct macro value with non-macro type!");
         v.data.macro = ref<Macro>(none<const Builtin&>(), env, args, body);
+        return v;
+    }
+
+    Value v_runtime(Source::Pos pos, Type type, rc<AST> ast) {
+        Value v(pos, type, nullptr);
+        if (!type.of(K_RUNTIME))
+            panic("Attempted to construct runtime value with non-runtime type!");
+        v.data.rt = ref<Runtime>(ast);
         return v;
     }
 
@@ -800,7 +935,8 @@ namespace basil {
     }
 
     Type infer_tuple(const vector<Value>& values) {
-        vector<Type> ts;
+        static vector<Type> ts;
+        ts.clear();
         for (const Value& v : values) ts.push(v.type);
         return t_tuple(ts);
     }
@@ -815,7 +951,8 @@ namespace basil {
     }
 
     Type infer_struct(const map<Symbol, Value>& fields) {
-        map<Symbol, Type> fieldts;
+        static map<Symbol, Type> fieldts;
+        fieldts.clear();
         for (const auto& [s, v] : fields) fieldts.put(s, v.type);
         return t_struct(fieldts);
     }
@@ -845,9 +982,9 @@ namespace basil {
     void v_set_head(Value& list, const Value& v) {
         if (!list.type.of(K_LIST)) panic("Expected a list value!");
         if (!list.data.list) panic("Attempted to set head of empty list!");
-        if (!v.type.coerces_to(t_list_element(list.type))) 
+        if (!v.type.coerces_to_generic(t_list_element(list.type))) 
             panic("Attempted to set list head to value of incompatible type!");
-        list.data.list->head = coerce(v, t_list_element(list.type));
+        list.data.list->head = v;
     }
 
     Value v_tail(const Value& list) {
@@ -889,9 +1026,9 @@ namespace basil {
     
     void v_tuple_set(Value& tuple, u32 i, const Value& v) {
         if (!tuple.type.of(K_TUPLE)) panic("Expected a tuple value!");
-        if (!v.type.coerces_to(t_tuple_at(tuple.type, i))) 
+        if (!v.type.coerces_to_generic(t_tuple_at(tuple.type, i))) 
             panic("Attempted to set tuple member to value of incompatible type!");
-        tuple.data.tuple->members[i] = coerce(v, t_tuple_at(tuple.type, i));
+        tuple.data.tuple->members[i] = v;
     }
 
     const vector<Value>& v_tuple_elements(const Value& tuple) {
@@ -911,9 +1048,9 @@ namespace basil {
 
     void v_array_set(Value& array, u32 i, const Value& v) {
         if (!array.type.of(K_ARRAY)) panic("Expected an array value!");
-        if (!v.type.coerces_to(t_array_element(array.type))) 
+        if (!v.type.coerces_to_generic(t_array_element(array.type))) 
             panic("Attempted to set array element to value of incompatible type!");
-        array.data.array->elements[i] = coerce(v, t_array_element(array.type));
+        array.data.array->elements[i] = v;
     }
 
     const vector<Value>& v_array_elements(const Value& array) {
@@ -964,11 +1101,11 @@ namespace basil {
     void v_struct_set(Value& str, Symbol field, const Value& v) {
         if (!str.type.of(K_STRUCT)) panic("Expected a struct value!");
         if (!t_struct_has(str.type, field)) panic("Attempted to set nonexistent struct field!");
-        if (!v.type.coerces_to(t_struct_field(str.type, field)))
+        if (!v.type.coerces_to_generic(t_struct_field(str.type, field)))
             panic("Attempted to set struct field to value of incompatible type!");
         auto it = str.data.str->fields.find(field);
         if (it == str.data.str->fields.end()) panic("Attempted to get nonexistent struct field!");
-        it->second = coerce(v, t_struct_field(str.type, field));
+        it->second = v;
     }
 
     u32 v_struct_len(const Value& str) {
@@ -983,16 +1120,16 @@ namespace basil {
 
     bool v_dict_has(const Value& dict, const Value& key) {
         if (!dict.type.of(K_DICT)) panic("Expected a dictionary value!");
-        if (!key.type.coerces_to(t_dict_key(dict.type))) 
+        if (!key.type.coerces_to_generic(t_dict_key(dict.type))) 
             panic("Attempted to check whether dict contains key of incompatible type!");
-        return dict.data.dict->elements.contains(coerce(key, t_dict_key(dict.type)));
+        return dict.data.dict->elements.contains(key);
     }
 
     const Value& v_dict_at(const Value& dict, const Value& key) {
         if (!dict.type.of(K_DICT)) panic("Expected a dictionary value!");
-        if (!key.type.coerces_to(t_dict_key(dict.type)))
+        if (!key.type.coerces_to_generic(t_dict_key(dict.type)))
             panic("Attempted to access dict by key of incompatible type!");
-        auto it = dict.data.dict->elements.find(coerce(key, t_dict_key(dict.type)));
+        auto it = dict.data.dict->elements.find(key);
         if (it == dict.data.dict->elements.end()) 
             panic("Attempted to access dict by nonexistent key!");
         return it->second;
@@ -1000,21 +1137,21 @@ namespace basil {
 
     void v_dict_put(Value& dict, const Value& key, const Value& value) {
         if (!dict.type.of(K_DICT)) panic("Expected a dictionary value!");
-        if (!key.type.coerces_to(t_dict_key(dict.type)))
+        if (!key.type.coerces_to_generic(t_dict_key(dict.type)))
             panic("Attempted to put key of incompatible type into dictionary!");
-        if (!value.type.coerces_to(t_dict_value(dict.type)))
+        if (!value.type.coerces_to_generic(t_dict_value(dict.type)))
             panic("Attempted to put value of incompatible type into dictionary!");
         dict.data.dict->elements.put(
-            coerce(key, t_dict_key(dict.type)), 
-            coerce(value, t_dict_value(dict.type))
+            key, 
+            value
         );
     }
 
     void v_dict_erase(Value& dict, const Value& key) {
         if (!dict.type.of(K_DICT)) panic("Expected a dictionary value!");
-        if (!key.type.coerces_to(t_dict_key(dict.type)))
+        if (!key.type.coerces_to_generic(t_dict_key(dict.type)))
             panic("Attempted to access dict by key of incompatible type!");
-        dict.data.dict->elements.erase(coerce(key, t_dict_key(dict.type)));
+        dict.data.dict->elements.erase(key);
     }
 
     u32 v_dict_len(const Value& dict) {
@@ -1079,28 +1216,61 @@ namespace basil {
         }
     }
 
-    Value coerce(const Value& src, Type target) {
+    Value lower(rc<Env> env, const Value& src) {
+        Type t_lowered = t_lower(src.type);
+        switch (src.type.kind()) {
+            case K_INT: return v_runtime(src.pos, t_runtime(T_INT), ast_int(src.pos, t_lowered, src.data.i));
+            case K_FLOAT: return v_runtime(src.pos, t_runtime(T_FLOAT), ast_float(src.pos, t_lowered, src.data.f32));
+            case K_DOUBLE: return v_runtime(src.pos, t_runtime(T_DOUBLE), ast_double(src.pos, t_lowered, src.data.f64));
+            case K_SYMBOL: return v_runtime(src.pos, t_runtime(T_SYMBOL), ast_symbol(src.pos, t_lowered, src.data.sym));
+            case K_CHAR: return v_runtime(src.pos, t_runtime(T_CHAR), ast_char(src.pos, t_lowered, src.data.ch));
+            case K_STRING: return v_runtime(src.pos, t_runtime(T_STRING), ast_string(src.pos, t_lowered, src.data.string->data));
+            case K_TYPE: return v_runtime(src.pos, t_runtime(T_TYPE), ast_type(src.pos, t_lowered, src.data.type));
+            case K_VOID: return v_runtime(src.pos, t_runtime(T_VOID), ast_void(src.pos));
+            case K_BOOL: return v_runtime(src.pos, t_runtime(T_BOOL), ast_bool(src.pos, t_lowered, src.data.b));
+            case K_RUNTIME: return src;
+            default:   
+                err(src.pos, "Attempted to lower compile-time-only value '", src, "' of type '", t_lowered, "'.");
+                return v_error(src.pos);
+        }
+    }
+
+    Value coerce(rc<Env> env, const Value& src, Type target) {
         if (src.type == target) return src; // no coercion needed
 
         if (src.type.coerces_to_generic(target)) return src; // generic conversions don't require representational changes
 
+        if (target.of(K_RUNTIME)) {
+            if (!src.type.of(K_RUNTIME)) {
+                Value result = src.type.coerces_to_generic(t_runtime_base(target)) ?
+                    src : coerce(env, src, t_runtime_base(target));
+                return lower(env, src);
+            }
+            else {
+                // println("src type = ", src.type, ", target = ", target);
+                return v_runtime(src.pos, target, ast_coerce(src.pos, src.data.rt->ast, t_runtime_base(target)));
+            }
+        }
+
         if (target.of(K_TYPE)) switch (src.type.kind()) { // coercing to type
             case K_ARRAY:
-                if (v_array_len(src) != 1) panic("Array being coerced to type has multiple elements!");
-                if (!v_array_at(src, 0).type.coerces_to(T_TYPE)) panic("Array being coerced to type has non-type element!");
-                return v_type(src.pos, t_list(coerce(v_array_at(src, 0), T_TYPE).data.type));
+                if (v_array_len(src) != 1) panic("Array '", src, "' being coerced to type has more than one element!");
+                if (!v_array_at(src, 0).type.coerces_to(T_TYPE)) 
+                    panic("Array being coerced to type has non-type element '", v_array_at(src, 0), "'!");
+                return v_type(src.pos, t_list(coerce(env, v_array_at(src, 0), T_TYPE).data.type));
             case K_TUPLE: {
                 vector<Type> elts;
                 for (const Value& v : v_tuple_elements(src)) {
-                    if (!v.type.coerces_to(T_TYPE)) panic("Tuple being coerced to type had a non-type element!");
-                    elts.push(coerce(v, T_TYPE).data.type);
+                    if (!v.type.coerces_to(T_TYPE)) 
+                        panic("Tuple being coerced to type has non-type element '", v, "'!");
+                    elts.push(coerce(env, v, T_TYPE).data.type);
                 }
                 return v_type(src.pos, t_tuple(elts));
             }
             case K_NAMED: {
                 const Value& b = src.data.named->value;
                 if (!b.type.coerces_to(T_TYPE)) panic("Named value being coerced to type did not contain type!");
-                return v_type(src.pos, t_named(t_get_name(src.type), coerce(b, T_TYPE).data.type));
+                return v_type(src.pos, t_named(t_get_name(src.type), coerce(env, b, T_TYPE).data.type));
             }
             default:
                 break;
@@ -1109,9 +1279,9 @@ namespace basil {
         if (target.of(K_TUPLE) && src.type.of(K_TUPLE)) { // tuple-to-tuple elementwise coercion
             vector<Value> new_elements;
             for (u32 i = 0; i < v_len(src); i ++) {
-                new_elements.push(coerce(v_at(src, i), t_tuple_at(target, i)));
+                new_elements.push(coerce(env, v_at(src, i), t_tuple_at(target, i)));
             }
-            return v_tuple(src.pos, target, new_elements);
+            return v_tuple(src.pos, target, move(new_elements));
         }
 
         if (src.type.of(K_INT)) {
@@ -1126,36 +1296,22 @@ namespace basil {
             return v_union(src.pos, target, src);
         }
 
-        panic("Attempted to perform unimplemented type conversion!");
+        panic("Attempted to perform unimplemented type conversion from '", src, " : ", src.type, 
+            "' to type '", target, "'!");
         return v_error({});
     }
 
-    rc<Value> v_resolve_body(Value fn, FormTuple tup) {
-        tup.compute_hash();
-
-        auto& table = fn.data.fn->resolutions;
-        auto it = table.find(tup);
-        if (it == table.end()) {
-            table.put(tup, ref<Value>(fn.data.fn->body.clone()));
-            for (const auto& [k, v] : table) if (k == tup) return v;
-            return table.find(tup)->second;
-        }
-        else {
-            return it->second;
-        }
-    }
-
-    rc<Value> v_resolve_body(Value fn, const vector<rc<Form>>& args) {
-        u32 num_args = fn.data.fn->args.size();
+    rc<InstTable> v_resolve_body(Function& fn, const vector<rc<Form>>& args) {
+        u32 num_args = fn.args.size();
         FormTuple tup;
         tup.forms = args;
         for (rc<Form>& form : tup.forms) if (!form) form = F_TERM; // default to term
         return v_resolve_body(fn, tup);
     }
 
-    rc<Value> v_resolve_body(Value fn, const Value& args) {
-        u32 num_args = fn.data.fn->args.size();
-        auto& table = fn.data.fn->resolutions;
+    rc<InstTable> v_resolve_body(Function& fn, const Value& args) {
+        u32 num_args = fn.args.size();
+        auto& table = fn.resolutions;
         FormTuple tup;
         if (num_args == 1) {
             tup.forms.push(args.form); // single arg

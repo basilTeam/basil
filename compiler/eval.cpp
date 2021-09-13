@@ -37,13 +37,22 @@ namespace basil {
         list_iterator it, list_iterator end,
         Associativity outerassoc, i64 outerprec) {
         i64 n = -1; // tracks number of params in best match so far, or -1 if no match has been found
-        optional<const Callable&> best_match = none<const Callable&>();
+        optional<rc<Callable>> best_match = none<rc<Callable>>();
         list_iterator best = it;
+        bool is_infix = params.size() > 1;
 
         if (auto match = sm->match()) { // check trivial match (no additional args needed)
             n = params.size();
-            best_match = match;
-            // 'best' already equals 'it', so it's already pointing in the right place
+
+            // we need all this machinery to get the refcall associated with the match, instead
+            // of a non-owning reference.
+            if (params[0].form->kind == FK_CALLABLE) best_match = some<rc<Callable>>((rc<Callable>)sm);
+            else if (params[0].form->kind == FK_OVERLOADED) {
+                rc<Callable> selected = nullptr;
+                for (rc<Callable> callable : ((rc<Overloaded>)sm)->overloads) 
+                    if (callable.raw() == &*match) selected = callable; // find the refcell of the best match
+                best_match = some<rc<Callable>>((rc<Callable>)selected);
+            }
         }
 
         while (!sm->is_finished() && it != end) {
@@ -57,9 +66,9 @@ namespace basil {
             }
             else { // other matches
                 GroupResult gr = next_group(env, it, end, outerassoc, outerprec);
-                if (gr.value.form->has_infix_case() && params.size() > 0
+                if (gr.value.form->has_infix_case() && params.size() > (is_infix ? 2 : 1)
                     && (gr.value.form->precedence > outerprec 
-                    || (gr.value.form->precedence == outerprec && outerassoc == ASSOC_RIGHT))) { 
+                    || (gr.value.form->precedence == outerprec && outerassoc == ASSOC_RIGHT && is_infix))) { 
                     // if we get an argument that is infix but not applied to anything, we need to consider
                     // backtracking
                     it = gr.next;
@@ -69,33 +78,37 @@ namespace basil {
                     it = gr.next;
                     while (gr.value.form->has_prefix_case() && it != end) {
                         GroupResult ogr = retry_group(env, gr, it, end);
-                        it = ogr.next; // retrying didn't make progress, so we exit
+                        it = ogr.next;
                         if (ogr.value.type != T_ERROR) gr = ogr;
-                        else break;
+                        else break; // retrying didn't make progress, so we exit
                     }
                     params.push(gr.value);
                     sm->advance(params.back());
                 }
             }
             if (auto match = sm->match()) {
-                best = it, best_match = match, n = params.size();
+                best = it, n = params.size();
+
+                // we need all this machinery to get the refcall associated with the match, instead
+                // of a non-owning reference.
+                if (params[0].form->kind == FK_CALLABLE) best_match = some<rc<Callable>>((rc<Callable>)sm);
+                else if (params[0].form->kind == FK_OVERLOADED) {
+                    rc<Callable> selected = nullptr;
+                    for (rc<Callable> callable : ((rc<Overloaded>)sm)->overloads) 
+                        if (callable.raw() == &*match) selected = callable; // find the refcell of the best match
+                    best_match = some<rc<Callable>>((rc<Callable>)selected);
+                }
             }
         }
         if (best_match) {
             while (params.size() > n) params.pop(); // remove any extra arguments we added while exploring
 
-            if (params[0].form->kind == FK_OVERLOADED) {
-                rc<Overloaded> overloaded = (rc<Overloaded>)params[0].form->invokable;
-                rc<Callable> selected = nullptr;
-                for (rc<Callable> callable : overloaded->overloads) 
-                    if (callable.raw() == &*best_match) selected = callable; // find the refcell of the best match
-                params[0].form = ref<Form>(FK_CALLABLE, params[0].form->precedence, params[0].form->assoc);
-                params[0].form->invokable = selected; // use best match instead of overload
-            }
+            params[0].form = ref<Form>(FK_CALLABLE, params[0].form->precedence, params[0].form->assoc);
+            params[0].form->invokable = *best_match; // use best match instead of overload
 
             Source::Pos resultpos = span(params.front().pos, params.back().pos); // params can never be empty, so this is safe
             if (params.size() >= 2) resultpos = span(params[1].pos, resultpos); // this handles the infix left hand operand
-            Value result = v_list(resultpos, t_list(T_ANY), params);
+            Value result = v_list(resultpos, t_list(T_ANY), move(params));
             resolve_form(env, result);
             return GroupResult{
                 result,
@@ -176,7 +189,7 @@ namespace basil {
             sm->advance(term); // move past first term
             list_iterator it_copy = it; // we don't want to actually move 'it'
             ++ it_copy;
-            auto gr = try_group(env, static_cast<vector<Value>&&>(params), term.form->kind, sm, 
+            auto gr = try_group(env, move(params), term.form->kind, sm, 
                 it_copy, end, term.form->assoc, term.form->precedence);
 
             if (gr.is_left()) { // if grouping succeeded
@@ -200,7 +213,6 @@ namespace basil {
             if (op.form->has_infix_case() && 
                 (op.form->precedence > outerprec 
                  || (outerassoc == ASSOC_RIGHT && op.form->precedence == outerprec))) { // try infix application
-
                 vector<Value> params;
                 params.push(op); // add op and term to params
                 params.push(term);
@@ -210,7 +222,7 @@ namespace basil {
                 sm->advance(op); // move past op
                 list_iterator it_copy = it; // we don't want to actually move 'it'
                 ++ it_copy;
-                auto gr = try_group(env, static_cast<vector<Value>&&>(params), op.form->kind, sm, 
+                auto gr = try_group(env, move(params), op.form->kind, sm, 
                     it_copy, end, op.form->assoc, op.form->precedence);
 
                 if (gr.is_left()) { // if grouping succeeded
@@ -248,7 +260,7 @@ namespace basil {
                 sm->advance(term); // move past lhs
                 sm->advance(op); // move past op
                 list_iterator it_copy = it; // we don't want to actually move 'it'
-                auto gr = try_group(env, static_cast<vector<Value>&&>(params), op.form->kind, sm, 
+                auto gr = try_group(env, move(params), op.form->kind, sm, 
                     it_copy, end, op.form->assoc, op.form->precedence);
 
                 if (gr.is_left()) { // if grouping succeeded
@@ -305,7 +317,7 @@ namespace basil {
         rc<StateMachine> sm = term.form->start();
         sm->advance(term); // move past first term
         list_iterator it_copy = it; // we don't want to actually move 'it'
-        auto gr = try_group(env, static_cast<vector<Value>&&>(params), term.form->kind, sm, 
+        auto gr = try_group(env, move(params), term.form->kind, sm, 
             it_copy, end, term.form->assoc, term.form->precedence);
 
         if (gr.is_left()) { // if grouping succeeded
@@ -349,7 +361,7 @@ namespace basil {
         else if (results.size() == 1) term = results.front();
         else {
             Source::Pos termpos = span(results.front().pos, results.back().pos);
-            term = v_list(termpos, t_list(T_ANY), results);
+            term = v_list(termpos, t_list(T_ANY), move(results));
         }
     }
 
@@ -453,7 +465,7 @@ namespace basil {
                             }
                             if (on_variadic) args.push(F_TERM);
 
-                            term.form = v_resolve_body(*lookup, args)->form;
+                            term.form = v_resolve_body(*lookup->data.fn, args)->base->form;
                             if (!term.form) term.form = F_TERM; // default to term
                             return;
                         }
@@ -523,12 +535,9 @@ namespace basil {
     static int call_count = 0;
 
     // stores information for reporting an overload mismatch error
-    struct OverloadError {
-        Type overload;
-        u32 index;
-    };
+    using PriorityError = pair<Type, u32>;
 
-    either<i64, OverloadError> overload_priority(Type fn_args, Type args) {
+    either<i64, PriorityError> overload_priority(Type fn_args, Type args) {
         u32 len = fn_args.of(K_TUPLE) ? t_tuple_len(fn_args) : 1; // number of arguments
 
         // we prioritize each argument by a certain value, based on how good of a match it is.
@@ -546,122 +555,445 @@ namespace basil {
         for (u32 i = 0; i < len; i ++) {
             Type fn_arg = len == 1 ? fn_args : t_tuple_at(fn_args, i); // get desired arg at position
             Type arg = len == 1 ? args : t_tuple_at(args, i); // get provided arg at position    
+
+            // in general, we avoid potentially binding coercion here, since we don't yet know which
+            // overloads are possible we don't want to prematurely constrain type variables to one
+            // that might ultimately be invalidated.
             
             if (arg == fn_arg) // if arg matches exactly
                 priority += EQUAL_PRIORITY;
-            else if (arg.coerces_to_generic(fn_arg)) // if arg matches generic target
+            else if (arg.nonbinding_coerces_to_generic(fn_arg)) // if arg matches generic target
                 priority += GENERIC_PRIORITY;
-            else if (arg.coerces_to(fn_arg)) // if arg can coerce to target
+            else if (arg.nonbinding_coerces_to(fn_arg)) // if arg can coerce to target
                 priority += COERCE_PRIORITY; 
             else if (arg.of(K_UNION) && fn_arg.coerces_to(arg)) // if arg is valid union containing target
                 priority += UNION_PRIORITY; 
-            else return OverloadError{ fn_arg, i }; // this argument is incompatible; we can't use this overload
+            else return PriorityError{ fn_arg, i }; // this argument is incompatible; we can't use this overload
         }
 
         return priority;
     }
 
-    Value call(rc<Env> env, Value func_term, Value func, const Value& args_in) {
+    // Returns whether an argument tuple is runtime-only.
+    bool is_args_runtime(Type args) {
+        if (args.of(K_TUPLE)) {
+            for (u32 i = 0; i < t_tuple_len(args); i ++) {
+                Type t = t_tuple_at(args, i);
+                if (t.of(K_RUNTIME)) return true;
+            }
+            return false;
+        }
+        else return args.of(K_RUNTIME);
+    }
+
+    // Removes the "runtime" wrapper around any argument types, if present.
+    Type strip_runtime(Type args) {
+        if (args.of(K_TUPLE)) {
+            vector<Type> nonruntime;
+            for (u32 i = 0; i < t_tuple_len(args); i ++) {
+                Type t = t_tuple_at(args, i);
+                nonruntime.push(t.of(K_RUNTIME) ? t_runtime_base(t) : t);
+            }
+            return t_tuple(nonruntime);
+        }
+        else if (args.of(K_RUNTIME)) return t_runtime_base(args);
+        else return args;
+    }
+
+    either<Type, OverloadError> resolve_call(rc<Env> env, const vector<Type>& overloads_in, Type args) {
+        if (overloads_in.size() == 0) panic("Cannot resolve empty list of overloads!");
+        if (overloads_in.size() == 1) return overloads_in[0];
+        static vector<either<i64, PriorityError>> priorities;
+        priorities.clear();
+
+        for (const auto& fn : overloads_in) { // compute priorities for each case
+            // println("found overload ", fn);
+            priorities.push(overload_priority(t_arg(fn), args)); 
+        }
+    
+        i64 max_priority = -1; // compute max priority
+        for (int i = 0; i < priorities.size(); i ++) {
+            if (priorities[i].is_left()) {
+                max_priority = priorities[i].left() > max_priority 
+                    ? priorities[i].left() : max_priority;
+            }
+        }
+
+        // for (int i = 0; i < priorities.size(); i ++) {
+        //     if (priorities[i].is_left()) 
+        //         println("overload ", overloads_in[i], " on ", 
+        //             args, " has priority ", priorities[i].left());
+        //     else 
+        //         println("overload ", overloads_in[i], " mismatches ", args, 
+        //             " at ", priorities[i].right().second);
+        // }
+
+        if (max_priority == -1) { // all functions were errors
+            vector<PriorityError> errors;
+            for (u32 i = 0; i < priorities.size(); i ++) errors.push({ overloads_in[i], priorities[i].right().second });
+            return OverloadError{ false, errors };
+        }
+
+        vector<Type> overloads = overloads_in; // copy so we can prune mismatches
+
+        u32 out = 0; // remove all cases with less than max priority
+        for (u32 i = 0; i < overloads.size(); i ++) {
+            if (priorities[i].is_left() && priorities[i].left() == max_priority)
+                overloads[out ++] = overloads[i];
+        }
+        while (overloads.size() > out) overloads.pop();
+
+        if (overloads.size() == 0) 
+            panic("Somehow got no valid function, even though max_priority > -1!");
+        if (overloads.size() > 1) { // conflict
+            vector<PriorityError> errors;
+            for (Type t : overloads) errors.push({ t, 0 });
+            return OverloadError{ true, move(errors) };
+        }
+
+        return overloads[0];
+    }
+
+    Value coerce_rt(rc<Env> env, const Param& param, bool is_runtime, const Value& v, Type dest) {
+        if ((v.type.of(K_RUNTIME) || is_runtime) && !dest.of(K_RUNTIME)) {
+            dest = t_runtime(t_lower(dest));
+        }
+        if (dest.of(K_RUNTIME) && !v.type.of(K_RUNTIME) && !is_evaluated(param.kind)) { // evaluate quoted stuff before runtime
+            Value v2 = v;
+            v2 = eval(env, v2);
+            if (v2.type == T_ERROR) return v_error({});
+            return coerce(env, v2, t_runtime(v2.type));
+        }
+        return coerce(env, v, dest);
+    }
+
+    Value coerce_args(rc<Env> env, const vector<Param>& params, bool is_runtime, const Value& args, Type dest) {
+        if (args.type.of(K_TUPLE)) {
+            vector<Value> coerced;
+            for (u32 i = 0; i < v_tuple_len(args); i ++) {
+                coerced.push(coerce_rt(env, params[i], is_runtime, v_at(args, i), t_tuple_at(dest, i)));
+                if (coerced.back().type == T_ERROR) return v_error({});
+            }
+            return v_tuple(args.pos, infer_tuple(coerced), move(coerced));
+        }
+        else return coerce_rt(env, params[0], is_runtime, args, dest);
+    }
+
+    PerfInfo::PerfInfo():
+        max_depth(50), max_count(50), exceeded(false) {}
+
+    void PerfInfo::begin_call(const Value& term, u32 base_cost) {
+        if (counts.size() >= max_depth) exceeded = true;
+        counts.push({term, base_cost, false});
+    }
+
+    void PerfInfo::end_call() {
+        u32 count = counts.back().count;
+        counts.pop();
+        if (counts.size()) counts.back().count += count;
+    }
+
+    void PerfInfo::end_call_without_add() {
+        counts.pop();
+    }
+
+    void PerfInfo::set_max_depth(u32 max_depth_in) {
+        max_depth = max_depth_in;
+    }
+
+    void PerfInfo::set_max_count(u32 max_count_in) {
+        max_count = max_count_in;
+    }
+
+    u32 PerfInfo::current_count() const {
+        if (counts.size() == 0) return 0; // root always has no cost
+        return counts.back().count;
+    }
+
+    void PerfInfo::make_comptime() {
+        if (counts.size()) counts.back().comptime = true;
+    }
+
+    bool PerfInfo::is_comptime() const {
+        return counts.size() > 0 ? counts.back().comptime : false;
+    }
+
+    bool PerfInfo::depth_exceeded() {
+        bool exc = exceeded;
+        exceeded = false;
+        return exc;
+    }
+
+    static PerfInfo perfinfo; // shared instance
+
+    PerfInfo& get_perf_info() {
+        return perfinfo;
+    }
+
+    Value call(rc<Env> env, Value call_term, Value func, const Value& args_in) {
+        if ((perfinfo.current_count() >= perfinfo.max_count || perfinfo.counts.size() >= perfinfo.max_depth)
+            && !perfinfo.is_comptime()) {
+            // println("skipping call to ", func_term, " ", args_in, " - current cost is ", perfinfo.current_count());
+            return v_error({}); // return error value if current function is too expensive
+        }
+
+        Value func_term = v_head(call_term);    
         Value args = args_in;
-        if (func.type.of(K_INTERSECT)) {
-            vector<Value> valid;
+        
+        vector<Type> fixed_args_type;
+
+        // resolve types of each runtime argument
+        if (args.type.of(K_TUPLE)) for (int i = 0; i < v_len(args); i ++) {
+            if (v_at(args, i).type.of(K_RUNTIME)) fixed_args_type.push(v_at(args, i).data.rt->ast->type(env));
+            else fixed_args_type.push(v_at(args, i).type);
+        }
+        else if (args.type.of(K_RUNTIME)) fixed_args_type.push(args.data.rt->ast->type(env));
+        else fixed_args_type.push(args.type);
+
+
+        // overload resolution is done independently of runtime typing, so we clean up
+        // our argument type to accommodate that.
+        Type args_type = fixed_args_type.size() == 1 ? fixed_args_type[0] : t_tuple(fixed_args_type);
+        args_type = strip_runtime(args_type);
+
+        // grab the parameters so that we know which arguments have been quoted
+        // we'll need to evaluate these arguments later if we lower to runtime, so that
+        // we don't try and lower any quoted lists directly to AST.
+        vector<Param> params;
+        if (func_term.form->kind != FK_CALLABLE) // sanity check
+            panic("Expected called function's form to be resolved to callable!");
+        // we can assume that the function's form has been resolved to a single callable because
+        // we have either completed form resolution or inferred a form based on type.
+        rc<Callable> callable = func_term.form->invokable;
+        for (u32 i = 0; i < callable->parameters->size(); i ++) {
+            const Param& p = (*callable->parameters)[i];
+            if (p.kind != PK_KEYWORD && p.kind != PK_SELF) params.push(p);
+        }
+
+        Type fntype = t_runtime_base(func.type);
+
+        if (fntype.of(K_INTERSECT)) { // we'll perform overload resolution among the intersection's cases
+            vector<Type> valid;
             // println("func form = ", func.form);
             for (const auto& [t, v] : func.data.isect->values) {
                 // println("  value form = ", v.form);
-                if (v.form == func_term.form && t.of(K_FUNCTION)) valid.push(v);
-            }
-            if (valid.size() == 0) panic("Somehow found no overloads matching resolved form!");
-
-            if (valid.size() > 1) { // do overload resolution
-                vector<either<i64, OverloadError>> priorities;
-
-                for (const auto& fn : valid) { // compute priorities for each case
-                    priorities.push(overload_priority(t_arg(fn.type), args.type)); 
+                Type bt = t_runtime_base(t);
+                if (v.form && v.form == func_term.form && bt.of(K_FUNCTION)) {
+                    valid.push(t_runtime_base(bt)); // select only those cases that have the same form we selected
                 }
-            
-                i64 max_priority = -1; // compute max priority
-                for (int i = 0; i < priorities.size(); i ++) {
-                    if (priorities[i].is_left()) {
-                        max_priority = priorities[i].left() > max_priority 
-                            ? priorities[i].left() : max_priority;
-                    }
-                }
-
-                if (max_priority == -1) { // all functions were errors
-                    err(args.pos, "Incompatible arguments for function '", func_term, "'.");
-                    for (u32 i = 0; i < priorities.size(); i ++) {
-                        Value arg = args.type.of(K_TUPLE) ? v_at(args, priorities[i].right().index) : args;
-                        note(valid[i].pos, "Candidate function found of type '", valid[i].type, "', but ",
-                            "given incompatible argument '", arg, "' of type '", arg.type, "'.");
-                    }
-                    return v_error({});
-                }
-
-                u32 out = 0; // remove all cases with less than max priority
-                for (u32 i = 0; i < valid.size(); i ++) {
-                    if (priorities[i].is_left() && priorities[i].left() == max_priority)
-                        valid[out ++] = valid[i];
-                }
-                while (valid.size() > out) valid.pop();
-
-                if (valid.size() == 0) 
-                    panic("Somehow got no valid function, even though max_priority > -1!");
-                if (valid.size() > 1) { // conflict
-                    err(args.pos, "Ambiguous call to overloaded function '", func_term, "'.");
-                    for (u32 i = 0; i < valid.size(); i ++) {
-                        note(valid[i].pos, "Candidate function found of type '", valid[i].type, "'.");
-                    }
-                    return v_error({});
-                }
-
-                func = valid[0];
-            }
-            else if (valid.size() == 1) func = valid[0];
-
-            if (!args.type.coerces_to(t_arg(func.type))) {
-                panic("Somehow ended up with incompatible arguments for overloaded function!");
             }
 
-            args = coerce(args, t_arg(func.type));
-            
-            if (args.type == T_ERROR) return v_error({});
-        }
-        else if (func.type.of(K_FUNCTION)) {
-            if (!args.type.coerces_to(t_arg(func.type))) {
-                err(args.pos, "Incompatible arguments for function '", func_term, "'! Expected '",
-                    t_arg(func.type), "', got '", args.type, "'.");
+            if (valid.size() == 0) {
+                err(call_term.pos, "No overloads of function '", func_term, "' matched the desired form '",
+                    func_term.form, "'.");
                 return v_error({});
             }
-            else args = coerce(args, t_arg(func.type));
 
-            if (args.type == T_ERROR) return v_error({});
+            // perform type-based overload resolution
+            auto resolved = resolve_call(env, valid, args_type);
+
+            // handle errors if necessary
+            if (resolved.is_right()) { // error
+                if (resolved.right().ambiguous) {
+                    if (!t_is_concrete(args_type)) {
+                        t_tvar_enable_isect();
+                        vector<Type> isect_types;
+                        map<Type, Value> isect_values;
+                        for (const auto& mismatch : resolved.right().mismatches) {
+                            Type case_arg = t_arg(mismatch.first);
+                            args_type.coerces_to(case_arg); // we call this for typevar-related side effects
+                            isect_values[mismatch.first] = func.data.isect->values[mismatch.first];
+                            isect_types.push(mismatch.first);
+                        }
+                        t_tvar_disable_isect();
+                        func = v_intersect(func.pos, t_intersect(isect_types), move(isect_values));
+                    }
+                    else {
+                        err(args.pos, "Ambiguous call to overloaded function '", func_term, "'.");
+                        for (u32 i = 0; i < resolved.right().mismatches.size(); i ++) {
+                            const auto& mismatch = resolved.right().mismatches[i];
+                            const Value& v = func.data.isect->values[mismatch.first];
+                            note(v.pos, "Candidate function found of type '", v.type, "'.");
+                        }
+                        return v_error({});
+                    }
+                }
+                else {
+                    err(args.pos, "Incompatible arguments '", args_type, "' for function '", func_term, "'.");
+                    for (u32 i = 0; i < resolved.right().mismatches.size(); i ++) {
+                        const auto& mismatch = resolved.right().mismatches[i];
+                        const Value& v = func.data.isect->values[mismatch.first];
+                        Value arg = args.type.of(K_TUPLE) ? v_at(args, mismatch.second) : args;
+                        note(v.pos, "Candidate function found of type '", v.type, "', but ",
+                            "given incompatible argument '", arg, "' of type '", strip_runtime(arg.type), "'.");
+                    }
+                    return v_error({});
+                }
+            }
+            else func = func.data.isect->values[resolved.left()];
+            fntype = t_runtime_base(func.type);
+
+            if (fntype.of(K_FUNCTION) && !args_type.coerces_to(t_arg(fntype))) {
+                panic("Somehow ended up with incompatible arguments for overloaded function!");
+            }
+        }
+        else if (fntype.of(K_FUNCTION)) {
+            if (!args_type.coerces_to(t_arg(fntype))) {
+                err(args.pos, "Incompatible arguments for function '", func_term, "'. Expected '",
+                    t_arg(fntype), "', got '", args_type, "'.");
+                return v_error({});
+            }
         }
         else panic("Tried to call non-callable value!");
 
-        // at this point we can assume 'func' is a function value, and args are compatible with it.
-        rc<Function> fndata = func.data.fn;
-        if (fndata->builtin) {
-            return fndata->builtin->comptime(env, args); // for now, assume compile time
+        bool is_runtime = is_args_runtime(args.type) || fntype.of(K_RUNTIME) || fntype.of(K_INTERSECT);
+
+        args = coerce_args(env, params, is_runtime, args, func.type.of(K_INTERSECT) ? args_type : t_arg(fntype));
+        // println("args_type = ", args_type, " and coerced to ", args);
+        if (args.type == T_ERROR) return v_error({});
+
+        if (func.type == T_ERROR) {
+            return v_error({});
+        }
+        else if (func.type.of(K_INTERSECT)) {
+            // if we're still in an intersect at this point, we'll figure things out in the AST phase
+
+            map<Type, rc<Function>> cases;
+            for (const auto& [t, v] : func.data.isect->values) cases[t] = v.data.fn;
+            vector<rc<AST>> arg_nodes;
+            if (args.type.of(K_TUPLE)) for (const Value& v : v_tuple_elements(args))
+                arg_nodes.push(v.data.rt->ast);
+            else arg_nodes.push(args.data.rt->ast);
+
+            return v_runtime({}, t_runtime(T_ANY), ast_call(
+                args.pos, 
+                ast_overload(func.pos, func.type, cases),
+                arg_nodes
+            ));
+        }
+        else if (func.type.of(K_FUNCTION) && func.data.fn->builtin) {
+            const auto& builtin = func.data.fn->builtin;
+            if (is_runtime) {
+                if (!builtin->runtime) {
+                    err(call_term.pos, "Compile-time only function '", func_term, 
+                        "' was invoked on runtime-only arguments.");
+                    return v_error({});
+                }
+                perfinfo.begin_call(call_term, 1); // builtins are considered cheap
+                rc<AST> ast = builtin->runtime(env, call_term, args);
+                perfinfo.end_call();
+                return v_runtime({}, t_runtime(ast->type(env)), ast);
+            }
+            else {
+                perfinfo.begin_call(call_term, 1);
+                if (!builtin->runtime) perfinfo.make_comptime();
+                Value result = builtin->comptime(env, call_term, args);
+                perfinfo.end_call();
+                return result;
+            }
+        }
+        else if (func.type.of(K_RUNTIME)) {
+            vector<rc<AST>> arg_nodes;
+            if (args.type.of(K_TUPLE)) for (const Value& v : v_tuple_elements(args))
+                arg_nodes.push(v.data.rt->ast);
+            else arg_nodes.push(args.data.rt->ast);
+
+            return v_runtime(
+                {},
+                t_runtime(t_ret(t_runtime_base(func.type))),
+                ast_call(func.pos, func.data.rt->ast, arg_nodes)
+            );
         }
         else {
-            static int n = 0;
-            n ++;
-            rc<Env> fn_env = func.data.fn->env;
-            const vector<Symbol>& fn_args = func.data.fn->args;
-            vector<pair<Symbol, Value>> existing;
-            for (const auto& p : fn_env->values) existing.push(p); // save existing environment 
-            if (fn_args.size() == 1) { // bind args to single argument
-                fn_env->def(fn_args[0], args);
-            }
-            else for (u32 i = 0; i < v_len(args); i ++) { // bind args to multiple arguments
-                fn_env->def(fn_args[i], v_at(args, i));
-            }
-            rc<Value> fn_body = v_resolve_body(func, args); // copy function body
-            Value result = eval(fn_env, *fn_body); // eval it
+            // if it's a compile-time call, we try to evaluate the body - but it might run into 
+            Value result;
+            if (!is_runtime) {
+                if (func.type.of(K_RUNTIME)) // check just in case
+                    panic("Somehow got runtime function in compile-time function call!");
 
-            for (u32 i = 0; i < existing.size(); i ++) 
-                fn_env->def(existing[i].first, existing[i].second); // restore any previous values
+                perfinfo.begin_call(call_term, 1); // user-defined functions are considered more expensive
+                // println("beginning call to ", func_term, " ", args_in);
+                static int n = 0;
+                n ++;
+                rc<InstTable> fn_body = v_resolve_body(*func.data.fn, args); // resolve function body
+
+                if (fn_body->is_instantiating(args_type)) {
+                    // we've called a function that is currently in the process of being compiled,
+                    // so we skip its compile-time evaluation to avoid infinite recursion in the
+                    // compiler
+                    is_runtime = true;
+                }
+                else {
+                    rc<Env> fn_env = fn_body->env;
+                    const vector<Symbol>& fn_args = func.data.fn->args;
+                    vector<pair<Symbol, Value>> existing;
+                    for (const auto& p : fn_env->values) existing.push(p); // save existing environment 
+                    if (fn_args.size() == 1) { // bind args to single argument
+                        fn_env->def(fn_args[0], args);
+                    }
+                    else for (u32 i = 0; i < v_len(args); i ++) { // bind args to multiple arguments
+                        fn_env->def(fn_args[i], v_at(args, i));
+                    }
+                    result = eval(fn_body->env, *fn_body->base); // eval it
+                    for (u32 i = 0; i < existing.size(); i ++) 
+                        fn_env->def(existing[i].first, existing[i].second); // restore any previous values
+                }
+            }
             
+            // if we couldn't resolve a compile-time value (either the function/args were runtime, or
+            // the compiler determined it was too expensive), instantiate a runtime call and return
+            // that.
+            if (is_runtime 
+                || perfinfo.current_count() >= perfinfo.max_count 
+                || perfinfo.depth_exceeded()) {
+                // if we exceeded the perf limit, pretend the call didn't happen - clear its perf
+                // frame
+
+                if (!is_runtime) {
+                    perfinfo.end_call_without_add();
+                }
+
+                rc<AST> fn_ast = nullptr;
+
+                // println("trying to lower call to ", func_term, " ", args, " of type ", func.type);
+
+                if (func.type.of(K_FUNCTION)) {
+                    // instantiate runtime call
+                    rc<FnInst> inst = func.data.fn->inst(args_type, args);
+                    if (!inst) return v_error({}); // propagate errors
+
+                    fntype = inst->func->type(env);
+                    fn_ast = inst->func;
+                }
+                else if (func.type.of(K_RUNTIME)) {
+                    fn_ast = func.data.rt->ast;
+                }
+                else {
+                    panic("Somehow got neither a function nor runtime value in function call!");
+                }
+
+                // we pretend the runtime call is a builtin with cost one
+                perfinfo.begin_call(call_term, 1);
+                perfinfo.end_call();
+
+                // try coercion again, with is_runtime always true
+                if (fntype == T_ERROR) return v_error({});
+                args = coerce_args(env, params, true, args, t_arg(fntype));
+                if (args.type == T_ERROR) return v_error({});
+
+                vector<rc<AST>> arg_nodes;
+                if (args.type.of(K_TUPLE)) for (const Value& v : v_tuple_elements(args))
+                    arg_nodes.push(v.data.rt->ast);
+                else arg_nodes.push(args.data.rt->ast);
+
+                return v_runtime({}, t_runtime(t_ret(fntype)), ast_call(
+                    args.pos, 
+                    fn_ast,
+                    arg_nodes
+                ));
+            }
+
+            perfinfo.end_call();
             return result; // return enclosing env
         }
     }
@@ -686,10 +1018,13 @@ namespace basil {
                 }
                 if (var->type == T_TYPE && var->data.type.is_tvar())
                     return v_type(var->pos, t_tvar_concrete(var->data.type));
+                if (var->type.of(K_RUNTIME))
+                    return v_runtime(var->pos, var->type, ast_var(var->pos, env, term.data.sym));
                 return *var;
             }
             case K_LIST: { // non-empty lists eval to the results of applying functions
-                if (error_count()) return v_error({}); // return error value if form resolution went awry
+                if (error_count()) 
+                    return v_error({}); // return error value if form resolution went awry
 
                 // expand_splices(env, term);
 
@@ -698,8 +1033,8 @@ namespace basil {
                 if (v_tail(term).type == T_VOID) 
                     return head.with(infer_form(head.type)); // return the function if no args, e.g. (+)
 
-                if (head.type.of(K_FUNCTION) 
-                    || (head.type.of(K_INTERSECT) && t_intersect_procedural(head.type))) {
+                if (t_runtime_base(head.type).of(K_FUNCTION) 
+                    || (t_runtime_base(head.type).of(K_INTERSECT) && t_intersect_procedural(head.type))) {
                     vector<Value> args;
                     vector<Value> varargs; // we use this to accumulate arguments for an individual variadic parameter
                     rc<Callable> form = (rc<Callable>)v_head(term).form->start();
@@ -719,12 +1054,12 @@ namespace basil {
 
                         // if we were building a variadic list, and aren't on a variadic anymore,
                         // we clear the varargs and push them as a list onto the arg array
-                        if (!is_variadic(form->current_param()->kind)
+                        if (form->current_param() && !is_variadic(form->current_param()->kind)
                             && varargs.size() > 0) {
                             args.push(v_list(
                                 span(varargs.front().pos, varargs.back().pos),
                                 infer_list(varargs),
-                                varargs
+                                move(varargs)
                             ));
                             varargs.clear();
                         }
@@ -738,7 +1073,7 @@ namespace basil {
                                 || form->current_param()->kind == PK_TERM_VARIADIC) varargs.push(arg);
                             else args.push(arg);
                         }
-                        else if (form->current_param()->kind != PK_KEYWORD) { // evaluate but ignore keywords
+                        else if (form->current_param() && form->current_param()->kind != PK_KEYWORD) { // evaluate but ignore keywords
                             Value arg_value = eval(env, arg);
                             if (arg_value.type == T_ERROR) return v_error({}); // propagate errors
 
@@ -752,20 +1087,20 @@ namespace basil {
                         args.push(v_list(
                             span(varargs.front().pos, varargs.back().pos),
                             infer_list(varargs),
-                            varargs
+                            move(varargs)
                         ));
                     }
 
                     if (args.size() == 0) {
-                        err(term.pos, "Procedure must be called on one or more arguments; zero given.");
+                        err(term.pos, "Procedure '", v_head(term), "' must be called on one or more arguments; zero given.");
                         return v_error({});
                     }
                     for (const Value& v : args) if (v.type == T_ERROR) return v_error({}); // propagate errors
 
                     Value args_value = args.size() == 1 ? args[0]
-                        : v_tuple(term.pos, infer_tuple(args), args);
+                        : v_tuple(span(args.front().pos, args.back().pos), infer_tuple(args), move(args));
 
-                    Value result = call(env, v_head(term), head, args_value);
+                    Value result = call(env, term, head, args_value);
                     if (!result.form) result.form = infer_form(result.type);
                     result.pos = term.pos; // prefer term pos over any other pos determined within call()
                     return result;

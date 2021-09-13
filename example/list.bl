@@ -1,34 +1,4 @@
-def (xs? filter f?) do:
+def xs? map f? =
     match xs with:
         () => ()
-        x? :: xs? => 
-            if (f x) then 
-                x :: (xs filter f)
-            else 
-                xs filter f
-
-def (xs? map f?) do:
-    match xs with:
-        () => ()
-        x? :: xs? =>
-            f x :: xs map f
-
-def (xs? fold init? f?) do:
-    match xs with:
-        () => init
-        x? :: xs? =>
-            f x (xs fold init f)
-
-def (a? append b?) do:
-    match (a, b) with:
-        ((), b?) => b
-        (a?, b?) => a :: a tail ++ b
-
-def (append*-helper lists?) do:
-    match lists with:
-        () => ()
-        () :: rest? => append*-helper rest
-        first? :: rest? => first head :: append*-helper (first tail :: rest)
-
-def (append* lists...?) do:
-    append*-helper lists
+        x? :: xs? => f x :: xs map f

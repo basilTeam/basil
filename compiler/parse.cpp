@@ -64,12 +64,12 @@ namespace basil {
         Source::Pos end = view.peek().pos;
         view.read(); // consume terminator
         if (values.size() == 0) return v_void(begin);
-        return v_list(span(begin, end), t_list(T_ANY), values);
+        return v_list(span(begin, end), t_list(T_ANY), move(values));
     }  
 
-    Value parse_indented(Value opener, TokenView& view, ParseContext ctx) {
+    Value parse_indented(optional<Value> opener, TokenView& view, ParseContext ctx) {
         vector<Value> values;
-        values.push(opener);
+        if (opener) values.push(*opener);
         while (!out_of_input(view) 
             && ((view.peek().kind == TK_NEWLINE && !is_repl()) 
                 || view.peek().pos.col_start > ctx.prev_indent)) {
@@ -80,7 +80,33 @@ namespace basil {
                 continue;
             }
         }
-        return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), values);
+        return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), move(values));
+    }
+
+    // Parses an indented or inline block after we've seen that a block should start.
+    Value parse_block(TokenView& view, ParseContext ctx, optional<Value> opener) {
+        Source::Pos initial = view.peek().pos;
+        if (view && view.peek().kind == TK_NEWLINE) { // consider indented block
+            while (view.peek().kind == TK_NEWLINE) view.read(); // consume all leading newlines
+            if (!out_of_input(view) && view.peek().pos.col_start > ctx.indent)
+                return parse_indented(opener, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start), ctx.enclosing});
+            else {
+                err(view.peek().pos, 
+                    "Expected indented block, but line isn't indented past the previous non-empty line. Prev indent = ", ctx.indent, ", cur indent = ", view.peek().pos.col_start);
+                return v_error(view.peek().pos);
+            }
+        }
+        else { // inline block
+            vector<Value> values;
+            if (opener) values.push(*opener);
+            while (view && view.peek().kind != TK_NEWLINE) {
+                if (ctx.enclosing && view.peek().kind == *ctx.enclosing) break; // we've hit the end of some outer block
+                Value v = parse_expr(view, ctx);
+                if (v.pos.line_start > initial.line_end) break; // stop if we're on a different line
+                values.push(v);
+            }
+            return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), move(values));
+        }
     }
 
     // Pulls a simple expression from the token stream.
@@ -169,6 +195,9 @@ namespace basil {
                     enclosed
                 );
             }
+            case TK_BLOCK: {
+                return parse_block(view, ctx, none<Value>());
+            }
             default:
                 err(pos, "Unexpected token '", escape(string_from(contents)), "'.");
                 return v_error(pos);
@@ -200,29 +229,13 @@ namespace basil {
     Value parse_expr(TokenView& view, ParseContext ctx) {
         while (view.peek().kind == TK_NEWLINE) view.read(); // consume leading newlines
         Value suffixed = parse_suffix(view, ctx);
-        if (view && view.peek().kind == TK_BLOCK) { // consider block
-            view.read(); // consume block
-            if (view && view.peek().kind == TK_NEWLINE) { // consider indented block
-                while (view.peek().kind == TK_NEWLINE) view.read(); // consume all leading newlines
-                if (!out_of_input(view) && view.peek().pos.col_start > ctx.indent)
-                    return parse_indented(suffixed, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start), ctx.enclosing});
-                else {
-                    err(view.peek().pos, 
-                        "Expected indented block, but line isn't indented past the previous non-empty line. Prev indent = ", ctx.indent, ", cur indent = ", view.peek().pos.col_start);
-                    return v_error(view.peek().pos);
-                }
+        if (view && view.peek().kind == TK_BLOCK && !suffixed.type.of(K_LIST)) { // consider block
+            if (suffixed.type == T_SYMBOL && 
+                (suffixed.data.sym == S_ASSIGN || suffixed.data.sym == S_OF || suffixed.data.sym == S_CASE_ARROW)) {
+                return suffixed;
             }
-            else { // inline block
-                vector<Value> values;
-                values.push(suffixed);
-                while (view && view.peek().kind != TK_NEWLINE) {
-                    if (ctx.enclosing && view.peek().kind == *ctx.enclosing) break; // we've hit the end of some outer block
-                    Value v = parse_expr(view, ctx);
-                    if (v.pos.line_start > suffixed.pos.line_end) break; // stop if we're on a different line
-                    values.push(v);
-                }
-                return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), values);
-            }
+            view.read();
+            suffixed = parse_block(view, ctx, some<Value>(suffixed));
         }
         return suffixed;
     }

@@ -35,7 +35,7 @@ namespace basil {
                 values.push(*maybe_expr);
         if (values.size() == 0) return v_void({});
         else if (values.size() == 1) return values[0];
-        else return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), values);
+        else return v_list(span(values.front().pos, values.back().pos), t_list(T_ANY), move(values));
     }
 
     Value resolve_step(const Value& term) {
@@ -101,7 +101,7 @@ namespace basil {
                 continue;
             }
 
-            Value list = v_list(span(code.front().pos, code.back().pos), t_list(T_ANY), code);
+            Value list = v_list(span(code.front().pos, code.back().pos), t_list(T_ANY), move(code));
             Value result = eval(global, list);
             if (error_count()) {
                 print_errors(_stdout, source);
@@ -146,7 +146,7 @@ namespace basil {
         }
 
         Value program = v_list(span(program_terms.front().pos, program_terms.back().pos), 
-            t_list(T_ANY), program_terms);
+            t_list(T_ANY), move(program_terms));
         Value result = eval(global, program);
         if (error_count()) {
             print_errors(_stdout, source);
@@ -190,7 +190,7 @@ namespace basil {
             }
 
             Value program = v_list(span(program_terms.front().pos, program_terms.back().pos), 
-                t_list(T_ANY), program_terms);
+                t_list(T_ANY), move(program_terms));
             Value result = eval(global, program);
             if (error_count()) {
                 print_errors(_stdout, source);
@@ -203,10 +203,5 @@ namespace basil {
             return some<rc<Env>>(global);
         }
         return modules[filename];
-    }
-
-    // Runs the "help" mode of the compiler.
-    void help(const char* cmd) {
-        // todo
     }
 }

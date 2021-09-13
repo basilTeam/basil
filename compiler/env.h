@@ -5,11 +5,10 @@
 #include "util/vec.h"
 #include "util/rc.h"
 #include "util/option.h"
+#include "value.h"
 #include "type.h"
 
 namespace basil {
-    struct Value;
-
     // Represents an environment within which evaluation may be performed.
     // Environments are essentially just mappings from symbols to values -
     // all form and AST information is stored in the normal value representation
@@ -39,6 +38,9 @@ namespace basil {
         // the value in this environment or the nearest parent that contained the name.
         optional<const Value&> find(Symbol name) const;
         optional<Value&> find(Symbol name);
+
+        // Duplicates this environment, creating an identical environment with the same parent.
+        rc<Env> clone() const;
         
         // Constructs an environment with a parent. Use extend() instead of calling this
         // directly.

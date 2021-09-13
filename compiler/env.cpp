@@ -29,6 +29,12 @@ namespace basil {
         else return some<Value&>(it->second);
     }
 
+    rc<Env> Env::clone() const {
+        rc<Env> dup = ref<Env>(parent);
+        dup->values = values;
+        return dup;
+    }
+
     rc<Env> extend(rc<Env> parent) {
         rc<Env> env = ref<Env>(parent);
         parent->children.push(env);

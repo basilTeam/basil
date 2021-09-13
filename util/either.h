@@ -74,7 +74,7 @@ struct either {
 
     const U& right() const {
         if (!_right) panic("Attempted to read right value of left-containing either!");
-        return *(const U)data.right;
+        return *(const U*)data.right;
     }
 
     U& right() {

@@ -16,7 +16,7 @@ namespace basil {
     // variable or function - leave them empty otherwise. All symbols require
     // a defined offset (within the section). 
     struct DefInfo {
-        u32 section;
+        u32 offset;
         optional<rc<Form>> form;
         optional<Type> type;
     };
@@ -26,13 +26,14 @@ namespace basil {
         ST_NONE = 0,    // The absence of a section.
         ST_SOURCE = 1,  // Raw Basil source code, in text form.
         ST_PARSED = 2,  // Parsed Basil source code.
-        ST_EVALED = 3,  // Evaluated Basil source code.
+        ST_EVAL = 3,    // Evaluated Basil module.
         ST_AST = 4,     // Typed Basil AST.
-        ST_JASMINE = 5, // Jasmine bytecode.
-        ST_NATIVE = 6,  // Native machine code for a particular architecture.
-        ST_LIBRARY = 7, // A wrapper around a shared library.
-        ST_DATA = 8,    // Raw data.
-        ST_LICENSE = 9  // A license associated with this code/data.
+        ST_IR = 5,      // SSA-based Basil IR.
+        ST_JASMINE = 6, // Jasmine bytecode.
+        ST_NATIVE = 7,  // Native machine code for a particular architecture.
+        ST_LIBRARY = 8, // A wrapper around a shared library.
+        ST_DATA = 9,    // Raw data.
+        ST_LICENSE = 10 // A license associated with this code/data.
     };
     
     // A section within a Basil object. Contains a list of symbols defined within
@@ -40,7 +41,17 @@ namespace basil {
     // section types structure this data differently.
     struct Section {
         SectionType type;
+        ustring name;
         map<Symbol, DefInfo> defs;
+
+        // Constructs a section from a SectionType and def table.
+        Section(SectionType type, const ustring& name, const map<Symbol, DefInfo>& defs);
+
+        virtual ~Section();
+
+        // Writes the section type and definition table to the provided byte
+        // buffer.
+        void serialize_header(bytebuf& buf);
 
         // Fills in all internal data structures besides 'type' and 'defs' with
         // data from the provided buffer.
@@ -53,30 +64,42 @@ namespace basil {
 
     // Compact semver-style version tuple.
     struct Version {
-        u8 major;
-        u16 minor;
-        u8 patch;
+        u16 major, minor, patch;
     };
 
     // A single Basil object, containing some number of sections.
     struct Object {
         Version version;
+        optional<u32> main_section;
         vector<rc<Section>> sections;
+
+        // Creates an empty object with the current default version.
+        Object();
 
         // Loads this object in full from the provided stream.
         void read(stream& io);
 
         // Writes this object to the provided stream.
         void write(stream& io);
+
+        // Prints information about this object file to the provided stream.
+        void show(stream& io);
     };
 
-    struct Source;
+    class Source;
     struct Env;
     struct Value;
+    struct AST;
 
-    rc<Section> source_section(rc<Source> source);
-    rc<Section> parsed_section(const Value& ast);
-    rc<Section> evaled_section(rc<Env> env, const Value& result);
+    rc<Source> source_from_section(rc<Section> section);
+    Value parsed_from_section(rc<Section> section);
+    // rc<Env> module_from_section(rc<Section> section);
+    // rc<AST> ast_from_section(rc<Section> section);
+
+    rc<Section> source_section(const ustring& name, rc<Source> source);
+    rc<Section> parsed_section(const ustring& name, const Value& term);
+    // rc<Section> module_section(const Value& module);
+    // rc<Section> ast_section(rc<AST> ast);
 }
 
 #endif

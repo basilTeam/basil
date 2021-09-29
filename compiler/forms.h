@@ -228,10 +228,9 @@ namespace basil {
 
     // Data type for the contents of a compound form.
     struct Compound {
-        rc<Env> env;
         map<Value, rc<Form>> members;
 
-        Compound(rc<Env> env, const map<Value, rc<Form>>& members);
+        Compound(const map<Value, rc<Form>>& members);
     };
 
     enum Associativity {
@@ -319,9 +318,12 @@ namespace basil {
         return f_overloaded(precedence, assoc, vector_of<rc<Form>>(args...));
     }
 
+    // Constructs an overloaded form from a list of callables, instead of having to go through rc<Form>.
+    rc<Form> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Callable>>& overloads);
+
     // Constructs a compound form from the provided subform mapping information.
     // Compound forms are not applicable, so no associativity or precedence is necessary.
-    rc<Form> f_compound(rc<Env> env, const map<Value, rc<Form>>& members);
+    rc<Form> f_compound(const map<Value, rc<Form>>& members);
 }
 
 void write(stream& io, const basil::Param& param);

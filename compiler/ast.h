@@ -1,9 +1,11 @@
 #ifndef BASIL_AST_H
 #define BASIL_AST_H
 
+#include "util/either.h"
 #include "type.h"
 #include "source.h"
 #include "env.h"
+#include "ssa.h"
 
 namespace basil {
     struct Function;
@@ -62,6 +64,12 @@ namespace basil {
         // return the error type.
         virtual Type type(rc<Env> env);
 
+        // Writes SSA instructions to the active basic block in the provided function.
+        // Returns the resulting IR value - either a terminal value like a variable or
+        // constant, or the result variable of the generated instruction.
+        virtual IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) = 0;
+
+        // Returns the kind of AST node this is.
         ASTKind kind() const;
     };
 
@@ -71,7 +79,7 @@ namespace basil {
     rc<AST> ast_func_stub(Source::Pos pos, Type type, Symbol name);
     rc<AST> ast_func(Source::Pos pos, Type type, rc<Env> fn_env, optional<Symbol> name, rc<AST> body);
     rc<AST> ast_call(Source::Pos pos, rc<AST> func, const vector<rc<AST>>& args);
-    rc<AST> ast_overload(Source::Pos pos, Type type, const map<Type, rc<Function>>& cases);
+    rc<AST> ast_overload(Source::Pos pos, Type type, const map<Type, either<Builtin, rc<InstTable>>>& cases);
 
     // Constants
 
@@ -129,6 +137,11 @@ namespace basil {
     rc<AST> ast_tail(Source::Pos pos, Type type, rc<AST> operand);
     rc<AST> ast_cons(Source::Pos pos, Type type, rc<AST> head, rc<AST> tail);
     rc<AST> ast_coerce(Source::Pos pos, rc<AST> value, Type dest);
+
+    // Utility Functions
+
+    rc<AST> resolve_overloads(rc<Env> env, rc<AST> root);
+    rc<IRFunction> get_ssa_function(rc<AST> function);
 }
 
 void write(stream& io, const rc<basil::AST>& param);

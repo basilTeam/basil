@@ -12,6 +12,10 @@ struct either {
     } data;
     bool _right;
 
+    either(): _right(false) {
+        new (data.left) T();
+    }
+
     either(const T& l): _right(false) {
         new (data.left) T(l); // copy in
     }

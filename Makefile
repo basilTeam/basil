@@ -9,7 +9,7 @@ TEST_OBJS := $(patsubst %.cpp,%.test,$(TEST_SRCS))
 CXX := clang++
 CXXHEADERS := -I. -Iutil -Ijasmine -Icompiler -Itest
 SHAREDFLAGS := $(CXXHEADERS) -std=c++17 \
-	-ffunction-sections -fdata-sections -ffast-math -fno-rtti -fPIC \
+	-ffunction-sections -fdata-sections -ffast-math -fno-rtti -finline-functions -fPIC \
 	-Wall -Werror -Wno-unused -Wno-comment -Wno-implicit-exception-spec-mismatch \
 	-DINCLUDE_UTF8_LOOKUP_TABLE
 
@@ -34,8 +34,8 @@ clean:
 basil: $(OBJS) compiler/main.o librt.a
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o $@
 
-release: $(OBJS) compiler/main.o librt.a
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o basil -lm
+release: $(SRCS) librt.a
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(SRCS) -o basil -lm
 	strip -g -R .gnu.version \
 			 -R .gnu.hash \
 			 -R .note.ABI-tag \

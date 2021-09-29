@@ -295,8 +295,8 @@ namespace basil {
         return *lazy_hash;
     }
     
-    Compound::Compound(rc<Env> env_in, const map<Value, rc<Form>>& members_in):
-        env(env_in), members(members_in) {}
+    Compound::Compound(const map<Value, rc<Form>>& members_in):
+        members(members_in) {}
 
     Form::Form(): kind(FK_TERM), precedence(INT64_MIN), assoc(ASSOC_LEFT) {}
 
@@ -444,10 +444,28 @@ namespace basil {
         form->invokable = invokable;
         return form;
     }
+    
+    rc<Form> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Callable>>& overloads) {
+        rc<Form> form = ref<Form>(FK_OVERLOADED, precedence, assoc);
+        vector<rc<Callable>> callables;
+        for (rc<Callable> callable : overloads) {
+            bool found_match = false;
+            for (rc<Callable> callable : callables) {
+                if (*callable == *(rc<Callable>)form->invokable) {
+                    found_match = true;
+                    break;
+                }
+            }
+            if (!found_match) callables.push((rc<Callable>)form->invokable);
+        }
+        rc<Overloaded> invokable = ref<Overloaded>(callables);
+        form->invokable = invokable;
+        return form;
+    }
 
-    rc<Form> f_compound(rc<Env> env, const map<Value, rc<Form>>& members) {
+    rc<Form> f_compound(const map<Value, rc<Form>>& members) {
         rc<Form> form = ref<Form>(FK_COMPOUND, INT64_MIN, ASSOC_LEFT); // precedence and associativity are irrelevant here
-        form->compound = ref<Compound>(env, members);
+        form->compound = ref<Compound>(members);
         return form;
     }
 

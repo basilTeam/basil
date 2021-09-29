@@ -858,8 +858,11 @@ namespace basil {
         else if (func.type.of(K_INTERSECT)) {
             // if we're still in an intersect at this point, we'll figure things out in the AST phase
 
-            map<Type, rc<Function>> cases;
-            for (const auto& [t, v] : func.data.isect->values) cases[t] = v.data.fn;
+            map<Type, either<Builtin, rc<InstTable>>> cases;
+            for (auto& [t, v] : func.data.isect->values) {
+                if (v.data.fn->builtin) cases[t] = *v.data.fn->builtin;
+                else cases[t] = v_resolve_body(*v.data.fn, args);
+            }
             vector<rc<AST>> arg_nodes;
             if (args.type.of(K_TUPLE)) for (const Value& v : v_tuple_elements(args))
                 arg_nodes.push(v.data.rt->ast);

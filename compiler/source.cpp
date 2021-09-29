@@ -27,7 +27,8 @@ namespace basil {
 
     Source::Source() {}
 
-    Source::Source(const char* filename) {
+    Source::Source(const char* filename):
+        filepath(some<ustring>(filename)) {
         file f(filename, "r");
         if (!f) {
             err({}, "Could not open file '", filename, "'.");
@@ -118,6 +119,10 @@ namespace basil {
 
     u32 Source::size() const {
         return lines.size();
+    }
+
+    const optional<ustring>& Source::path() const {
+        return filepath;
     }
 
     Source::Pos::Pos():

@@ -10,6 +10,7 @@ namespace basil {
     // but we use the class to provide a nice abstract interface for exploring and
     // revisiting source information without passing it around everywhere as strings.
     class Source {
+        optional<ustring> filepath = none<ustring>();
         vector<ustring*> lines;
 
         // Checks that the Source file is within the size limitations enforced by the
@@ -97,6 +98,9 @@ namespace basil {
         // Reads text from the provided stream until encountering a 
         // line break. Adds the text as a new line to this source.
         View expand_line(stream& io);
+
+        // Returns the path this source originated from, if one exists.
+        const optional<ustring>& path() const;
     };
 
     // Returns a new Source::Pos, representing the smallest range that

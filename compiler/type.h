@@ -380,6 +380,7 @@ namespace basil {
 }
 
 void write(stream& io, const basil::Symbol& symbol);
+void write(stream& io, const basil::Kind& type);
 void write(stream& io, const basil::Type& type);
 
 #endif

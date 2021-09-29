@@ -21,11 +21,3 @@ def (m? find k?) : (Any to Any, Any) -> Any do:
 def (m? with entry?) : (Any to Any, (Any, Any)) -> Any do:
     match m with:
         Map of xs? => Map of (entry :: xs)
-
-def (m : K? to V?) with (entry : (K?, V?)) : V? =
-
-def x = 1 + 2
-
-def f x = {
-    x + 1
-}

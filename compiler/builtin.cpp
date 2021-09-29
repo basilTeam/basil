@@ -748,7 +748,7 @@ namespace basil {
                     for (const auto& [k, v] : (*mod_env)->values) {
                         forms.put(v_symbol({}, k), v.form);
                     }
-                    rc<Form> compound = f_compound(*mod_env, forms);
+                    rc<Form> compound = f_compound(forms);
                     return compound;
                 }, P_SELF, p_var("path")),
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
@@ -768,7 +768,7 @@ namespace basil {
                     for (const auto& [k, v] : mod_env->values) {
                         forms.put(v_symbol({}, k), v.form);
                     }
-                    return f_compound(mod_env, forms);
+                    return f_compound(forms);
                 }, P_SELF, p_term_variadic("contents")),
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 rc<Env> mod_env = extend(env);

@@ -4,6 +4,7 @@
 #include "env.h"
 #include "eval.h"
 #include "token.h"
+#include "obj.h"
 
 #define BASIL_MAJOR_VERSION 1
 #define BASIL_MINOR_VERSION 0
@@ -23,6 +24,12 @@ namespace basil {
     };
 
     optional<ustring> locate_source(const char* path);
+
+    optional<rc<Object>> load_artifact(const char* path);
+    optional<rc<Section>> lex_and_parse(rc<Section> section);
+    optional<rc<Section>> eval_section(rc<Section> section);
+    optional<rc<Section>> to_ast(rc<Section> section);
+    optional<rc<Section>> advance_section(rc<Section> section, SectionType target);
 
     rc<Source> load_step(const char* const& str);
     vector<Token> lex_step(rc<Source> source);
@@ -62,6 +69,9 @@ namespace basil {
 
     // Runs the REPL mode of the compiler.
     void repl();
+
+    // Compiles a single Basil source file to a Basil object.
+    void compile(const char* filename, SectionType target);
 
     // Runs the "run file" mode of the compiler.
     void run(const char* filename);

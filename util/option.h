@@ -79,7 +79,6 @@ struct optional<rc<T>> {
         return o;
     }
 
-
     template<typename ...Args>
     static optional<rc<T>> some(Args... args) {
         optional<rc<T>> o;
@@ -202,7 +201,7 @@ optional<T> none() {
 
 template<typename T, typename F>
 optional<T> apply(const optional<T>& o, const F& func) {
-    if (o.present) return some<T>(func(*o));
+    if (o) return func(*o);
     else return o;
 }
 

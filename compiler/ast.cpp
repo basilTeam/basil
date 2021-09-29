@@ -54,7 +54,6 @@ namespace basil {
                             
                             cached_type = t_var();
                             cached_type.coerces_to(t_intersect(rets));
-                            // println("determined call type = ", cached_type);
                         }
                         else {
                             err(pos, "Ambiguous call to overloaded function.");
@@ -75,7 +74,7 @@ namespace basil {
                         }
                         cached_type = T_ERROR;
                     }
-                    else cached_type = t_ret(resolved.left());
+                    else t = resolved.left(), cached_type = t_ret(resolved.left());
                 }
                 else cached_type = t_ret(t);
             }
@@ -167,6 +166,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTInt>(pos, t, val);
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_int(val);
+        }
     };
 
     struct ASTFloat : public ASTLeaf {
@@ -180,6 +183,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTFloat>(pos, t, val);
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_float(val);
         }
     };
 
@@ -195,6 +202,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTDouble>(pos, t, val);
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_double(val);
+        }
     };
 
     struct ASTVoid : public ASTLeaf {
@@ -207,6 +218,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTVoid>(pos);
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_int(0);
         }
     };
 
@@ -222,6 +237,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTSymbol>(pos, t, val);
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_sym(val);
+        }
     };
 
     struct ASTType : public ASTLeaf {
@@ -235,6 +254,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTType>(pos, t, val);
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_type(val);
         }
     };
 
@@ -250,6 +273,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTBool>(pos, t, val);
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_bool(val);
+        }
     };
 
     struct ASTString : public ASTLeaf {
@@ -264,6 +291,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTString>(pos, t, s);
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_string(s);
+        }
     };
 
     struct ASTChar : public ASTLeaf {
@@ -277,6 +308,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTChar>(pos, t, ch);
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_char(ch);
         }
     };
     
@@ -338,6 +373,10 @@ namespace basil {
             }
             return cached_type;
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_var(name);
+        }
     };
 
     rc<AST> ast_var(Source::Pos pos, rc<Env> env, Symbol name) {
@@ -354,6 +393,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTUnknown>(pos, t);
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_none();
         }
     };
 
@@ -374,6 +417,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTAdd>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_add(func, type(env), left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+        }
     };
 
     rc<AST> ast_add(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -390,6 +437,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTSub>(pos, t, left()->clone(), right()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_sub(func, type(env), left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
         }
     };
 
@@ -408,6 +459,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTMul>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_mul(func, type(env), left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+        }
     };
 
     rc<AST> ast_mul(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -425,6 +480,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTDiv>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_div(func, type(env), left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+        }
     };
 
     rc<AST> ast_div(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -441,6 +500,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTRem>(pos, t, left()->clone(), right()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_rem(func, type(env), left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
         }
     };
 
@@ -461,6 +524,19 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTAnd>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override { // short circuiting
+            rc<IRBlock> branch = func->new_block(), end = func->new_block();
+            func->add_block(branch);
+            func->add_insn(ir_if(func, left()->gen_ssa(env, func), branch, end));
+
+            func->set_active(branch);
+            IRParam rhs = right()->gen_ssa(env, func);
+            func->add_insn(ir_goto(func, end));
+
+            func->set_active(end);
+            return func->add_insn(ir_phi(func, T_BOOL, ir_bool(false), rhs));
+        }
     };
 
     rc<AST> ast_and(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -477,6 +553,19 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTOr>(pos, t, left()->clone(), right()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            rc<IRBlock> branch = func->new_block(), end = func->new_block();
+            func->add_block(branch);
+            func->add_insn(ir_if(func, left()->gen_ssa(env, func), end, branch));
+
+            func->set_active(branch);
+            IRParam rhs = right()->gen_ssa(env, func);
+            func->add_insn(ir_goto(func, end));
+
+            func->set_active(end);
+            return func->add_insn(ir_phi(func, T_BOOL, ir_bool(true), rhs));
         }
     };
 
@@ -495,6 +584,10 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTXor>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_xor(func, T_BOOL, left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+        }
     };
 
     rc<AST> ast_xor(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -511,6 +604,10 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTNot>(pos, t, operand()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_not(func, T_BOOL, operand()->gen_ssa(env, func)));
         }
     };
 
@@ -531,6 +628,11 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTLess>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_less(func, left()->type(env), 
+                left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+        }
     };
 
     rc<AST> ast_less(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -547,6 +649,11 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTLessEqual>(pos, t, left()->clone(), right()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_less_eq(func, left()->type(env), 
+                left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
         }
     };
 
@@ -565,6 +672,11 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTGreater>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_greater(func, left()->type(env), 
+                left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+        }
     };
 
     rc<AST> ast_greater(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -581,6 +693,11 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTGreaterEqual>(pos, t, left()->clone(), right()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_greater_eq(func, left()->type(env), 
+                left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
         }
     };
 
@@ -599,6 +716,11 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTEqual>(pos, t, left()->clone(), right()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_eq(func, left()->type(env), 
+                left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+        }
     };
 
     rc<AST> ast_equal(Source::Pos pos, Type type, rc<AST> left, rc<AST> right) {
@@ -615,6 +737,11 @@ namespace basil {
 
         rc<AST> clone() const override {
             return ref<ASTNotEqual>(pos, t, left()->clone(), right()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return func->add_insn(ir_not_eq(func, left()->type(env), 
+                left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
         }
     };
 
@@ -675,6 +802,21 @@ namespace basil {
                 else cached_type = T_VOID; 
             }
             return cached_type;
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            rc<IRBlock> ifTrue = func->new_block(), end = func->new_block();
+            rc<IRBlock> active = func->active();
+            func->add_block(ifTrue);
+            func->add_insn(ir_if(func, cond()->gen_ssa(env, func), ifTrue, end));
+
+            func->set_active(ifTrue);
+            this->ifTrue()->gen_ssa(env, func);
+            func->add_insn(ir_goto(func, end));
+
+            func->add_block(end);
+            func->set_active(end); // insert future instructions after the conditional
+            return ir_none();
         }
     };
 
@@ -759,6 +901,31 @@ namespace basil {
             }
             return cached_type;
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            rc<IRBlock> ifTrue = func->new_block(), ifFalse = func->new_block(), end = func->new_block();
+            rc<IRBlock> active = func->active();
+            func->add_block(ifTrue);
+            func->add_block(ifFalse);
+            func->add_insn(ir_if(func, cond()->gen_ssa(env, func), ifTrue, ifFalse));
+
+            func->set_active(ifTrue);
+            IRParam ifTrue_result = this->ifTrue()->gen_ssa(env, func);
+            rc<IRBlock> ifTrue_end = func->active();
+            func->add_insn(ir_goto(func, end));
+
+            func->set_active(ifFalse);
+            IRParam ifFalse_result = this->ifFalse()->gen_ssa(env, func);
+            rc<IRBlock> ifFalse_end = func->active();
+            func->add_insn(ir_goto(func, end));
+
+            func->set_active(ifTrue_end);
+            func->add_block(end);
+            end->add_entry(ifFalse_end); // add edge from other branch
+
+            func->set_active(end); // insert future instructions after the conditional
+            return func->add_insn(ir_phi(func, this->ifTrue()->type(env), ifTrue_result, ifFalse_result));
+        }
     };
 
     rc<AST> ast_if_else(Source::Pos pos, rc<AST> cond, rc<AST> ifTrue, rc<AST> ifFalse) {
@@ -816,6 +983,23 @@ namespace basil {
             }
             return cached_type;
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            rc<IRBlock> cond_block = func->new_block(), body_block = func->new_block(), end = func->new_block();
+            func->add_block(cond_block);
+            func->set_active(cond_block);
+            func->add_insn(ir_if(func, cond()->gen_ssa(env, func), body_block, end));
+
+            func->add_block(body_block);
+            func->set_active(body_block);
+            body()->gen_ssa(env, func);
+            func->add_insn(ir_goto(func, cond_block));
+            cond_block->add_entry(body_block);
+
+            func->add_block(end);
+            func->set_active(end); // insert future instructions after the loop
+            return ir_none();
+        }
     };
 
     rc<AST> ast_while(Source::Pos pos, rc<AST> cond, rc<AST> body) {
@@ -860,6 +1044,12 @@ namespace basil {
             }
             return cached_type;
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            IRParam result = ir_none();
+            for (rc<AST> expr : child) result = expr->gen_ssa(env, func);
+            return result;
+        }
     };
 
     rc<AST> ast_do(Source::Pos pos, const vector<rc<AST>>& exprs) {
@@ -880,6 +1070,11 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTDefine>(pos, name, operand()->clone());
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            func->add_insn(ir_assign(func, operand()->type(env), ir_var(name), operand()->gen_ssa(env, func)));
+            return ir_none();
+        }
     };
 
     rc<AST> ast_def(Source::Pos pos, Symbol name, rc<AST> value) {
@@ -899,38 +1094,65 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTFunctionStub>(pos, t, name);
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return ir_none(); // stubs don't have any code
+        }
     };
 
     rc<AST> ast_func_stub(Source::Pos pos, Type type, Symbol name) {
         return ref<ASTFunctionStub>(pos, type, name);
     }
 
+    static u32 anon_id = 0;
+
+    static Symbol next_anon_fn() {
+        return symbol_from(format<ustring>("#lambda_", anon_id ++));
+    }
+
     struct ASTFunction : public ASTUnary {
         rc<Env> env;
-        optional<Symbol> name;
+        Symbol name;
+        rc<IRFunction> ir_func = nullptr;
 
         ASTFunction(Source::Pos pos, Type type, rc<Env> local, optional<Symbol> name_in, rc<AST> body_in):
-            ASTUnary(pos, AST_FUNCTION, type, body_in), env(local), name(name_in) {}
+            ASTUnary(pos, AST_FUNCTION, type, body_in), env(local), name(name_in ? *name_in : next_anon_fn()) {}
 
         void format(stream& io) const override {
-            write(io, name ? *name : symbol_from("#anon"));
+            write(io, name);
         }
 
         rc<AST> clone() const override {
-            return ref<ASTFunction>(pos, t, env, name, operand()->clone());
+            return ref<ASTFunction>(pos, t, env, some<Symbol>(name), operand()->clone());
         }
 
         Type type(rc<Env> outer_env) override {
             if (!resolved) {
                 resolved = true;
                 cached_type = t;
+                operand()->type(env);
+                operand() = resolve_overloads(env, operand());
             }
             return cached_type;
+        }
+
+        IRParam gen_ssa(rc<Env> outer_env, rc<IRFunction> func) override {
+            if (!ir_func) {
+                ir_func = ref<IRFunction>(name, type(outer_env));
+                IRParam returned = operand()->gen_ssa(env, ir_func);
+                ir_func->finish(operand()->type(env), returned);
+            }
+            return ir_var(name);
         }
     };
 
     rc<AST> ast_func(Source::Pos pos, Type type, rc<Env> fn_env, optional<Symbol> name, rc<AST> body) {
         return ref<ASTFunction>(pos, type, fn_env, name, body);
+    }
+    
+    rc<IRFunction> get_ssa_function(rc<AST> function) {
+        if (function->kind() != AST_FUNCTION) panic("Tried to get SSA function from non-function AST node!");
+        return ((rc<ASTFunction>)function)->ir_func;
     }
 
     struct ASTCall : public AST {
@@ -967,6 +1189,13 @@ namespace basil {
             }
             else return cached_type;
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            IRParam f = this->func->gen_ssa(env, func);
+            vector<IRParam> params;
+            for (rc<AST> arg : args) params.push(arg->gen_ssa(env, func));
+            return func->add_insn(ir_call(func, this->func->type(env), f, params));
+        }
     };
 
     rc<AST> ast_call(Source::Pos pos, rc<AST> func, const vector<rc<AST>>& args) {
@@ -974,9 +1203,9 @@ namespace basil {
     }
 
     struct ASTOverload : public ASTLeaf {
-        map<Type, rc<Function>> cases;
+        map<Type, either<Builtin, rc<InstTable>>> cases;
 
-        ASTOverload(Source::Pos pos, Type type, map<Type, rc<Function>> cases_in):
+        ASTOverload(Source::Pos pos, Type type, map<Type, either<Builtin, rc<InstTable>>> cases_in):
             ASTLeaf(pos, AST_OVERLOAD, type), cases(cases_in) {}
 
         void format(stream& io) const override {
@@ -986,9 +1215,15 @@ namespace basil {
         rc<AST> clone() const override {
             return ref<ASTOverload>(pos, t, cases);
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            resolved = false;
+            println("resolved overload call to ", type(env), " with type ", t);
+            return ir_none();
+        }
     };
 
-    rc<AST> ast_overload(Source::Pos pos, Type type, const map<Type, rc<Function>>& cases) {
+    rc<AST> ast_overload(Source::Pos pos, Type type, const map<Type, either<Builtin, rc<InstTable>>>& cases) {
         return ref<ASTOverload>(pos, type, cases);
     }
 
@@ -1018,10 +1253,60 @@ namespace basil {
             }
             return cached_type;
         }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            return operand()->gen_ssa(env, func);
+        }
     };
 
     rc<AST> ast_coerce(Source::Pos pos, rc<AST> value, Type dest) {
         return ref<ASTCoerce>(pos, value, dest);
+    }
+
+    rc<AST> resolve_overloads(rc<Env> env, rc<AST> node) {
+        // first, we recursively fix up overloads in any of this node's children
+        for (const rc<AST>& child : *node) *(rc<AST>*)&child = resolve_overloads(env, child);
+
+        // next, we see if this is a call to an unresolved overloaded function...
+        if (node->kind() == AST_CALL && ((rc<ASTCall>)node)->func->kind() == AST_OVERLOAD) {
+            rc<ASTOverload> overload = ((rc<ASTCall>)node)->func;
+
+            // first, we assemble a list of arguments, so we know what we are resolving the overload
+            // based on
+            vector<Value> vals;
+            vector<Type> arg_types, overloads;
+            for (rc<AST> child : ((rc<ASTCall>)node)->args) {
+                vals.push(v_runtime(child->pos, t_runtime(child->type(env)), child)); 
+                arg_types.push(t_concrete(child->type(env))); // we elide type vars here
+            }
+
+            // next, we collect all the overloaded function types we're going to consider
+            for (const auto& overload : t_intersect_members(overload->t))
+                overloads.push(overload);
+
+            Type args_type = arg_types.size() == 1 ? arg_types[0] : t_tuple(arg_types);
+            auto call = resolve_call(env, overloads, args_type);
+            if (call.is_left()) { // if the call was resolved
+                const auto& cases = ((rc<ASTOverload>)overload)->cases;
+                auto it = cases.find(call.left());
+                if (it == cases.end()) 
+                    panic("Somehow resolved overload to type '", call.left(), "' for which no overload exists!");
+                
+                auto fn = it->second;
+                if (fn.is_left()) { // if it's a builtin function, we invoke it and replace the current
+                    Value args = vals.size() == 1 ? vals[0] 
+                        : v_tuple(span(vals[0].pos, vals[vals.size() - 1].pos), infer_tuple(vals), move(vals));
+                    return fn.left().runtime(env, v_void(overload->pos), args);
+                }
+                else // otherwise, we replace the overload node with a runtime function
+                    ((rc<ASTCall>)node)->func = fn.right()->insts[t_arg(call.left())]->func;
+            }
+            else { // we shouldn't reach here if the program typechecked correctly.
+                if (call.right().ambiguous) panic("Ambiguous overloaded function call after typechecking!");
+                else panic("Mismatched arguments to overloaded function call after typechecking!");
+            }
+        }
+        return node;
     }
 }
 

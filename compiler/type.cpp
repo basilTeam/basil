@@ -79,6 +79,35 @@ namespace basil {
         S_OF = symbol_from("of");
     }
 
+    const char* KIND_NAMES[NUM_KINDS] = {
+        "int",
+        "float",
+        "double",
+        "symbol",
+        "string",
+        "char",
+        "bool",
+        "type",
+        "void",
+        "error",
+        "undefined",
+        "any",
+        "named",
+        "list",
+        "tuple",
+        "array",
+        "union",
+        "intersect",
+        "function",
+        "struct",
+        "dict",
+        "macro",
+        "alias",
+        "tvar", 
+        "module",
+        "runtime"
+    };
+
     const u64 KIND_HASHES[NUM_KINDS] = {
         17611011710004237389ul,
         6730409401287790033ul,
@@ -1502,6 +1531,10 @@ u64 hash(const basil::Kind& kind) {
 
 void write(stream& io, const basil::Symbol& symbol) {
     write(io, basil::string_from(symbol));
+}
+
+void write(stream& io, const basil::Kind& kind) {
+    write(io, basil::KIND_NAMES[kind]);
 }
 
 void write(stream& io, const basil::Type& type) {

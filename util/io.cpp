@@ -44,7 +44,7 @@ void file::unget(u8 c) {
 }
 
 file::operator bool() const {
-		if (!f) return false;
+	if (!f) return false;
     int i = fgetc(f);
     ungetc(i, f);
     return i != EOF;

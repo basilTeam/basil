@@ -94,7 +94,7 @@ public:
         if (this != &other) {
             free(data);
             data = other.data;
-            _size = other.size;
+            _size = other._size;
             _capacity = other._capacity;
             if (other.data == other.fixed) data = fixed, copy((const T*)other.data, _size);
             other.data = nullptr;

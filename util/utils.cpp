@@ -31,4 +31,4 @@ void exit_in_a_panic() {
 
 void __cxa_pure_virtual() {
     panic("Tried to invoke pure virtual function!");
-}
+} 

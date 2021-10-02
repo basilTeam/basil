@@ -668,6 +668,26 @@ namespace basil {
         return at_form(env, mod, v_at(v, 0));
     }
 
+    // this function parses quoted terms in the lhs of mutating expressions (e.g. assignment)
+    // and produces a correct AST. we need this because ordinarily, lvalues would simply evaluate
+    // to their associated values, which are not always assignable (say the destination variable
+    // is already defined as some compile-time-known constant).
+    optional<rc<AST>> lower_lval(rc<Env> env, const Value& lval, const Value& rhs) {
+        if (lval.type == T_SYMBOL) {
+            if (!env->find(lval.data.sym)) {
+                err(lval.pos, "Undefined variable '", lval, "'.");
+                return none<rc<AST>>();
+            }
+            env->def(lval.data.sym, v_runtime(lval.pos, t_runtime(rhs.type), 
+                ast_unknown(lval.pos, t_runtime_base(rhs.type))));
+            return some<rc<AST>>(ast_var(lval.pos, env, lval.data.sym));
+        }
+        else {
+            err(lval.pos, "Assignment target '", lval, "' has unknown pattern.");
+            return none<rc<AST>>();
+        }
+    }
+
     void init_builtins() {
         DEF = {
             t_func(t_tuple(t_list(T_ANY), T_ANY), T_VOID), // type
@@ -707,13 +727,30 @@ namespace basil {
                 auto iterable = iter_list(args);
                 auto a = iterable.begin(), b = a;
                 ++ b;
-                while (b != iterable.end()) ++ a, ++ b; // loop until the end
+
+                // we need to catch any/all runtime subexprs and emit different code
+                // if any exist. this is because, similar to an `if` where the condition is
+                // known at compile time, `do`'s order of execution is independent of any
+                // runtime subexpressions. but, we don't want to discard them like we'd
+                // discard compile-time values, so we track them in this vector.
+                static vector<rc<AST>> runtime;
+                runtime.clear();
+
+                while (b != iterable.end()) {
+                    if (b->type.of(K_RUNTIME)) runtime.push(b->data.rt->ast);
+                    ++ a, ++ b; // loop until the end
+                }
+                if (runtime.size()) { // we want to run all runtime subexprs
+                    rc<AST> ast = ast_do(call_term.pos, runtime);
+                    return v_runtime(ast->pos, t_runtime(ast->type(env)), ast);
+                }
                 return *a; // return the last value 
             },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
                 auto iterable = iter_list(args);
                 vector<rc<AST>> subexprs;
                 for (const Value& v : iterable) subexprs.push(v.data.rt->ast);
+                println("args = ", args);
                 return ast_do(args.pos, subexprs); 
             }
         };
@@ -929,12 +966,39 @@ namespace basil {
             t_func(t_tuple(T_ANY, T_ANY), T_VOID), // type
             f_callable(PREC_CONTROL, ASSOC_RIGHT, P_SELF, p_quoted("cond"), p_quoted("body")), // form
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                rc<Env> before = env->clone(); // we track the initial state before entering the loop
+
                 Value cond = v_at(args, 0), body = v_at(args, 1);
                 Value cond_eval = eval(env, cond);
                 while (cond_eval.type == T_BOOL && cond_eval.data.b) {
                     Value body_eval = eval(env, body); // eval body
                     cond_eval = eval(env, cond); // re-eval condition
                 }
+
+                if (cond_eval.type.of(K_RUNTIME)) {
+                    // because while quotes both of its arguments, and is the only construct in basil
+                    // that contains a backedge, we need to do some trickery to generate a proper
+                    // runtime AST for it...
+                    
+                    Value body_eval = lower(env, eval(env, body)); // eval body
+                    if (body_eval.type == T_ERROR) return v_error({});
+
+                    vector<rc<AST>> defs;
+                    for (const auto& [k, v] : before->values) if (!v.type.of(K_RUNTIME) 
+                        && env->find(k)->type.of(K_RUNTIME)) {
+                        // insert runtime definitions for anything we lowered in the course of evaluating the loop
+                        Value lowered_init = lower(env, v);
+                        if (lowered_init.type == T_ERROR) return v_error({}); // propagate errors
+                        defs.push(ast_def(v.pos, k, lowered_init.data.rt->ast));
+                    }
+
+                    Source::Pos pos = span(cond_eval.pos, body_eval.pos);
+                    defs.push(ast_while(pos, cond_eval.data.rt->ast, body_eval.data.rt->ast));
+                    return v_runtime(pos, t_runtime(T_VOID), ast_do(pos, defs));
+                }
+
+                if (cond_eval.type == T_ERROR) return v_error({}); // propagate errors
+
                 if (cond_eval.type != T_BOOL) {
                     err(cond_eval.pos, "Condition in 'while' expression must evaluate to a boolean; got '",
                         cond_eval.type, "' instead.");
@@ -942,7 +1006,9 @@ namespace basil {
                 }
                 return v_void({});
             },
-            nullptr
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_while(args.pos, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+            }
         };
         ARROW = {
             t_func(t_tuple(T_ANY, T_ANY), T_BOOL),
@@ -1445,6 +1511,18 @@ namespace basil {
             },
             nullptr
         };
+        ASSIGN = {
+            t_func(t_tuple(T_SYMBOL, T_ANY), T_VOID),
+            f_callable(PREC_COMPOUND - 20, ASSOC_RIGHT, p_quoted("dest"), P_SELF, p_var("src")),
+            nullptr,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                Value lhs = v_at(args, 0);
+                auto lhs_ast = lower_lval(env, lhs, v_at(args, 1));
+                if (!lhs_ast) return nullptr;
+                return ast_assign(args.pos, ASSIGN.type, *lhs_ast, v_at(args, 1).data.rt->ast);
+            },
+            true // preserve quoted dest
+        };
         DEBUG = {
             t_func(T_ANY, T_VOID),
             f_callable(PREC_ANNOTATED, ASSOC_RIGHT, P_SELF, p_var("value")),
@@ -1513,6 +1591,7 @@ namespace basil {
         env->def(symbol_from("at"), v_intersect(&AT_MODULE, &AT_TUPLE, &AT_ARRAY));
         env->def(symbol_from("."), v_func(DOT));
         env->def(symbol_from(":>"), v_func(IS_SUBTYPE));
+        env->def(symbol_from("="), v_func(ASSIGN));
 
         // type primitives
         env->def(symbol_from("Int"), v_type({}, T_INT));

@@ -6,6 +6,7 @@
 #include "util/option.h"
 #include "util/ustr.h"
 #include "util/hash.h"
+#include "util/sets.h"
 #include "type.h"
 
 namespace basil {
@@ -29,7 +30,7 @@ namespace basil {
 
     struct IRParam {
         union Data {
-            struct { Symbol name; u32 id; } var;
+            u32 var;
             i64 i;
             float f32;
             double f64;
@@ -43,6 +44,10 @@ namespace basil {
             ~Data();
         } data;
         IRKind kind;
+
+        // We use this to inform printing of IR parameters, since variables
+        // are stored as indices within a function's variable table.
+        static const IRFunction* CURRENT_FN;
 
         IRParam(IRKind kind);
         ~IRParam();
@@ -59,6 +64,15 @@ namespace basil {
         vector<rc<IRInsn>> insns;
         vector<rc<IRBlock>> in, out;
 
+        // The set of block ids this basic block dominates.
+        bitset dom, dom_frontier;
+
+        // The immediate dominator of this basic block.
+        rc<IRBlock> idom;
+
+        // Tracks the SSA register numbers going in and out of this block.
+        map<Symbol, u32> vars_in, vars_out;
+
         void add_exit(rc<IRBlock> dest);
         void add_entry(rc<IRBlock> dest);
 
@@ -67,16 +81,30 @@ namespace basil {
         void format(stream& io) const;
     };
 
+    struct VarInfo {
+        Symbol name;
+        u32 id;
+    };
+
+    bool operator==(const VarInfo& a, const VarInfo& b);
+
     // Represents a single Basil procedure. Functions contain graphs of basic blocks,
     // which themselves contain instruction sequences. 
     struct IRFunction {
         Symbol label;
         Type type;
+
         u32 temp_idx = 0;
+        vector<VarInfo> vars;
+        map<VarInfo, u32> var_indices;
+        map<Symbol, u32> var_numbers;
+
         u32 block_idx = 0;
-        map<Symbol, u32> var_indices;
         vector<rc<IRBlock>> blocks;
         rc<IRBlock> entry, exit, active_block;
+
+        // Tracks which passes have been done over this function.
+        bitset passes;
 
         // Creates an empty function with the provided label and type.
         IRFunction(Symbol label, Type type);
@@ -114,16 +142,26 @@ namespace basil {
         Type type;
         optional<IRParam> dest;
         vector<IRParam> src; 
+        bitset in, out;
+
         IRInsn(Type type_in, const optional<IRParam>& dest_in);
 
         virtual ~IRInsn();
 
+        // Computes live-in set based on this instruction's live-out set.
+        // Returns true if the live-in set changed during the process, false otherwise.
+        virtual bool liveout();
+
         // Writes a textual representation of this instruction to the provided
         // output stream.
         virtual void format(stream& io) const = 0;
+
+        // Writes liveness information about this instruction to the provided output
+        // stream.
+        void show_liveness(stream& io) const;
     };
 
-    IRParam ir_var(Symbol name);
+    IRParam ir_var(rc<IRFunction> func, Symbol name);
     IRParam ir_int(i64 i);
     IRParam ir_float(float f);
     IRParam ir_double(double d);
@@ -157,7 +195,7 @@ namespace basil {
     rc<IRInsn> ir_tail(rc<IRFunction> func, Type list_type, const IRParam& list);
     rc<IRInsn> ir_cons(rc<IRFunction> func, Type list_type, const IRParam& head, const IRParam& tail);
     rc<IRInsn> ir_call(rc<IRFunction> func, Type func_type, const IRParam& proc, const vector<IRParam>& args);
-    rc<IRInsn> ir_arg(rc<IRFunction> func, Type type, const IRParam& dest);
+    rc<IRInsn> ir_arg(rc<IRFunction> func, Type type, const IRParam& dest, u32 arg);
     rc<IRInsn> ir_assign(rc<IRFunction> func, Type type, const IRParam& dest, const IRParam& src);
     rc<IRInsn> ir_phi(rc<IRFunction> func, Type type, const vector<IRParam>& inputs);
     rc<IRInsn> ir_return(Type return_type, const IRParam& value);
@@ -166,7 +204,75 @@ namespace basil {
     rc<IRInsn> ir_phi(rc<IRFunction> func, Type type, const Args&... args) {
         return ir_phi(func, type, vector_of<IRParam>(args...));
     }
+
+    // Passes
+
+    using Pass = void(*)(rc<IRFunction>);
+
+    enum PassType {
+        ENFORCE_SSA,
+        DOMINANCE_FRONTIER,
+        LIVENESS,
+        REACHING_DEFS,
+        DEAD_CODE_ELIM,
+        COMMON_SUBEXPR_ELIM,
+        GLOBAL_VALUE_NUMBERING,
+        CONSTANT_FOLDING,
+        OPTIMIZE_ARITHMETIC,
+        NUM_PASS_TYPES
+    };
+
+    extern Pass PASS_TABLE[NUM_PASS_TYPES];
+
+    // Require that the pass denoted by the provided pass type be performed for the
+    // provided function before proceeding. This is used to enforce certain computations
+    // be done before others in the optimization process.
+    void require(rc<IRFunction> func, PassType pass);
+
+    // Mark a pass type as invalid for the provided function. This is used to denote
+    // passes that require repetition, since their invariants have been invalidated
+    // by recent changes. Invalidating a pass does not eagerly force it to be recomputed,
+    // but future calls to require() for that pass will.
+    void invalidate(rc<IRFunction> func, PassType pass);
+
+    // Enforces SSA over the instructions of the provided function. This means
+    // detecting duplicate assignments of the same variable and numbering accordingly,
+    // as well as inserting any necessary phi nodes.
+    void enforce_ssa(rc<IRFunction> func);
+
+    // Computes dominance and dominance frontiers for all basic blocks in the 
+    // provided function.
+    void dominance_frontiers(rc<IRFunction> func);
+
+    // Computes liveness information for each variable in the provided function.
+    void liveness_ssa(rc<IRFunction> func);
+
+    // Computes reaching definitions for each variable in the provided function.
+    void rdefs_ssa(rc<IRFunction> func);
+
+    // Performs dead code elimination over all expressions in the provided function.
+    void dead_code_elim_ssa(rc<IRFunction> func);
+
+    // Performs common subexpression elimination over all expressions in the provided
+    // function.
+    void cse_elim_ssa(rc<IRFunction> func);
+
+    // Performs global value numbering and eliminates duplicate computations in the
+    // provided function.
+    void gvn_ssa(rc<IRFunction> func);
+
+    // Folds any available constant expressions in the provided function.
+    void constant_folding_ssa(rc<IRFunction> func);
+
+    // Transforms arithmetic instructions to generally faster equivalents from a
+    // high-level perspective. Generally costly instructions like division are
+    // avoided, but smaller optimizations like code size reduction are left to
+    // a lower-level code generation pass.
+    void optimize_arithmetic_ssa(rc<IRFunction> func);
 }
+
+template<>
+u64 hash(const basil::VarInfo& i);
 
 void write(stream& io, const basil::IRParam& param);
 void write(stream& io, const rc<basil::IRInsn>& insn);

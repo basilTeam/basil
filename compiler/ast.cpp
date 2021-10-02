@@ -375,7 +375,7 @@ namespace basil {
         }
 
         IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
-            return ir_var(name);
+            return ir_var(func, name);
         }
     };
 
@@ -991,12 +991,12 @@ namespace basil {
             func->add_insn(ir_if(func, cond()->gen_ssa(env, func), body_block, end));
 
             func->add_block(body_block);
+            func->add_block(end);
             func->set_active(body_block);
             body()->gen_ssa(env, func);
             func->add_insn(ir_goto(func, cond_block));
             cond_block->add_entry(body_block);
 
-            func->add_block(end);
             func->set_active(end); // insert future instructions after the loop
             return ir_none();
         }
@@ -1072,7 +1072,7 @@ namespace basil {
         }
 
         IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
-            func->add_insn(ir_assign(func, operand()->type(env), ir_var(name), operand()->gen_ssa(env, func)));
+            func->add_insn(ir_assign(func, operand()->type(env), ir_var(func, name), operand()->gen_ssa(env, func)));
             return ir_none();
         }
     };
@@ -1113,17 +1113,20 @@ namespace basil {
     struct ASTFunction : public ASTUnary {
         rc<Env> env;
         Symbol name;
+        vector<Symbol> args;
         rc<IRFunction> ir_func = nullptr;
 
-        ASTFunction(Source::Pos pos, Type type, rc<Env> local, optional<Symbol> name_in, rc<AST> body_in):
-            ASTUnary(pos, AST_FUNCTION, type, body_in), env(local), name(name_in ? *name_in : next_anon_fn()) {}
+        ASTFunction(Source::Pos pos, Type type, rc<Env> local, 
+            optional<Symbol> name_in, const vector<Symbol>& args_in, rc<AST> body_in):
+            ASTUnary(pos, AST_FUNCTION, type, body_in), env(local), 
+            name(name_in ? *name_in : next_anon_fn()), args(args_in) {}
 
         void format(stream& io) const override {
             write(io, name);
         }
 
         rc<AST> clone() const override {
-            return ref<ASTFunction>(pos, t, env, some<Symbol>(name), operand()->clone());
+            return ref<ASTFunction>(pos, t, env, some<Symbol>(name), args, operand()->clone());
         }
 
         Type type(rc<Env> outer_env) override {
@@ -1139,15 +1142,19 @@ namespace basil {
         IRParam gen_ssa(rc<Env> outer_env, rc<IRFunction> func) override {
             if (!ir_func) {
                 ir_func = ref<IRFunction>(name, type(outer_env));
+                for (u32 i = 0; i < args.size(); i ++) ir_func->add_insn(
+                    ir_arg(ir_func, env->find(args[i])->data.rt->ast->type(outer_env), ir_var(func, args[i]), i)
+                );
                 IRParam returned = operand()->gen_ssa(env, ir_func);
                 ir_func->finish(operand()->type(env), returned);
             }
-            return ir_var(name);
+            return ir_var(func, name);
         }
     };
 
-    rc<AST> ast_func(Source::Pos pos, Type type, rc<Env> fn_env, optional<Symbol> name, rc<AST> body) {
-        return ref<ASTFunction>(pos, type, fn_env, name, body);
+    rc<AST> ast_func(Source::Pos pos, Type type, rc<Env> fn_env, optional<Symbol> name, 
+        const vector<Symbol>& args, rc<AST> body) {
+        return ref<ASTFunction>(pos, type, fn_env, name, args, body);
     }
     
     rc<IRFunction> get_ssa_function(rc<AST> function) {
@@ -1225,6 +1232,31 @@ namespace basil {
 
     rc<AST> ast_overload(Source::Pos pos, Type type, const map<Type, either<Builtin, rc<InstTable>>>& cases) {
         return ref<ASTOverload>(pos, type, cases);
+    }
+
+    // Mutation
+
+    struct ASTAssign : public ASTBinary {
+        ASTAssign(Source::Pos pos, Type type, rc<AST> lhs, rc<AST> rhs):
+            ASTBinary(pos, AST_ASSIGN, type, lhs, rhs) {}
+        
+        void format(stream& io) const override {
+            write(io, "(= ", left(), " ", right(), ")");
+        }
+
+        rc<AST> clone() const override {
+            return ref<ASTAssign>(pos, t, left()->clone(), right()->clone());
+        }
+
+        IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            func->add_insn(ir_assign(func, left()->type(env), 
+                left()->gen_ssa(env, func), right()->gen_ssa(env, func)));
+            return ir_none();
+        }
+    };
+    
+    rc<AST> ast_assign(Source::Pos pos, Type type, rc<AST> dest, rc<AST> src) {
+        return ref<ASTAssign>(pos, type, dest, src);
     }
 
     // Type stuff

@@ -136,6 +136,33 @@ namespace basil {
         return result;
     }
 
+    rc<AST> ast_step(const Value& value) {
+        if (value.type == T_ERROR) return nullptr;
+        Value result = lower(root_env(), value);
+        if (error_count()) print_errors(_stdout, nullptr), discard_errors();
+        if (!result.type.of(K_RUNTIME)) return nullptr;
+        return result.data.rt->ast;
+    }
+
+    map<Symbol, rc<IRFunction>> ssa_step(const rc<AST>& ast_in) {
+        rc<AST> ast = ast_in;
+        if (!ast) return {};
+        rc<IRFunction> main_ir = ref<IRFunction>(symbol_from("#main"), t_func(T_VOID, T_VOID));
+        ast->gen_ssa(root_env(), main_ir);
+        main_ir->finish(T_VOID, ir_none());
+
+        if (error_count()) print_errors(_stdout, nullptr), discard_errors();
+
+        map<Symbol, rc<IRFunction>> functions;
+        functions[symbol_from("#main")] = main_ir;
+        for (const auto& [k, v] : root_env()->values) if (v.type.of(K_FUNCTION)) {
+            for (const auto& [_, v] : v.data.fn->resolutions) for (const auto& [_, v] : v->insts) {
+                if (v->func && get_ssa_function(v->func)) functions[k] = get_ssa_function(v->func);
+            }
+        }
+        return functions;
+    }
+
     static bool repl_mode = false;
 
     bool is_repl() {

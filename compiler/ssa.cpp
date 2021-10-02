@@ -1,5 +1,11 @@
 #include "ssa.h"
 
+
+template<>
+u64 hash(const basil::VarInfo& i) {
+    return raw_hash(&i, sizeof(basil::VarInfo));   
+}
+
 namespace basil {
     IRParam::Data::Data(): i(0) {}
     IRParam::Data::~Data() {}
@@ -48,13 +54,17 @@ namespace basil {
         return *this;
     }
 
+    const IRFunction* IRParam::CURRENT_FN = nullptr;
+
     void IRParam::format(stream& io) const {
         switch (kind) {
             case IK_NONE: return write(io, "()");
-            case IK_VAR: 
-                write(io, data.var.name);
-                if (data.var.id) write(io, data.var.id);
+            case IK_VAR: {
+                const auto& i = CURRENT_FN->vars[data.var];
+                write(io, i.name);
+                if (*string_from(i.name).begin() != '#') write(io, BOLDMAGENTA, '#', i.id, RESET);
                 break;
+            }
             case IK_INT: return write(io, data.i);
             case IK_FLOAT: return write(io, data.f32);
             case IK_DOUBLE: return write(io, data.f64);
@@ -63,7 +73,7 @@ namespace basil {
             case IK_SYMBOL: return write(io, ':', data.sym);
             case IK_TYPE: return write(io, data.type);
             case IK_CHAR: return write(io, "'", data.ch, "'");
-            case IK_BLOCK: return write(io, "BB", data.block);
+            case IK_BLOCK: return write(io, BOLDYELLOW, "BB", data.block, RESET);
         }
     }
 
@@ -78,12 +88,27 @@ namespace basil {
     }
 
     void IRBlock::format(stream& io) const {
-        writeln(io, "BB", id, ":");
-        for (const auto& insn : insns) {
-            write(io, '\t');
-            insn->format(io);
-            writeln(io, "");
+        write(io, BOLDYELLOW, "BB", id, RESET, ":\t", GRAY);
+        write(io, "(in =");
+        for (rc<IRBlock> bb : in) write(io, " ", bb->id);
+        write(io, ")\t");
+        write(io, "(out =");
+        for (rc<IRBlock> bb : out) write(io, " ", bb->id);
+        write(io, ")\t");
+        if (dom.begin() != dom.end()) {
+            write_seq(io, dom, "(DOM = ", ", ", ")\t");
+            write(io, "idom = ", idom ? ::format<ustring>(idom->id) : "Ø", "\t");
+            write_seq(io, dom_frontier, "(DF = ", ", ", ")\t");
         }
+        write(io, RESET, "\n");
+        
+        for (const auto& insn : insns) {
+            writeln(io, '\t', insn);
+        }
+    }
+
+    bool operator==(const VarInfo& a, const VarInfo& b) {
+        return a.name == b.name && a.id == b.id;
     }
 
     IRFunction::IRFunction(Symbol label_in, Type type_in): 
@@ -129,20 +154,29 @@ namespace basil {
     }
 
     void IRFunction::format(stream& io) const {
-        writeln(io, "---- ", label, " : ", type, "\t(", blocks.size(), " blocks)");
-        for (rc<IRBlock> block : blocks) block->format(io);
+        IRParam::CURRENT_FN = this;
+        writeln(io, "---- ", BOLDCYAN, label, RESET, " : ", type, "\t(", blocks.size(), " blocks)");
+        for (rc<IRBlock> block : blocks) write(io, block);
+    }
+
+    IRParam find_var(rc<IRFunction> func, VarInfo info) {
+        IRParam p(IK_VAR);
+        auto existing = func->var_indices.find(info);
+        if (existing != func->var_indices.end()) p.data.var = existing->second;
+        else {
+            func->var_indices[info] = func->vars.size();
+            p.data.var = func->vars.size();
+            func->vars.push(info);
+        }
+        return p;
     }
 
     IRParam ir_temp(rc<IRFunction> func) {
-        IRParam p(IK_VAR);
-        p.data.var = { symbol_from(format<ustring>("#", func->temp_idx ++)), 0 };
-        return p;
+        return find_var(func, { symbol_from(format<ustring>("#", func->temp_idx ++)), 0 });
     }
 
-    IRParam ir_var(Symbol name) {
-        IRParam p(IK_VAR);
-        p.data.var = { name, 0 };
-        return p;
+    IRParam ir_var(rc<IRFunction> func, Symbol name) {
+        return find_var(func, { name, 0 });
     }
 
     IRParam ir_int(i64 i) {
@@ -207,6 +241,36 @@ namespace basil {
         type(type_in), dest(dest_in) {}
     
     IRInsn::~IRInsn() {}
+
+    bool IRInsn::liveout() {
+        bool result = false;
+        bitset new_in = out;
+        for (const IRParam& p : src) if (p.kind == IK_VAR) new_in.insert(p.data.var);
+        if (dest && dest->kind == IK_VAR) new_in.erase(dest->data.var);
+        for (u32 i : new_in) result = in.insert(i) || result;
+        // print("\tinstruction ");
+        // format(_stdout);
+        // show_liveness(_stdout);
+        // println(" is ", result ? "not " : "", "done working");
+        return result;
+    }
+    
+    void IRInsn::show_liveness(stream& io) const {
+        vector<IRParam> in_vars, out_vars;
+        for (u32 i : in) {
+            IRParam p(IK_VAR);
+            p.data.var = i;
+            in_vars.push(p);
+        }
+        for (u32 i : out) {
+            IRParam p(IK_VAR);
+            p.data.var = i;
+            out_vars.push(p);
+        }
+        write_seq(io, in_vars, "{", ", ", "}");
+        write(io, " => ");
+        write_seq(io, out_vars, "{", ", ", "}");
+    }
 
     struct IRUnary : public IRInsn {
         IRUnary(rc<IRFunction> func, Type type, const IRParam& operand):
@@ -470,7 +534,20 @@ namespace basil {
     rc<IRInsn> ir_call(rc<IRFunction> func, Type func_type, const IRParam& proc, const vector<IRParam>& args) {
         return ref<IRCall>(func, func_type, proc, args);
     }
-    // rc<IRInsn> ir_arg(rc<IRFunction> func, Type type, const IRParam& dest);
+
+    struct IRArg : public IRInsn {
+        u32 arg;
+        IRArg(rc<IRFunction> func, Type type, const IRParam& dest, u32 arg_in):
+            IRInsn(type, some<IRParam>(dest)), arg(arg_in) {}
+
+        void format(stream& io) const override {
+            write(io, *dest, " = arg ", arg);
+        }
+    };
+
+    rc<IRInsn> ir_arg(rc<IRFunction> func, Type type, const IRParam& dest, u32 arg) {
+        return ref<IRArg>(func, type, dest, arg);
+    }
 
     struct IRAssign : public IRInsn {
         IRAssign(rc<IRFunction> func, Type type, const IRParam& dest, const IRParam& src_in):
@@ -489,19 +566,23 @@ namespace basil {
 
     struct IRPhi : public IRInsn {
         rc<IRBlock> block;
-        IRPhi(rc<IRFunction> func, Type type, const vector<IRParam>& inputs):
-            IRInsn(type, some<IRParam>(ir_temp(func))), block(func->active()) {
+        IRPhi(rc<IRFunction> func, Type type, const IRParam& dest, const vector<IRParam>& inputs):
+            IRInsn(type, some<IRParam>(dest)), block(func->active()) {
             src = inputs;
         }
 
         void format(stream& io) const override {
-            write(io, *dest, " = Φ ");
-            write_seq(io, src, "", ", ", "");
+            write(io, *dest, " = Φ");
+            write_seq(io, src, "(", ", ", ")");
         }
     };
 
     rc<IRInsn> ir_phi(rc<IRFunction> func, Type type, const vector<IRParam>& inputs) {
-        return ref<IRPhi>(func, type, inputs);
+        return ref<IRPhi>(func, type, ir_temp(func), inputs);
+    }
+
+    rc<IRInsn> ir_phi(rc<IRFunction> func, Type type, const IRParam& dest, const vector<IRParam>& inputs) {
+        return ref<IRPhi>(func, type, dest, inputs);
     }
 
     struct IRReturn : public IRInsn {
@@ -517,6 +598,226 @@ namespace basil {
 
     rc<IRInsn> ir_return(Type return_type, const IRParam& value) {
         return ref<IRReturn>(return_type, value);
+    }
+
+    // Passes
+
+    Pass PASS_TABLE[NUM_PASS_TYPES] = {
+        enforce_ssa,
+        dominance_frontiers,
+        liveness_ssa,
+        rdefs_ssa,
+        dead_code_elim_ssa,
+        cse_elim_ssa,
+        gvn_ssa,
+        constant_folding_ssa,
+        optimize_arithmetic_ssa
+    };
+    
+    void require(rc<IRFunction> func, PassType pass) {
+        if (!func->passes.contains(pass)) {
+            func->passes.insert(pass);
+            PASS_TABLE[pass](func);
+        }
+    }
+
+    void invalidate(rc<IRFunction> func, PassType pass) {
+        func->passes.erase(pass);
+    }
+
+    void enforce_ssa_block(rc<IRFunction> func, rc<IRBlock> block) {
+        // compute numbering on block entry, from predecessors
+        map<Symbol, bitset> problematic;
+        for (const auto& pred : block->in) {
+            for (const auto& [k, v] : pred->vars_out) {
+                auto it = block->vars_in.find(k);
+                if (it != block->vars_in.end()) {
+                    problematic[k].insert(v); // build set of conflicts so we can make a phi later
+                    problematic[k].insert(it->second); 
+                }
+                else block->vars_in[k] = v;
+            }
+        }
+
+        vector<rc<IRInsn>> phis;
+        for (const auto& [k, v] : problematic) {
+            IRParam dest = find_var(func, { k, ++ func->var_numbers[k] }); // fresh number as result of phi
+            vector<IRParam> params;
+            for (u32 i : v) params.push(find_var(func, { k, i }));
+            phis.push(ir_phi(func, T_ANY, dest, params));
+        }
+
+        // number instructions in this block
+        for (auto& insn : block->insns) {
+            // rename src vars
+            for (IRParam& p : insn->src) if (p.kind == IK_VAR) {
+                Symbol s = func->vars[p.data.var].name;
+                auto it = func->var_numbers.find(s);
+                if (it != func->var_numbers.end()) // use current register id
+                    p = find_var(func, { s, it->second });
+                else 
+                    panic("Found variable '", s, "' usage before any definition!");
+            }
+
+            // rename dest var
+            if (insn->dest && insn->dest->kind == IK_VAR) {
+                Symbol s = func->vars[insn->dest->data.var].name;
+                auto it = func->var_numbers.find(s);
+                if (it != func->var_numbers.end()) // increment register id and continue
+                    *insn->dest = find_var(func, { s, ++ it->second });
+                else func->var_numbers[s] = 0; // must be the first def, so we start at zero
+                block->vars_out[s] = it->second;
+            }
+        }
+
+        // insert phis after the rest of our instructions have been processed
+        vector<rc<IRInsn>> existing = move(block->insns);
+        block->insns = move(phis);
+        for (const auto& insn : existing) block->insns.push(insn);
+    }
+    
+    void enforce_ssa(rc<IRFunction> func) {
+        require(func, DOMINANCE_FRONTIER);
+
+        // reset any previous attempts at ssa
+        func->var_numbers.clear();
+        for (auto& block : func->blocks) block->vars_in.clear(), block->vars_out.clear();
+        for (auto& block : func->blocks) for (auto& insn : block->insns) {
+            // reset all src and dest params to index 0
+            for (IRParam& p : insn->src) if (p.kind == IK_VAR) 
+                p = ir_var(func, func->vars[p.data.var].name);
+            if (insn->dest) if (insn->dest->kind == IK_VAR) 
+                insn->dest = some<IRParam>(ir_var(func, func->vars[insn->dest->data.var].name));
+        }
+
+        // compute SSA numberings for each block
+        for (auto& block : func->blocks) enforce_ssa_block(func, block);
+    }
+
+    void dominance_frontiers(rc<IRFunction> func) {
+        // compute dominance
+
+        // entry node dominates itself
+        func->entry->dom.insert(func->entry->id);
+
+        // all other nodes are dominated by all nodes to start
+        for (rc<IRBlock>& block : func->blocks) if (!block.is(func->entry)) {
+            for (const rc<IRBlock>& other : func->blocks) block->dom.insert(other->id);
+        }
+
+        // iteratively work on computing dominance
+        bool working = true;
+        while (working) {
+            working = false;
+            for (u32 i = 1; i < func->blocks.size(); i ++) { // skip entry block (id 0)
+                bool first = true;
+                bitset tmp;
+                for (const rc<IRBlock>& bb : func->blocks[i]->in) {
+                    // print(" ", bb->id);
+                    if (first) tmp = bb->dom, first = false;
+                    else for (u32 i : tmp) 
+                        if (!bb->dom.contains(i)) tmp.erase(i); // safe to erase mid-iteration for bitset
+                }
+                tmp.insert(i);
+                // println("");
+                // print("tmp(", i, ") = ");
+                // write_seq(_stdout, tmp, "", ", ", "\n");
+                // print("DOM(", i, ") = ");
+                // write_seq(_stdout, func->blocks[i]->dom, "", ", ", "\n");
+
+                bool diff = false;
+                for (u32 i : tmp) if (!func->blocks[i]->dom.contains(i)) diff = true;
+                for (u32 i : func->blocks[i]->dom) if (!tmp.contains(i)) diff = true;
+                // if tmp(i) != DOM(i), replace DOM with tmp
+                if (diff) {
+                    func->blocks[i]->dom = tmp;
+                    working = true;
+                }
+            }
+        }
+
+        // compute immediate dominators for all nodes other than the entry
+        for (rc<IRBlock>& block : func->blocks) if (!block.is(func->entry)) {
+            vector<rc<IRBlock>> queue;
+            for (rc<IRBlock>& pred : block->in) queue.push(pred);
+            while (queue.size()) {
+                rc<IRBlock> b = queue.back();
+                queue.pop();
+                if (block->dom.contains(b->id)) {
+                    block->idom = b;
+                    break;
+                }
+                else for (rc<IRBlock>& pred : b->in) queue.push(pred);
+            }
+        }
+
+        // compute dominance frontiers
+        for (rc<IRBlock>& block : func->blocks) if (block->in.size() > 1) { // only consider join points
+            for (rc<IRBlock>& pred : block->in) { // for each immediate predecessor of block...
+                rc<IRBlock> runner = pred;
+                // we'll look for all nodes between us and the nearest dominating node
+                while (runner && !runner.is(block->idom) && !runner.is(block)) {
+                    runner->dom_frontier.insert(block->id);
+                    runner = runner->idom;
+                }
+            }
+        }
+    }
+
+    bool liveness_block(rc<IRBlock> block) {
+        bool working = false;
+        for (i64 i = i64(block->insns.size()) - 1; i >= 0; i --) {
+            rc<IRInsn>& insn = block->insns[i];
+            if (i < i64(block->insns.size()) - 1) {
+                for (u32 i : block->insns[i + 1]->in)
+                    working = insn->out.insert(i) || working;
+            }
+            working = insn->liveout() || working;
+        }
+        // println("block ", block->id, " is ", working ? "not " : "", "done working");
+        return working;
+    }
+    
+    void liveness_ssa(rc<IRFunction> func) {
+        for (auto block : func->blocks) for (auto insn : block->insns)
+            insn->in.clear(), insn->out.clear();
+        
+        bool working = true;
+        while (working) {
+            working = false;
+            for (i64 i = i64(func->blocks.size()) - 1; i >= 0; i --) {
+                working = liveness_block(func->blocks[i]) || working; // compute liveness for this basic block
+
+                for (auto& pred : func->blocks[i]->in) {
+                    for (u32 j : func->blocks[i]->insns.front()->in) // unify our new in with each predecessor's out
+                        working = pred->insns.back()->out.insert(j) || working;
+                }
+            }
+        }
+    }
+    
+    void rdefs_ssa(rc<IRFunction> func) {
+        panic("Unimplemented!");
+    }
+
+    void dead_code_elim_ssa(rc<IRFunction> func) {
+        panic("Unimplemented!");
+    }
+
+    void cse_elim_ssa(rc<IRFunction> func) {
+        panic("Unimplemented!");
+    }
+
+    void gvn_ssa(rc<IRFunction> func) {
+        panic("Unimplemented!");
+    }
+
+    void constant_folding_ssa(rc<IRFunction> func) {
+        panic("Unimplemented!");
+    }
+
+    void optimize_arithmetic_ssa(rc<IRFunction> func) {
+        panic("Unimplemented!");
     }
 }
 

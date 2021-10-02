@@ -36,6 +36,8 @@ namespace basil {
     Value parse_step(const vector<Token>& tokens);
     Value resolve_step(const Value& term);
     Value eval_step(const Value& term);
+    rc<AST> ast_step(const Value& value);
+    map<Symbol, rc<IRFunction>> ssa_step(const rc<AST>& ast);
 
     template<typename T>
     T compile(const T& input) {

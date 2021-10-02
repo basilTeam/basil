@@ -654,11 +654,14 @@ namespace basil {
         return overloads[0];
     }
 
-    Value coerce_rt(rc<Env> env, const Param& param, bool is_runtime, const Value& v, Type dest) {
+    Value coerce_rt(rc<Env> env, const Param& param, bool is_runtime, 
+        bool preserve_quotes, const Value& v, Type dest) {
         if ((v.type.of(K_RUNTIME) || is_runtime) && !dest.of(K_RUNTIME)) {
             dest = t_runtime(t_lower(dest));
         }
-        if (dest.of(K_RUNTIME) && !v.type.of(K_RUNTIME) && !is_evaluated(param.kind)) { // evaluate quoted stuff before runtime
+        if (dest.of(K_RUNTIME) && !v.type.of(K_RUNTIME) 
+            && !is_evaluated(param.kind)) { // evaluate quoted stuff before runtime
+            if (preserve_quotes) return v;
             Value v2 = v;
             v2 = eval(env, v2);
             if (v2.type == T_ERROR) return v_error({});
@@ -667,16 +670,17 @@ namespace basil {
         return coerce(env, v, dest);
     }
 
-    Value coerce_args(rc<Env> env, const vector<Param>& params, bool is_runtime, const Value& args, Type dest) {
+    Value coerce_args(rc<Env> env, const vector<Param>& params, bool is_runtime, 
+        bool preserve_quotes, const Value& args, Type dest) {
         if (args.type.of(K_TUPLE)) {
             vector<Value> coerced;
             for (u32 i = 0; i < v_tuple_len(args); i ++) {
-                coerced.push(coerce_rt(env, params[i], is_runtime, v_at(args, i), t_tuple_at(dest, i)));
+                coerced.push(coerce_rt(env, params[i], is_runtime, preserve_quotes, v_at(args, i), t_tuple_at(dest, i)));
                 if (coerced.back().type == T_ERROR) return v_error({});
             }
             return v_tuple(args.pos, infer_tuple(coerced), move(coerced));
         }
-        else return coerce_rt(env, params[0], is_runtime, args, dest);
+        else return coerce_rt(env, params[0], is_runtime, preserve_quotes, args, dest);
     }
 
     PerfInfo::PerfInfo():
@@ -847,8 +851,15 @@ namespace basil {
         else panic("Tried to call non-callable value!");
 
         bool is_runtime = is_args_runtime(args.type) || fntype.of(K_RUNTIME) || fntype.of(K_INTERSECT);
+        bool preserve_quotes = false;
 
-        args = coerce_args(env, params, is_runtime, args, func.type.of(K_INTERSECT) ? args_type : t_arg(fntype));
+        if (func.type.of(K_FUNCTION) && func.data.fn->builtin) {
+            if (!func.data.fn->builtin->comptime) is_runtime = true; // check for runtime-only functions
+            if (func.data.fn->builtin->preserve_quotes) preserve_quotes = true;
+        }
+
+        args = coerce_args(env, params, is_runtime, preserve_quotes, 
+            args, func.type.of(K_INTERSECT) ? args_type : t_arg(fntype));
         // println("args_type = ", args_type, " and coerced to ", args);
         if (args.type == T_ERROR) return v_error({});
 
@@ -981,7 +992,7 @@ namespace basil {
 
                 // try coercion again, with is_runtime always true
                 if (fntype == T_ERROR) return v_error({});
-                args = coerce_args(env, params, true, args, t_arg(fntype));
+                args = coerce_args(env, params, true, preserve_quotes, args, t_arg(fntype));
                 if (args.type == T_ERROR) return v_error({});
 
                 vector<rc<AST>> arg_nodes;

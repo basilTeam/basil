@@ -77,7 +77,8 @@ namespace basil {
 
     rc<AST> ast_def(Source::Pos pos, Symbol name, rc<AST> init);
     rc<AST> ast_func_stub(Source::Pos pos, Type type, Symbol name);
-    rc<AST> ast_func(Source::Pos pos, Type type, rc<Env> fn_env, optional<Symbol> name, rc<AST> body);
+    rc<AST> ast_func(Source::Pos pos, Type type, rc<Env> fn_env, optional<Symbol> name, 
+        const vector<Symbol>& args, rc<AST> body);
     rc<AST> ast_call(Source::Pos pos, rc<AST> func, const vector<rc<AST>>& args);
     rc<AST> ast_overload(Source::Pos pos, Type type, const map<Type, either<Builtin, rc<InstTable>>>& cases);
 
@@ -137,6 +138,10 @@ namespace basil {
     rc<AST> ast_tail(Source::Pos pos, Type type, rc<AST> operand);
     rc<AST> ast_cons(Source::Pos pos, Type type, rc<AST> head, rc<AST> tail);
     rc<AST> ast_coerce(Source::Pos pos, rc<AST> value, Type dest);
+
+    // Mutation
+    
+    rc<AST> ast_assign(Source::Pos pos, Type type, rc<AST> dest, rc<AST> src);
 
     // Utility Functions
 

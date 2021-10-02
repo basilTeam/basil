@@ -18,15 +18,15 @@ namespace jasmine {
     using Parser = void(*)(Context&, stream&, Insn&);
 
     // Populates an instruction with something pulled from encoded binary.
-    using Disassembler = void(*)(stream&, Insn&);
+    using Disassembler = void(*)(Context& context, bytebuf&, const Object&, Insn&, ParamKind);
 
     // Validates an instruction at the param 'param'. Returns the next param
     // if validation is complete, the current param if more validation is necessary,
     // or -1 if an error occurred.
-    using Validator = i64(*)(const Insn&, i64 param);
+    using Validator = i64(*)(const Context& context, const Insn&, i64 param);
 
     // Writes an instruction component to Jasmine bytecode in an object file.
-    using Assembler = i64(*)(stream&, const Insn&, i64 param);
+    using Assembler = i64(*)(const Context& context, Object&, const Insn&, i64 param);
 
     // Pretty-prints an instruction component at index 'param' to the provided stream.
     using Printer = i64(*)(const Context& context, stream&, const Insn&, i64 param);
@@ -43,13 +43,13 @@ namespace jasmine {
     // decoded from text and binary, and how it is validated.
     struct Op {
         Opcode opcode;
-        vector<OpComponent> components;
+        vector<const OpComponent*> components;
 
         void add_components() {}
 
         template<typename... Args>
         void add_components(const OpComponent& component, const Args&... args) {
-            components.push(component);
+            components.push(&component);
             add_components(args...);
         }
 
@@ -229,14 +229,16 @@ namespace jasmine {
                         i64 off = 0;
                         for (int i = 0; i < info.members.size(); i ++) 
                             if (field == info.members[i].name) off = i;
-                        p.data.mem.kind = MK_TYPE;
-                        p.data.mem.reg = ptr.data.reg;
+                        p.data.mem.kind = ptr.kind == PK_REG ? MK_REG_TYPE : MK_LABEL_TYPE;
+                        if (ptr.kind == PK_REG) p.data.mem.reg = ptr.data.reg;
+                        else p.data.mem.label = ptr.data.label;
                         p.data.mem.off = off + 1;
                         p.data.mem.type = t;
                     }
                     else {
-                        p.data.mem.kind = MK_TYPE;
-                        p.data.mem.reg = ptr.data.reg;
+                        p.data.mem.kind = ptr.kind == PK_REG ? MK_REG_TYPE : MK_LABEL_TYPE;
+                        if (ptr.kind == PK_REG) p.data.mem.reg = ptr.data.reg;
+                        else p.data.mem.label = ptr.data.label;
                         p.data.mem.off = 0;
                         p.data.mem.type = t;
                     }
@@ -327,17 +329,283 @@ namespace jasmine {
             consume_leading_space(io);
         }
         expect('}', io);
+        if (context.type_decls.find(name) != context.type_decls.end()) {
+            fprintf(stderr, "[ERROR] Duplicate type definition '%s'!\n", (const char*)name.raw());
+            exit(1);
+        }
         TypeInfo info = TypeInfo{ context.type_info.size(), name, members };
         context.type_info.push(info);
         context.type_decls.put(name, info.id);
         insn.type = Type{ K_STRUCT, info.id };
     }
 
+    void assemble_60bit(bytebuf& io, i64 i, bool extra_bit) {
+        i64 o = i;
+        i64 n = 0;
+        u8 data[8];
+        while (i >= 4096) {
+            data[n ++] = i % 256;
+            i /= 256;
+        }
+        if (i >= 256) {
+            data[n ++] = i % 256;
+            i /= 256;
+        }
+        if (i >= 16) {
+            fprintf(stderr, "[ERROR] Constant integer or id %ld is too big to be encoded within 60 bits!\n", o);
+            exit(1);
+        }
+        data[n] = i | n << 5 | (extra_bit ? 1 : 0) << 4;
+        while (n >= 0) io.write(data[n --]);
+    }
+
     // Disassemblers
+
+    pair<i64, bool> disassemble_60bit(bytebuf& buf) {
+        u8 head = buf.read<u8>();
+        u8 n = head >> 5 & 7;
+        bool bit = head >> 4 & 1;
+
+        i64 acc = head & 15;
+        while (n > 0) {
+            acc *= 256;
+            acc += buf.read<u8>();
+            n --;
+        } 
+
+        return { acc, bit };
+    }
+
+    string disassemble_string(const Context& context, bytebuf& buf) {
+        u8 length = buf.read<u8>();
+        string s;
+        for (u32 i = 0; i < length; i ++) s += buf.read<u8>();
+        return s;
+    }
+
+    Type disassemble_type(const Context& context, bytebuf& buf) {
+        Type type;
+        type.kind = Kind(buf.read<u8>() >> 4);
+        if (type.kind == K_STRUCT) type.id = disassemble_60bit(buf).first;
+        return type;
+    }
+
+    i64 disassemble_imm(const Context& context, bytebuf& buf) {
+        auto result = disassemble_60bit(buf);
+        return result.first * (result.second ? -1 : 1);
+    }
+
+    Reg disassemble_reg(const Context& context, bytebuf& buf) {
+        auto result = disassemble_60bit(buf);
+        return Reg{ result.second, u64(result.first) };
+    }
+
+    Symbol disassemble_label(const Context& context, bytebuf& buf, const Object& obj) {
+        for (u8 i = 0; i < 4; i ++) buf.read<u8>();
+        auto it = obj.references().find(obj.code().size() - buf.size());
+        if (it == obj.references().end()) {
+            fprintf(stderr, "[ERROR] Undefined symbol in object file!\n");
+            exit(1);
+        }
+        return it->second.symbol;
+    }
+
+    void disassemble_param(Context& context, bytebuf& buf, const Object& obj, Insn& insn, ParamKind pk) {
+        Param p;
+        p.kind = pk;
+        switch (pk) {
+            case PK_REG:
+                p.data.reg = disassemble_reg(context, buf);
+                break;
+            case PK_MEM: {
+                p.data.mem.kind = MemKind(buf.read<u8>() >> 6 & 3);
+                switch (p.data.mem.kind) {
+                    case MK_REG_OFF:
+                        p.data.mem.reg = disassemble_reg(context, buf);
+                        p.data.mem.off = disassemble_imm(context, buf);
+                        break;
+                    case MK_LABEL_OFF:
+                        p.data.mem.label = disassemble_label(context, buf, obj);
+                        p.data.mem.off = disassemble_imm(context, buf);
+                        break;
+                    case MK_REG_TYPE:
+                        p.data.mem.reg = disassemble_reg(context, buf);
+                        p.data.mem.type = disassemble_type(context, buf);
+                        p.data.mem.off = disassemble_imm(context, buf);
+                        break;
+                    case MK_LABEL_TYPE:
+                        p.data.mem.label = disassemble_label(context, buf, obj);
+                        p.data.mem.type = disassemble_type(context, buf);
+                        p.data.mem.off = disassemble_imm(context, buf);
+                        break;
+                }
+                break;
+            }
+            case PK_LABEL: 
+                p.data.label = disassemble_label(context, buf, obj);
+                break;
+            case PK_IMM:
+                p.data.imm = Imm{ disassemble_imm(context, buf) };
+                break;
+        }
+        insn.params.push(p);
+    }
+
+    void disassemble_type(Context& context, bytebuf& buf, const Object& obj, Insn& insn, ParamKind pk) {
+        // don't disassemble type directly
+    }
+
+    void disassemble_typedef(Context& context, bytebuf& buf, const Object& obj, Insn& insn, ParamKind pk) {
+        string name = disassemble_string(context, buf);
+        vector<Member> members;
+        i64 num_members = disassemble_60bit(buf).first;
+        for (u32 i = 0; i < num_members; i ++) {
+            Member member;
+            member.name = disassemble_string(context, buf);
+            auto result = disassemble_60bit(buf);
+            member.count = result.first;
+            if (!result.second) member.type = none<Type>();
+            else member.type = some<Type>(disassemble_type(context, buf));
+            members.push(member);
+        }
+        TypeInfo info = TypeInfo{ context.type_info.size(), name, members };
+        context.type_info.push(info);
+        context.type_decls.put(name, info.id);
+        insn.type = Type{ K_STRUCT, info.id };
+    }
+
+    void disassemble_variadic_param(Context& context, bytebuf& buf, const Object& obj, Insn& insn, ParamKind pk) {
+        u8 n = buf.read<u8>();
+        vector<ParamKind> kinds;
+        ParamKind acc[4]; // this song and dance serves to reverse the kinds we read from the encoded call
+        u8 m = 0;
+        if (n > 0) {
+            u8 packed = buf.read<u8>();
+            for (u32 i = 0; i < n; i ++) {
+                acc[m ++] = ParamKind(packed & 3);
+                packed >>= 2;
+                if (m == 4) {
+                    packed = buf.read<u8>();
+                    for (i64 j = 3; j >= 0; j --) kinds.push(acc[j]);
+                    m = 0;
+                }
+            }
+        }
+        for (i64 j = m - 1; j >= 0; j --) kinds.push(acc[j]);
+
+        for (ParamKind pk : kinds) {
+            Type type = disassemble_type(context, buf);
+            disassemble_param(context, buf, obj, insn, pk);
+            insn.params.back().annotation = some<Type>(type);
+        }
+    }
     
     // Validators
 
     // Assemblers
+
+    void assemble_string(const Context& context, const string& string, Object& obj) {
+        obj.code().write<u8>(string.size());
+        for (u32 i = 0; i < string.size(); i ++) obj.code().write<u8>(string[i]);
+    }
+
+    void assemble_type(const Context& context, const Type& type, Object& obj) {
+        u8 typekind = type.kind << 4;
+        obj.code().write(typekind);
+        if (type.kind == K_STRUCT) assemble_60bit(obj.code(), type.id, false);
+    }
+
+    void assemble_typedef(const Context& context, const Type& type, Object& obj) {
+        assemble_string(context, context.type_info[type.id].name, obj);
+        assemble_60bit(obj.code(), context.type_info[type.id].members.size(), false);
+        for (const Member& m : context.type_info[type.id].members) {
+            assemble_string(context, m.name, obj);  // field name
+            assemble_60bit(obj.code(), m.count, m.type);    // field count
+            if (m.type) assemble_type(context, *m.type, obj);
+        }
+    }
+
+    void assemble_param(const Context& context, const Param& param, Object& obj) {
+        switch (param.kind) {
+            case PK_REG:
+                assemble_60bit(obj.code(), param.data.reg.id, param.data.reg.global);
+                break;
+            case PK_MEM:
+                obj.code().write(param.data.mem.kind << 6); // memkind
+                switch (param.data.mem.kind) {
+                    case MK_REG_OFF:
+                        assemble_60bit(obj.code(), param.data.mem.reg.id, param.data.mem.reg.global);
+                        assemble_60bit(obj.code(), abs(param.data.mem.off), param.data.mem.off < 0);
+                        break;
+                    case MK_LABEL_OFF:
+                        for (u8 i = 0; i < 4; i ++) obj.code().write<u8>(0);
+                        obj.reference(param.data.mem.label, REL32_LE, -4);
+                        assemble_60bit(obj.code(), abs(param.data.mem.off), param.data.mem.off < 0);
+                        break;
+                    case MK_REG_TYPE:
+                        assemble_60bit(obj.code(), param.data.mem.reg.id, param.data.mem.reg.global);
+                        assemble_type(context, param.data.mem.type, obj);
+                        assemble_60bit(obj.code(), abs(param.data.mem.off), param.data.mem.off < 0);
+                        break;
+                    case MK_LABEL_TYPE:
+                        for (u8 i = 0; i < 4; i ++) obj.code().write<u8>(0);
+                        obj.reference(param.data.mem.label, REL32_LE, -4);
+                        assemble_60bit(obj.code(), param.data.mem.off, false);
+                        assemble_type(context, param.data.mem.type, obj);
+                        assemble_60bit(obj.code(), abs(param.data.mem.off), param.data.mem.off < 0);
+                        break;
+                }
+                break;
+            case PK_LABEL:
+                for (u8 i = 0; i < 4; i ++) obj.code().write<u8>(0);
+                obj.reference(param.data.label, REL32_LE, -4);
+                break;
+            case PK_IMM:
+                assemble_60bit(obj.code(), abs(param.data.imm.val), param.data.imm.val < 0);
+                break;
+        }
+    }
+
+    i64 assemble_type(const Context& context, Object& obj, const Insn& insn, i64 param) {
+        return param; // don't assemble insn types independently
+    }
+
+    i64 assemble_typedef(const Context& context, Object& obj, const Insn& insn, i64 param) {
+        assemble_typedef(context, insn.type, obj);
+        return param + 1;
+    }
+
+    i64 assemble_param(const Context& context, Object& obj, const Insn& insn, i64 param) {
+        assemble_param(context, insn.params[param], obj);
+        return param + 1;
+    }
+
+    i64 assemble_label(const Context& context, Object& obj, const Insn& insn, i64 param) {
+        assemble_param(context, insn.params[param], obj);
+        return param + 1;
+    }
+
+    i64 assemble_variadic_param(const Context& context, Object& obj, const Insn& insn, i64 param) {
+        u8 n = insn.params.size() - param;
+        obj.code().write<u8>(n);
+
+        // each byte contains 1-4 param kinds
+        u8 acc = 0;
+        for (i64 i = param; i < insn.params.size(); i ++) {
+            if (i > param && (i - param) % 4 == 0) obj.code().write<u8>(acc), acc = 0;
+            acc <<= 2;
+            acc |= insn.params[i].kind;
+        }
+        if (n > 0) obj.code().write<u8>(acc);
+
+        // encode type adjacent to value
+        for (i64 i = param; i < insn.params.size(); i ++) {
+            assemble_type(context, *insn.params[i].annotation, obj);
+            assemble_param(context, insn.params[i], obj);
+        }
+
+        return insn.params.size();
+    }
 
     // Printers
 
@@ -387,9 +655,27 @@ namespace jasmine {
                             p.data.mem.off < 0 ? -p.data.mem.off : p.data.mem.off);
                     write(io, "]");
                     break;
-                case MK_TYPE:
+                case MK_REG_TYPE:
                     write(io, prefix, "[");
                     print_reg(context, io, p.data.mem.reg);
+                    write(io, " + ");
+                    if (p.data.mem.off == 0) {
+                        print_type(context, io, p.data.mem.type, "");
+                    } 
+                    else {
+                        if (p.data.mem.type.kind != K_STRUCT) {
+                            fprintf(stderr, "[ERROR] Expected struct type in field offset.\n");
+                            exit(1);
+                        }
+                        print_type(context, io, p.data.mem.type, "");
+                        write(io, ".");
+                        write(io, context.type_info[p.data.mem.type.id].members[p.data.mem.off - 1].name);
+                    }
+                    write(io, "]");
+                    break;
+                case MK_LABEL_TYPE:
+                    write(io, prefix, "[");
+                    write(io, " ", name(p.data.mem.label));
                     write(io, " + ");
                     if (p.data.mem.off == 0) {
                         print_type(context, io, p.data.mem.type, "");
@@ -410,19 +696,17 @@ namespace jasmine {
     }
 
     i64 print_param(const Context& context, stream& io, const Insn& insn, i64 param) {
-        const Param& p = insn.params[param];
         print_param(context, insn.params[param], io, " ");
         return param + 1;
     }
 
     i64 print_another_param(const Context& context, stream& io, const Insn& insn, i64 param) {
-        const Param& p = insn.params[param];
         print_param(context, insn.params[param], io, ", ");
         return param + 1;
     }
 
     i64 print_variadic_param(const Context& context, stream& io, const Insn& insn, i64 param) {
-        write(io, " (");
+        write(io, "(");
         for (i64 i = param; i < insn.params.size(); i ++) {
             if (i == param) {
                 print_type(context, io, *insn.params[i].annotation, "");
@@ -472,49 +756,49 @@ namespace jasmine {
 
     static OpComponent C_TYPE = {
         parse_type,
+        disassemble_type,
         nullptr,
-        nullptr,
-        nullptr,
+        assemble_type,
         print_type
     };
 
     static OpComponent C_SRC = {
         parse_another_param,
+        disassemble_param,
         nullptr,
-        nullptr,
-        nullptr,
+        assemble_param,
         print_another_param
     };
 
     static OpComponent C_DEST = {
         parse_param,
-        nullptr, 
+        disassemble_param, 
         nullptr,
-        nullptr,
+        assemble_param,
         print_param
     };
 
     static OpComponent C_VARIADIC = {
         parse_variadic_param,
+        disassemble_variadic_param,
         nullptr,
-        nullptr,
-        nullptr,
+        assemble_variadic_param,
         print_variadic_param
     };
 
     static OpComponent C_LABEL = {
         parse_param,
+        disassemble_param,
         nullptr,
-        nullptr,
-        nullptr,
+        assemble_label,
         print_label
     };
 
     static OpComponent C_TYPEDEF = {
         parse_typedef,
+        disassemble_typedef,
         nullptr,
-        nullptr,
-        nullptr,
+        assemble_typedef,
         print_typedef
     };
 
@@ -689,25 +973,63 @@ namespace jasmine {
             exit(1);
         }
         insn.opcode = it->second;
-        for (const auto& comp : OPS[insn.opcode].components) comp.parser(context, io, insn);
+        for (const auto& comp : OPS[insn.opcode].components) comp->parser(context, io, insn);
         i64 i = 0;
-        for (const auto& comp : OPS[insn.opcode].components) if (comp.validator) {
-            i64 v = comp.validator(insn, i);
+        for (const auto& comp : OPS[insn.opcode].components) if (comp->validator) {
+            i64 v = comp->validator(context, insn, i);
             if (v < 0) exit(1);
             else i = v;
         }
         return insn;
     }
 
-    void assemble_insn(Context& context, stream& io, const Insn& insn) {
+    Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj) {
+        Insn insn;
+        u8 opcode = buf.read<u8>();
+        u8 typearg = buf.read<u8>();
+        insn.opcode = Opcode(opcode >> 2 & 63);
+        insn.type.kind = Kind(typearg & 15);
+        if (insn.type.kind == K_STRUCT) insn.type.id = disassemble_60bit(buf).first;
 
+        ParamKind pk[3];
+        pk[0] = ParamKind(opcode & 3);
+        pk[1] = ParamKind(typearg >> 6 & 3);
+        pk[2] = ParamKind(typearg >> 4 & 3);
+        i64 i = 0;
+        for (const auto& comp : OPS[insn.opcode].components) {
+            comp->disassembler(context, buf, obj, insn, pk[i]);
+            if (comp != &C_TYPE && comp != &C_TYPEDEF && comp != &C_VARIADIC) i ++;
+        }
+        i = 0;
+        for (const auto& comp : OPS[insn.opcode].components) if (comp->validator) {
+            i64 v = comp->validator(context, insn, i);
+            if (v < 0) exit(1);
+            else i = v;
+        }
+        return insn;
+    }
+
+    void assemble_insn(Context& context, Object& obj, const Insn& insn) {
+        // [opcode 6         ] [p1 2] [p2 2] [p3 2] [typekind 4]
+        u8 opcode = (insn.opcode & 63) << 2;
+        if (insn.params.size() > 0) opcode |= insn.params[0].kind;
+        u8 typearg = insn.type.kind;
+        if (insn.params.size() > 1) typearg |= insn.params[1].kind << 6;
+        if (insn.params.size() > 2) typearg |= insn.params[2].kind << 4;
+        obj.code().write<u8>(opcode);
+        obj.code().write<u8>(typearg);
+        if (insn.type.kind == K_STRUCT) assemble_60bit(obj.code(), insn.type.id, false);
+        
+        i64 i = 0;
+        for (const auto& comp : OPS[insn.opcode].components) 
+            i = comp->assembler(context, obj, insn, i);
     }
 
     void print_insn(Context& context, stream& io, const Insn& insn) {
         i64 i = 0;
         write(io, "\t", OPCODE_NAMES[insn.opcode]);
         for (const auto& comp : OPS[insn.opcode].components) 
-            i = comp.printer(context, io, insn, i);
+            i = comp->printer(context, io, insn, i);
         write(io, "\n");
     }
 

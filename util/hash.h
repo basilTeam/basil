@@ -38,6 +38,8 @@ u64 key_hash(const T& a) {
     return ::hash(a.first);
 }
 
+// Open-addressed general-purpose hash table based on robin-hood hashing, with a 
+// fixed stack-allocated buffer of N elements.
 template<typename T, int N>
 class set {
     enum bucket_status : u8 {
@@ -152,7 +154,6 @@ public:
         _size = other._size, _mask = other._mask;
         copy(other.data);
     }
-
 
     set& operator=(const set& other) {
         if (this != &other) {
@@ -367,6 +368,7 @@ public:
     }
 };
 
+// Key-value map backed by a hashset.
 template<typename K, typename V>
 class map : public set<pair<K, V>> {
 public:

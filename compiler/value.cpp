@@ -500,7 +500,7 @@ namespace basil {
         return ref<FnInst>(
             args_type,
             local,
-            ast_func(base->pos, fntype, local, fn.name, body_ast)
+            ast_func(base->pos, fntype, local, fn.name, fn.args, body_ast)
         );
     }
     

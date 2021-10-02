@@ -18,6 +18,10 @@ namespace basil {
         // Built-in behavior for compiling this builtin to binary. If nullptr,
         // forces this builtin to be evaluated at compile-time.
         rc<AST> (*runtime)(rc<Env> env, const Value& call_term, const Value& args);
+
+        // Whether or not we should evaluate quoted parameters for this builtin
+        // when lowering to runtime AST.
+        bool preserve_quotes = false;
     };
 
     // Adds all built-in functions and macros to the provided environment.

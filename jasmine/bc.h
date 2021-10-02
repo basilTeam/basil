@@ -55,7 +55,8 @@ namespace jasmine {
     enum MemKind {
         MK_REG_OFF,
         MK_LABEL_OFF,
-        MK_TYPE
+        MK_REG_TYPE,
+        MK_LABEL_TYPE
     };
 
     struct Type {
@@ -98,10 +99,12 @@ namespace jasmine {
             // Register-offset uses 'reg' and 'off' to store [%reg + off]
             // Label uses 'label' to store [label]
             // Label-offset uses 'label' and 'off' to store [label + off]
-            // Type uses 'reg' and 'type' to store [%reg + type] (such as [%0 + ptr])
-            // Type *also* uses 'reg', 'type', and 'off' to store [%reg + type.off]
+            // Register-type uses 'reg' and 'type' to store [%reg + type] (such as [%0 + ptr])
+            // Register-type *also* uses 'reg', 'type', and 'off' to store [%reg + type.off]
             // ...in the last case, 'off' denotes the index of the field within the type,
             // not the byte offset in memory.
+            // Label-type has the same characteristics as Register-type, only it uses a label
+            // as the base address instead of a register.
             struct { 
                 MemKind kind; 
                 Reg reg;
@@ -129,7 +132,12 @@ namespace jasmine {
     Param imm(Imm i);
     Param m(Reg reg);
     Param m(Reg reg, i64 off);
-    Param m(Reg reg, Symbol type, Symbol field);
+    Param m(Symbol label, i64 off);
+    Param m(Symbol label, i64 off);
+    Param m(Reg reg, Type type);
+    Param m(Reg reg, Type, Symbol field);
+    Param m(Symbol label, Type type);
+    Param m(Symbol label, Type type, Symbol field);
     Param l(Symbol symbol);
     Param l(const char* name);
 
@@ -217,7 +225,8 @@ namespace jasmine {
     void global(Type type, Symbol symbol);
     
     Insn parse_insn(Context& context, stream& io);
-    Insn disassemble_insn(stream& io);
+    Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj);
+    void assemble_insn(Context& context, Object& obj, const Insn& insn);
     void print_insn(Context& context, stream& io, const Insn& insn);
 
     Object jasmine_to_x86(Object& obj);

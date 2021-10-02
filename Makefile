@@ -9,7 +9,8 @@ TEST_OBJS := $(patsubst %.cpp,%.test,$(TEST_SRCS))
 CXX := clang++
 CXXHEADERS := -I. -Iutil -Ijasmine -Icompiler -Itest
 SHAREDFLAGS := $(CXXHEADERS) -std=c++17 \
-	-ffunction-sections -fdata-sections -ffast-math -fno-rtti -finline-functions -fPIC \
+	-ffunction-sections -fdata-sections -ffast-math -fno-rtti -finline-functions \
+	-fPIC -fomit-frame-pointer -fmerge-all-constants \
 	-Wall -Werror -Wno-unused -Wno-comment -Wno-implicit-exception-spec-mismatch \
 	-DINCLUDE_UTF8_LOOKUP_TABLE
 
@@ -22,7 +23,7 @@ test: SHAREDFLAGS += -g3
 
 basil: SHAREDFLAGS += -g3
 
-release: SHAREDFLAGS += -Os -DBASIL_RELEASE
+release: SHAREDFLAGS += -Os -DBASIL_RELEASE -fno-unwind-tables -fno-asynchronous-unwind-tables
 
 CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -fno-threadsafe-statics -nostdlib++
 TESTFLAGS = $(SHAREDFLAGS)
@@ -35,13 +36,12 @@ basil: $(OBJS) compiler/main.o librt.a
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o $@
 
 release: $(SRCS) librt.a
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(SRCS) -o basil -lm
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(SRCS) -o basil
 	strip -g -R .gnu.version \
 			 -R .gnu.hash \
+			 -R .note \
 			 -R .note.ABI-tag \
 			 -R .note.gnu.build-id \
-			 -R .eh_frame \
-			 -R .eh_frame_hdr \
 			 -R .comment \
 			 --strip-unneeded basil
 

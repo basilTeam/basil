@@ -23,6 +23,7 @@ namespace jasmine {
         Architecture arch;
         bytebuf buf;
         map<Symbol, u64> defs;
+        map<u64, Symbol> def_positions;
         map<u64, SymbolRef> refs;
         void* loaded_code;
 
@@ -37,6 +38,7 @@ namespace jasmine {
 
         const map<Symbol, u64>& symbols() const;
         const map<u64, SymbolRef>& references() const;
+        const map<u64, Symbol>& symbol_positions() const;
         const bytebuf& code() const;
         bytebuf& code();
         u64 size() const;

@@ -119,6 +119,7 @@ namespace jasmine {
     // Represents a single instruction, with an opcode, type, and several
     // parameters.
     struct Insn {
+        optional<Symbol> label = none<Symbol>();
         Opcode opcode;
         Type type;
         vector<Param> params;
@@ -229,7 +230,7 @@ namespace jasmine {
     void assemble_insn(Context& context, Object& obj, const Insn& insn);
     void print_insn(Context& context, stream& io, const Insn& insn);
 
-    Object jasmine_to_x86(Object& obj);
+    Object jasmine_to_x86(const vector<Insn>& obj);
 }
 
 #endif

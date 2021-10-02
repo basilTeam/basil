@@ -27,6 +27,10 @@ namespace jasmine {
     const map<u64, SymbolRef>& Object::references() const {
         return refs;
     }
+    
+    const map<u64, Symbol>& Object::symbol_positions() const {
+        return def_positions;
+    }
 
     const bytebuf& Object::code() const {
         return buf;
@@ -42,6 +46,7 @@ namespace jasmine {
 
     void Object::define(Symbol symbol) {
         defs.put(symbol, buf.size());
+        def_positions.put(buf.size(), symbol);
     }
 
     void Object::reference(Symbol symbol, RefType type, i8 field_offset) {
@@ -251,6 +256,7 @@ namespace jasmine {
             Symbol sym = internal_syms[from_little_endian(b.read<u32>())];
 
             defs.put(sym, offset);
+            def_positions.put(offset, sym);
             -- def_count;
         }
 

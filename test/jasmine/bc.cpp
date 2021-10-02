@@ -34,19 +34,13 @@ mov i64 %0, [%1 + Tree.right]
     ASSERT_TRUE(insn2.params[1].data.mem.type.id == insn.type.id); // should have same type as insn
 }
 
-TEST(simple_assemble) {
+TEST(round_trip) {
     buffer in;
-    write(in, R"(
-        local i64 %0
-        mov i64 %0, 1
-        call i64 %1, foo(i64 %0, i64 0, i64 1, i64 2, i64 3)
-)");
-    println("");
-    println("Original source:");
-    println(R"(        local i64 %0
-        mov i64 %0, 1
-        call i64 %1, foo(i64 %0, i64 0, i64 1, i64 2, i64 3)
-)");
+    write(in,
+"foo:\tlocal i64 %0\n"
+"\tmov i64 %0, 1\n"
+"\tcall i64 %1, foo(i64 %0, i64 0, i64 1, i64 2, i64 3)\n");
+    buffer copy(in);
     Context ctx;
     Insn insns[3];
     for (u8 i = 0; i < 3; i ++) insns[i] = parse_insn(ctx, in);
@@ -54,27 +48,57 @@ TEST(simple_assemble) {
     Object object(JASMINE);
     for (u8 i = 0; i < 3; i ++) assemble_insn(ctx, object, insns[i]);
 
-    // bytebuf tmp = object.code();
-    // while (tmp.size()) printf("%02x ", tmp.read());
-    // println("");
     bytebuf buf = object.code();
     for (u8 i = 0; i < 3; i ++) insns[i] = disassemble_insn(ctx, buf, object);
 
-    println("After round trip:");
-    for (u8 i = 0; i < 3; i ++) print_insn(ctx, _stdout, insns[i]);
-    println("");
+    buffer out;
+    for (u8 i = 0; i < 3; i ++) print_insn(ctx, out, insns[i]);
+
+    string a(copy), b(out);
+    ASSERT_EQUAL(a, b);
 }
 
-// fib:    frame
-//         param i64 %0
-//         local i64 %1
-//         jl i64 %0, 2 .L0
-//         push i64 %0
-//         sub i64 %1, %0, 1
-//         call i64 %1, fib(i64 %1)
-//         xchg i64 %0, %1
-//         sub i64 %1, %1, 2
-//         call i64 %1, fib(i64 %1)
-//         add i64 %0, %0, %1
-//         pop i64 %1
-// .L0:    ret i64 %0
+TEST(labeled_branches) {
+    buffer in;
+    write(in,
+"foo:\tframe\n"
+"\tparam i64 %0\n"
+"\tlocal i64 %1\n"
+"_L0:\tjeq i64 _L1 %0, %1\n"
+"\tsub i64 %0, %0, 1\n"
+"\tjump _L0\n"
+"_L1:\tret i64 %0\n");
+    buffer copy(in);
+    Context ctx;
+    Insn insns[7];
+    for (u8 i = 0; i < 7; i ++) insns[i] = parse_insn(ctx, in);
+
+    Object object(JASMINE);
+    for (u8 i = 0; i < 7; i ++) assemble_insn(ctx, object, insns[i]);
+
+    bytebuf buf = object.code();
+    for (u8 i = 0; i < 7; i ++) insns[i] = disassemble_insn(ctx, buf, object);
+
+    buffer out;
+    for (u8 i = 0; i < 7; i ++) print_insn(ctx, out, insns[i]);
+
+    string a(copy), b(out);
+    ASSERT_EQUAL(a, b);
+}
+
+TEST(x86_regalloc) {
+    buffer in;
+    write(in,R"(
+foo:    frame
+        param i64 %0
+        local i64 %1
+_L0:    jeq i64 _L1 %0, %1
+        sub i64 %0, %0, 1
+        jump _L0
+_L1:    ret i64 %0)");
+    Context ctx;
+    vector<Insn> insns;
+    for (u8 i = 0; i < 7; i ++) insns.push(parse_insn(ctx, in));
+    
+    jasmine_to_x86(insns);
+}

@@ -3,6 +3,7 @@
 #include "stdio.h"
 #include "util/str.h"
 #include "util/hash.h"
+#include "util/sets.h"
 
 namespace jasmine {
     struct Insn;
@@ -837,7 +838,7 @@ namespace jasmine {
     Op label_binary_op(Opcode opcode) {
         return Op(
             opcode,
-            C_TYPE, C_DEST, C_SRC, C_LABEL
+            C_TYPE, C_LABEL, C_DEST, C_SRC
         );
     }
 
@@ -878,7 +879,7 @@ namespace jasmine {
         unary_op(OP_PUSH),
         unary_op(OP_POP),
         nullary_op(OP_FRAME),
-        nullary_op(OP_RET),
+        unary_op(OP_RET),
         call_op(OP_CALL),
         label_binary_op(OP_JEQ),
         label_binary_op(OP_JNE),
@@ -967,6 +968,11 @@ namespace jasmine {
     Insn parse_insn(Context& context, stream& io) {
         Insn insn;
         string op = next_string(io);
+        if (io.peek() == ':') {
+            insn.label = some<Symbol>(local((const char*)op.raw()));
+            io.read();
+            op = next_string(io);
+        }
         auto it = OPCODE_TABLE.find(op);
         if (it == OPCODE_TABLE.end()) {
             fprintf(stderr, "Unknown opcode '%s'.\n", (const char*)op.raw());
@@ -985,6 +991,10 @@ namespace jasmine {
 
     Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj) {
         Insn insn;
+        u64 offset = obj.code().size() - buf.size();
+        auto it = obj.symbol_positions().find(offset);
+        if (it != obj.symbol_positions().end())
+            insn.label = some<Symbol>(it->second);
         u8 opcode = buf.read<u8>();
         u8 typearg = buf.read<u8>();
         insn.opcode = Opcode(opcode >> 2 & 63);
@@ -1011,6 +1021,7 @@ namespace jasmine {
 
     void assemble_insn(Context& context, Object& obj, const Insn& insn) {
         // [opcode 6         ] [p1 2] [p2 2] [p3 2] [typekind 4]
+        if (insn.label) obj.define(*insn.label);
         u8 opcode = (insn.opcode & 63) << 2;
         if (insn.params.size() > 0) opcode |= insn.params[0].kind;
         u8 typearg = insn.type.kind;
@@ -1027,6 +1038,7 @@ namespace jasmine {
 
     void print_insn(Context& context, stream& io, const Insn& insn) {
         i64 i = 0;
+        if (insn.label) write(io, name(*insn.label), ':');
         write(io, "\t", OPCODE_NAMES[insn.opcode]);
         for (const auto& comp : OPS[insn.opcode].components) 
             i = comp->printer(context, io, insn, i);
@@ -1034,6 +1046,329 @@ namespace jasmine {
     }
 
     Object jasmine_to_x86(Object& obj) {
+        return Object(X86_64);
+    }
+    
+    struct Location {
+        bool is_reg;
+        u32 val;
+    };
+
+    struct LiveRange {
+        Reg reg;
+        u64 first, last;
+        Location loc;
+        bool arg_hint = false;
+
+        LiveRange(Reg reg_in, u64 f, u64 l):
+            reg(reg_in), first(f), last(l) {}
+    };
+
+    struct Function {
+        u64 first, last;
+        u64 stack;
+        vector<LiveRange> ranges;
+
+        void format(const vector<Insn>& insns, stream& io) const {
+            for (u64 i = first; i <= last; i ++) {
+                insns[i].format(io);
+            }
+        }
+    };
+
+    vector<Function> find_functions(const vector<Insn>& insns) {
+        vector<Function> functions;
+        optional<Function> fn = none<Function>();
+        for (u32 i = 0; i < insns.size(); i ++) {
+            if (insns[i].opcode == OP_FRAME) { // frame
+                if (fn) {
+                    if (fn->first == fn->last) {
+                        fprintf(stderr, "[ERROR] Found second 'frame' instruction before 'ret'.\n");
+                        exit(1);
+                    }
+                    else {
+                        functions.push(*fn);
+                        fn = none<Function>();
+                        // fallthrough to none case
+                    }
+                }
+                if (!fn) {
+                    fn = some<Function>();
+                    fn->first = i, fn->last = i;
+                }
+            }
+            else if (insns[i].opcode == OP_RET && fn) { // ret
+                fn->last = i;
+            }
+        }
+        if (fn && fn->first != fn->last) functions.push(*fn);
+
+        return functions;
+    }
+
+    bool unify(bitset& out, bitset& in) {
+        bool changed = false;
+        for (u32 r : in) changed = out.insert(r) || changed;
+        return changed;
+    }
+
+    bool destructive(const Insn& in) {
+        return (in.params.size() > 0 && in.opcode != OP_PUSH && in.opcode != OP_NOT && in.opcode != OP_RET)
+            && (in.params[0].kind == PK_REG || in.params[0].kind == PK_MEM);
+    }
+
+    bool liveout(const Insn& in, bitset& live, const bitset& out) {
+        bitset old = live;
+        bool changed = false;
+        live = out;
+        if (destructive(in)) {
+            live.erase(in.params[0].data.reg.id);
+            for (u32 i = 1; i < in.params.size(); i ++) if (in.params[i].kind == PK_REG)
+                live.insert(in.params[i].data.reg.id);
+        }
+        else {
+            for (u32 i = 0; i < in.params.size(); i ++) if (in.params[i].kind == PK_REG)
+                live.insert(in.params[i].data.reg.id);
+        }
+        for (u32 i : live) if (!old.contains(i)) changed = true;
+        for (u32 i : old) if (!live.contains(i)) changed = true;
+        return changed;
+    }
+
+    void compute_ranges(Function& function, const vector<Insn>& insns) {
+        vector<pair<bitset, bitset>> sets;
+        map<Symbol, u64> local_syms;
+        for (u64 i = function.first; i <= function.last; i ++) {
+            sets.push({});
+            if (insns[i].label) local_syms.put(*insns[i].label, i);
+        }
+
+        sets.push({});
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (i64 i = i64(function.last); i >= i64(function.first); i --) {
+                const Insn& in = insns[i];
+                if (in.opcode == OP_JUMP) { // unconditional jump
+                    auto it = local_syms.find(in.params[0].data.label);
+                    if (it == local_syms.end()) {
+                        fprintf(stderr, "[ERROR] Tried to jump to label '%s' outside of current function.\n", 
+                            name(in.params[0].data.label));
+                        exit(1);
+                    }
+
+                    changed = unify(sets[i - function.first].second, sets[it->second - function.first].first) || changed;
+                }
+                else if (in.opcode >= OP_JEQ && in.opcode < OP_JUMP) { // conditional jump
+                    auto it = local_syms.find(in.params[0].data.label);
+                    if (it == local_syms.end()) {
+                        fprintf(stderr, "[ERROR] Tried to jump to label '%s' outside of current function.\n", 
+                            name(in.params[0].data.label));
+                        exit(1);
+                    }
+                    
+                    changed = unify(sets[i - function.first].second, sets[it->second - function.first].first) || changed;
+                    changed = unify(sets[i - function.first].second, sets[i + 1 - function.first].first) || changed;
+                }
+                else {
+                    changed = unify(sets[i - function.first].second, sets[i + 1 - function.first].first) || changed;
+                }
+                
+                changed = liveout(insns[i], sets[i - function.first].first, sets[i - function.first].second) || changed;
+            }
+        }
+        // println("");
+        // for (u64 i = function.first; i <= function.last; i ++) {
+        //     print("{");
+        //     bool first = true;
+        //     for (u32 r : sets[i - function.first].first) {
+        //         Param p;
+        //         p.kind = PK_REG;
+        //         p.data.reg = {false, r};
+        //         print(first ? "" : " ");
+        //         print_param({}, p, _stdout, "");
+        //         first = false;
+        //     }
+        //     print("} => {");
+        //     first = true;
+        //     for (u32 r : sets[i - function.first].second) {
+        //         Param p;
+        //         p.kind = PK_REG;
+        //         p.data.reg = {false, r};
+        //         print(first ? "" : " ");
+        //         print_param({}, p, _stdout, "");
+        //         first = false;
+        //     }
+        //     print("}\t");
+        //     Context ctx;
+        //     print_insn(ctx, _stdout, insns[i]);
+        // }
+        // println("");
+
+        map<u64, optional<LiveRange>> ranges;
+        for (u64 i = function.first; i <= function.last; i ++) {
+            const Insn& in = insns[i];
+            for (const Param& p : in.params) if (p.kind == PK_REG)
+                ranges[p.data.reg.id] = none<LiveRange>();
+        }
+        for (u64 i = function.first; i <= function.last; i ++) {
+            const auto& live = sets[i - function.first];
+            for (auto& [reg, range] : ranges) {
+                if (!range && live.second.contains(reg)) { // new definition
+                    range = some<LiveRange>(Reg{false, reg}, i, i);
+                    if (insns[i].opcode == OP_PARAM) range->arg_hint = true; // arg
+                }
+                else if (range && !live.first.contains(reg)) { // range ended last instruction
+                    range->last = i - 1;
+                    function.ranges.push(*range);
+                    range = none<LiveRange>();
+                }
+                
+                if (range && !live.second.contains(reg)) { // range ends this instruction
+                    range->last = i;
+                    function.ranges.push(*range);
+                    range = none<LiveRange>();
+                }
+            }
+        }
+        for (auto& [reg, range] : ranges) if (range) range->last = function.last, function.ranges.push(*range); // add any ranges we didn't catch
+
+        // for (const LiveRange& r : function.ranges) {
+        //     Param p;
+        //     p.kind = PK_REG;
+        //     p.data.reg = r.reg;
+        //     print("register ");
+        //     print_param({}, p, _stdout, "");
+        //     println(" live from ", r.first, " to ", r.last);
+        // }
+        // println("");
+    }
+}
+
+#include "x64.h"
+
+namespace jasmine {
+    void populate_arg_registers(Architecture arch, vector<u32>& regs) {
+        switch (arch) {
+            case X86_64: {
+                using namespace x64;
+                regs.push(x64::RDI); // just sysv for now...
+                regs.push(x64::RSI);
+                regs.push(x64::RDX);
+                regs.push(x64::RCX);
+                regs.push(x64::R8);
+                regs.push(x64::R9);
+                break;
+            }
+            default:
+                fprintf(stderr, "Unsupported architecture.\n");
+                exit(1);
+                break;
+        }
+    }
+
+    u32 return_register(Architecture arch) {
+        switch (arch) {
+            case X86_64: {
+                using namespace x64;
+                return x64::RAX;
+            }
+            default:
+                fprintf(stderr, "Unsupported architecture.\n");
+                exit(1);
+                return 0;
+        }
+    }
+
+    void populate_registers(Architecture arch, vector<u32>& regs) {
+        switch (arch) {
+            case X86_64: {
+                using namespace x64;
+                for (u32 i = 0; i < 16; i ++) regs.push(i); // rax - r15
+                break;
+            }
+            default:
+                fprintf(stderr, "Unsupported architecture.\n");
+                exit(1);
+                break;
+        }
+    }
+
+    void allocate_registers(Function& f, const vector<Insn>& insns, Architecture arch)  {
+        vector<u32> args, regs;
+        populate_arg_registers(arch, args);
+        populate_registers(arch, regs);
+
+        u32 cur_arg = 0;
+
+        vector<u32> available;
+        for (i64 i = i64(regs.size()) - 1; i >= 0; i --) {
+            available.push(regs[i]);
+        }
+        map<u64, LiveRange*> mappings;
+        for (u32 r : regs) mappings.put(r, nullptr);
+
+        vector<vector<LiveRange*>> starts_by_insn, ends_by_insn;
+        for (u64 i = f.first; i <= f.last; i ++) {
+            starts_by_insn.push({});
+            ends_by_insn.push({});
+        }
+        for (LiveRange& r : f.ranges) {
+            starts_by_insn[r.first - f.first].push(&r);
+            ends_by_insn[r.last - f.first].push(&r);
+        }
+
+        for (u64 i = f.first; i <= f.last; i ++) {
+            for (LiveRange* r : ends_by_insn[i - f.first]) {
+                if (r->loc.is_reg) {
+                    available.push(r->loc.val);
+                    mappings[r->loc.val] = nullptr;
+                }
+            }
+            for (LiveRange* r : starts_by_insn[i - f.first]) {
+                if (r->arg_hint) {
+                    r->loc = { true, args[cur_arg] };
+                    bool found = false;
+                    for (u32 i = 0; i < available.size(); i ++) { // remove arg register
+                        if (available[i] == r->loc.val) found = true;
+                        if (found && i < available.size() - 1) available[i] = available[i + 1];
+                    }
+                    if (found) available.pop();
+                    LiveRange* existing = mappings[r->loc.val];
+                    mappings.put(r->loc.val, r);
+                    cur_arg ++;
+
+                    if (existing) r = existing;
+                    else continue;
+                }
+                if (available.size()) {
+                    r->loc = { true, available.back() };
+                    available.pop();
+                    mappings.put(r->loc.val, r);
+                }
+                else r->loc = { false, u32(f.stack += 8ul) }; // spill
+            }
+        }
+
+        for (const LiveRange& r : f.ranges) {
+            Param p;
+            p.kind = PK_REG;
+            p.data.reg = r.reg;
+            print("register ");
+            print_param({}, p, _stdout, "");
+            print(" from ", r.first, " to ", r.last);
+            if (r.loc.is_reg) println(" allocated to register %", x64::REGISTER_NAMES[r.loc.val]);
+            else println(" spilled to [%rbp - ", r.loc.val, "]");
+        }
+        println("");
+    }
+    
+    Object jasmine_to_x86(const vector<Insn>& insns_in) {
+        vector<Insn> insns = insns_in;
+        vector<Function> functions = find_functions(insns);
+        for (Function& f : functions) compute_ranges(f, insns);
+        for (Function& f : functions) allocate_registers(f, insns, X86_64);
+
         return Object(X86_64);
     }
 }

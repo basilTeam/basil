@@ -89,17 +89,17 @@ namespace basil {
 
     void IRBlock::format(stream& io) const {
         write(io, BOLDYELLOW, "BB", id, RESET, ":\t", GRAY);
-        write(io, "(in =");
-        for (rc<IRBlock> bb : in) write(io, " ", bb->id);
-        write(io, ")\t");
-        write(io, "(out =");
-        for (rc<IRBlock> bb : out) write(io, " ", bb->id);
-        write(io, ")\t");
-        if (dom.begin() != dom.end()) {
-            write_seq(io, dom, "(DOM = ", ", ", ")\t");
-            write(io, "idom = ", idom ? ::format<ustring>(idom->id) : "Ø", "\t");
-            write_seq(io, dom_frontier, "(DF = ", ", ", ")\t");
-        }
+        // write(io, "(in =");
+        // for (rc<IRBlock> bb : in) write(io, " ", bb->id);
+        // write(io, ")\t");
+        // write(io, "(out =");
+        // for (rc<IRBlock> bb : out) write(io, " ", bb->id);
+        // write(io, ")\t");
+        // if (dom.begin() != dom.end()) {
+        //     write_seq(io, dom, "(DOM = ", ", ", ")\t");
+        //     write(io, "idom = ", idom ? ::format<ustring>(idom->id) : "Ø", "\t");
+        //     write_seq(io, dom_frontier, "(DF = ", ", ", ")\t");
+        // }
         write(io, RESET, "\n");
         
         for (const auto& insn : insns) {

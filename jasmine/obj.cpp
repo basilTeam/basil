@@ -16,6 +16,10 @@ namespace jasmine {
         read(path);
     }
 
+    Object::Object(Object&& other):
+        arch(other.arch), buf(other.buf), defs(other.defs), def_positions(other.def_positions),
+        refs(other.refs), loaded_code(other.loaded_code) {}
+
     Object::~Object() {
         if (loaded_code) free_exec(loaded_code, buf.size());
     }
@@ -288,13 +292,19 @@ namespace jasmine {
             exit(1);
         }
         switch (arch) {
-            case JASMINE: switch (architecture) {
-                case X86_64:
-                    return jasmine_to_x86(*this);
-                default: 
-                    break;
-            }
+            case JASMINE: {
+                vector<Insn> insns;
+                bytebuf b = code();
+                Context ctx;
+                while (b.size()) insns.push(disassemble_insn(ctx, b, *this));
+                switch (architecture) {
+                    case X86_64: 
+                        return jasmine_to_x86(insns);
+                    default: 
+                        break;
+                }
                 break;
+            }
             default:
                 break;
         }

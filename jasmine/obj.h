@@ -33,6 +33,7 @@ namespace jasmine {
         Object(Architecture architecture = DEFAULT_ARCH);
         Object(const char* path, Architecture architecture = DEFAULT_ARCH);
         ~Object();
+        Object(Object&& other);
         Object(const Object&) = delete;
         Object& operator=(const Object&) = delete;
 

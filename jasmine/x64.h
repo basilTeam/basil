@@ -155,11 +155,13 @@ namespace x64 {
     };    
 
     bool operator==(const Arg& lhs, const Arg& rhs);
+    bool operator!=(const Arg& lhs, const Arg& rhs);
 
 	bool is_register(ArgType type);
     bool is_immediate(ArgType type);
     bool is_memory(ArgType type);
     bool is_label(ArgType type);
+    i64 immediate_value(const Arg& arg);
 		
     void writeto(jasmine::Object& obj);
 
@@ -216,7 +218,10 @@ namespace x64 {
     void xor_(const Arg& dest, const Arg& src, Size size = AUTO);
     void cmp(const Arg& dest, const Arg& src, Size size = AUTO);
     void mov(const Arg& dest, const Arg& src, Size size = AUTO);
+    void movsx(const Arg& dest, const Arg& src, Size size = AUTO);
+    void movzx(const Arg& dest, const Arg& src, Size size = AUTO);
     void imul(const Arg& dest, const Arg& src, Size size = AUTO);
+    void imul(const Arg& dest, const Arg& lhs, const Arg& rhs, Size size = AUTO);
     void rol(const Arg& dest, const Arg& src, Size size = AUTO);
     void ror(const Arg& dest, const Arg& src, Size size = AUTO);
     void rcl(const Arg& dest, const Arg& src, Size size = AUTO);
@@ -226,6 +231,7 @@ namespace x64 {
     void sar(const Arg& dest, const Arg& src, Size size = AUTO);
     void idiv(const Arg& src, Size size = AUTO);
     void not_(const Arg& src, Size size = AUTO);
+    void neg(const Arg& src, Size size = AUTO);
     void inc(const Arg& src, Size size = AUTO);
     void dec(const Arg& src, Size size = AUTO);
     void push(const Arg& src, Size size = AUTO);

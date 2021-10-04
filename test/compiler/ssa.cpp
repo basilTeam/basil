@@ -37,6 +37,8 @@ do:
     ASSERT_EQUAL(i1->dest->data.var, i2->dest->data.var);
 
     enforce_ssa(main);
+    // println("");
+    // println(main);
 
     // after enforcing ssa, the two assignments to x should have different ids
     ASSERT_NOT_EQUAL(i1->dest->data.var, i2->dest->data.var);
@@ -69,5 +71,5 @@ do:
 )", load_step, lex_step, parse_step, eval_step, ast_step, ssa_step)[symbol_from("#main")];
 
     enforce_ssa(main);
-    println(main);
+    // println(main);
 }

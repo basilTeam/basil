@@ -127,103 +127,105 @@ namespace jasmine {
         void format(stream& io) const;
     };
 
-    Param r(u64 id);
-    Param gr(Symbol symbol);
-    Param gr(const char* name);
-    Param imm(Imm i);
-    Param m(Reg reg);
-    Param m(Reg reg, i64 off);
-    Param m(Symbol label, i64 off);
-    Param m(Symbol label, i64 off);
-    Param m(Reg reg, Type type);
-    Param m(Reg reg, Type, Symbol field);
-    Param m(Symbol label, Type type);
-    Param m(Symbol label, Type type, Symbol field);
-    Param l(Symbol symbol);
-    Param l(const char* name);
+    namespace bc {
+        Param r(u64 id);
+        Param gr(Symbol symbol);
+        Param gr(const char* name);
+        Param imm(Imm i);
+        Param m(Reg reg);
+        Param m(Reg reg, i64 off);
+        Param m(Symbol label, i64 off);
+        Param m(Symbol label, i64 off);
+        Param m(Reg reg, Type type);
+        Param m(Reg reg, Type, Symbol field);
+        Param m(Symbol label, Type type);
+        Param m(Symbol label, Type type, Symbol field);
+        Param l(Symbol symbol);
+        Param l(const char* name);
 
-    void writeto(Object& buf);
+        void writeto(Object& buf);
 
-    void add(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void sub(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void mul(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void div(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void rem(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void and_(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void or_(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void not_(Type type, const Param& dest, const Param& operand);
-    void icast(Type type, const Param& dest, const Param& operand);
-    void f32cast(Type type, const Param& dest, const Param& operand);
-    void f64cast(Type type, const Param& dest, const Param& operand);
-    void sxt(Type type, const Param& dest, const Param& operand);
-    void zxt(Type type, const Param& dest, const Param& operand);
-    void icast(Type type, const Param& lhs, const Param& rhs);
-    void f32cast(Type type, const Param& lhs, const Param& rhs);
-    void f64cast(Type type, const Param& lhs, const Param& rhs);
-    void sl(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void slr(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void sar(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void local(Type type, const Param& dest);
-    void param(Type type, const Param& dest);
-    void push(Type type, const Param& operand);
-    void pop(Type type, const Param& dest);
-    void frame();
-    void ret();
-    void begincall(Type type, const Param& dest, const Param& func);
-    void arg(Type type, const Param& param);
-    void endcall();
-    void call_recur();
+        void add(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void sub(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void mul(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void div(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void rem(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void and_(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void or_(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void not_(Type type, const Param& dest, const Param& operand);
+        void icast(Type type, const Param& dest, const Param& operand);
+        void f32cast(Type type, const Param& dest, const Param& operand);
+        void f64cast(Type type, const Param& dest, const Param& operand);
+        void sxt(Type type, const Param& dest, const Param& operand);
+        void zxt(Type type, const Param& dest, const Param& operand);
+        void icast(Type type, const Param& lhs, const Param& rhs);
+        void f32cast(Type type, const Param& lhs, const Param& rhs);
+        void f64cast(Type type, const Param& lhs, const Param& rhs);
+        void sl(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void slr(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void sar(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void local(Type type, const Param& dest);
+        void param(Type type, const Param& dest);
+        void push(Type type, const Param& operand);
+        void pop(Type type, const Param& dest);
+        void frame();
+        void ret();
+        void begincall(Type type, const Param& dest, const Param& func);
+        void arg(Type type, const Param& param);
+        void endcall();
+        void call_recur();
 
-    template<typename ...Args>
-    void call_recur(Type type, const Param& arg, const Args&... args) {
-        jasmine::arg(type, arg);
-        call_recur(args...);
+        template<typename ...Args>
+        void call_recur(Type type, const Param& arg, const Args&... args) {
+            jasmine::bc::arg(type, arg);
+            call_recur(args...);
+        }
+
+        template<typename... Args>
+        void call(Type type, const Param& dest, const Param& func, const Args&... args) {
+            begincall(type, dest, func);
+            call_recur(args...);
+        }
+
+        void jeq(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jne(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jl(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jle(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jg(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jge(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jo(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jno(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
+        void jump(Symbol symbol);
+        void nop();
+        void ceq(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void cne(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void cl(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void cle(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void cg(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void cge(Type type, const Param& dest, const Param& lhs, const Param& rhs);
+        void mov(Type type, const Param& dest, const Param& operand);
+        void begintype(Symbol name);
+        void member(Symbol name, u64 size);
+        void endtype();
+        
+        void type_recur();
+        
+        template<typename... Args>
+        void type_recur(Symbol name, u64 size, const Args&... args) {
+            member(name, size);
+            type_recur(args...);
+        }
+
+        template<typename... Args>
+        void type(Symbol name, const Args&... args) {
+            begintype(name);
+            type_recur(args...);
+        }
+
+        void label(Symbol symbol);
+        void label(const char* symbol);
+        void global(Type type, Symbol symbol);
     }
-
-    template<typename... Args>
-    void call(Type type, const Param& dest, const Param& func, const Args&... args) {
-        begincall(type, dest, func);
-        call_recur(args...);
-    }
-
-    void jeq(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jne(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jl(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jle(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jg(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jge(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jo(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jno(Type type, Symbol symbol, const Param& lhs, const Param& rhs);
-    void jump(Symbol symbol);
-    void nop();
-    void ceq(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void cne(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void cl(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void cle(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void cg(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void cge(Type type, const Param& dest, const Param& lhs, const Param& rhs);
-    void mov(Type type, const Param& dest, const Param& operand);
-    void begintype(Symbol name);
-    void member(Symbol name, u64 size);
-    void endtype();
-    
-    void type_recur();
-    
-    template<typename... Args>
-    void type_recur(Symbol name, u64 size, const Args&... args) {
-        member(name, size);
-        type_recur(args...);
-    }
-
-    template<typename... Args>
-    void type(Symbol name, const Args&... args) {
-        begintype(name);
-        type_recur(args...);
-    }
-
-    void label(Symbol symbol);
-    void label(const char* symbol);
-    void global(Type type, Symbol symbol);
     
     Insn parse_insn(Context& context, stream& io);
     Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj);

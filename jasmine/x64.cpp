@@ -184,6 +184,10 @@ namespace x64 {
             && lhs.data.register_offset.offset == rhs.data.register_offset.offset;
         return false;
     }
+    
+    bool operator!=(const Arg& lhs, const Arg& rhs) {
+        return !(lhs == rhs);
+    }
 
     jasmine::RefType relative(Size size) {
         switch (size) {
@@ -548,9 +552,14 @@ namespace x64 {
     }
 
     void emitprefix(const Arg& dest, Size size) {
-        if (size == WORD) target->code().write(0x66); // 16-bit prefix
+        if (size == WORD) target->code().write<u8>(0x66); // 16-bit prefix
         u8 rex = 0x40;
         Register dest_reg = base_register(dest);
+
+        if (operand_size(dest.type) == BYTE || size == BYTE) {
+            // we need some REX prefix to enable the use of bpl, spl, dil, and sil registers
+            if (dest_reg >= RBP && dest_reg < R8) rex |= 2; // we use the SIB bit since SIB is forbidden in 8-bit mode
+        }
         
         if (is_64bit_register(dest_reg)) rex |= 1; // 64-bit r/m field
 
@@ -562,10 +571,16 @@ namespace x64 {
     }
 
     void emitprefix(const Arg& dest, const Arg& src, Size size) {
-        if (size == WORD) target->code().write(0x66); // 16-bit prefix
+        if (size == WORD) target->code().write<u8>(0x66); // 16-bit prefix
         u8 rex = 0x40;
         Register src_reg = base_register(src);
         Register dest_reg = base_register(dest);
+
+        if (operand_size(dest.type) == BYTE || operand_size(src.type) == BYTE || size == BYTE) {
+            // we need some REX prefix to enable the use of bpl, spl, dil, and sil registers
+            if ((src_reg >= RBP && src_reg < R8) || (dest_reg >= RBP && dest_reg < R8))
+                rex |= 2; // we use the SIB bit since SIB is forbidden in 8-bit mode
+        }
         
         if (is_memory(src.type)) {
             Register temp = src_reg;
@@ -714,7 +729,8 @@ namespace x64 {
         }
         else modrm |= 0b11000000; // register-register mod
 
-        if (is_register_offset(src.type) || is_register_offset(dest.type)) {
+        if (is_register_offset(src.type) || is_register_offset(dest.type)
+            || is_scaled_addressing(src.type) || is_scaled_addressing(dest.type)) {
             if (disp > -129 && disp < 128) modrm |= 0b01000000; // 8-bit offset
             else if (disp < -0x80000000l || disp > 0x7fffffffl) {
                 fprintf(stderr, "[ERROR] Cannot represent memory offset %lx "
@@ -743,7 +759,8 @@ namespace x64 {
         if (is_displacement_only(src.type) || is_displacement_only(dest.type)) {
             target->code().write(little_endian((i32)disp));
         }
-        else if (is_register_offset(src.type) || is_register_offset(dest.type)) {
+        else if (is_register_offset(src.type) || is_register_offset(dest.type)
+            || is_scaled_addressing(src.type) || is_scaled_addressing(dest.type)) {
             if (disp > -129 && disp < 128) target->code().write((i8)disp);
             else target->code().write(little_endian((i32)disp));
         }
@@ -896,6 +913,70 @@ namespace x64 {
                 target->reference(src.data.label, relative(DWORD), -4);
         }
     }
+    
+    void movsx(const Arg& dest, const Arg& src, Size size) {
+        verify_buffer();
+        verify_args(dest, src);
+        Size src_size = operand_size(src.type);
+
+        if (src_size != WORD && src_size != BYTE) {
+            fprintf(stderr, "[ERROR] Invalid operand size; source parameter in "
+                "'movsx' instruction must be word or byte-sized.\n");
+            exit(1);
+        }
+        if (is_immediate(src.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted in "
+                "'movsx' instruction.\n");
+            exit(1);
+        }
+        if (is_memory(dest.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; destination in binary "
+                "'movsx' instruction cannot be memory.\n");
+            exit(1);
+        }
+
+        u8 opcode = src_size == WORD ? 0xBF : 0xBE;
+
+        emitprefix(dest, src, operand_size(dest.type));
+        target->code().write<u8>(0x0f);
+        target->code().write<u8>(opcode);
+
+        Arg realsrc = src;
+        if (is_label(src.type)) realsrc = riprel64(0);
+        emitargs(realsrc, dest, operand_size(dest.type));
+    }
+
+    void movzx(const Arg& dest, const Arg& src, Size size) {
+        verify_buffer();
+        verify_args(dest, src);
+        Size src_size = operand_size(src.type);
+
+        if (src_size != WORD && src_size != BYTE) {
+            fprintf(stderr, "[ERROR] Invalid operand size; source parameter in "
+                "'movsx' instruction must be word or byte-sized.\n");
+            exit(1);
+        }
+        if (is_immediate(src.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted in "
+                "'movsx' instruction.\n");
+            exit(1);
+        }
+        if (is_memory(dest.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; destination in binary "
+                "'movsx' instruction cannot be memory.\n");
+            exit(1);
+        }
+
+        u8 opcode = src_size == WORD ? 0xB7 : 0xB6;
+
+        emitprefix(dest, src, operand_size(dest.type));
+        target->code().write<u8>(0x0f);
+        target->code().write<u8>(opcode);
+
+        Arg realsrc = src;
+        if (is_label(src.type)) realsrc = riprel64(0);
+        emitargs(realsrc, dest, operand_size(dest.type));
+    }
 
     void imul(const Arg& dest, const Arg& src, Size size) {
         verify_buffer();
@@ -916,6 +997,38 @@ namespace x64 {
         else { // use normal opcode
             target->code().write<u8>(0x0f, 0xaf);
             emitargs(src, dest, actual_size); // operands are reversed...not sure why :p
+        }
+    }
+
+    void imul(const Arg& dest, const Arg& lhs, const Arg& rhs, Size size) {
+        verify_buffer();
+        verify_args(dest, lhs);
+        Size actual_size = resolve_size(dest, lhs, size);
+
+        emitprefix(lhs, dest, actual_size); // operands are reversed...not sure why :p
+        if (!is_immediate(rhs.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; third operand of ternary "
+                "'imul' instruction must be immediate.\n");
+            exit(1);
+        }
+        else if (is_immediate(lhs.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted "
+                "in ternary 'imul' instruction.\n");
+            exit(1);
+        }
+        else if (is_memory(dest.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; destination in binary "
+                "'imul' instruction cannot be memory.\n");
+            exit(1);
+        }
+        else { // use normal opcode
+            i64 val = immediate_value(rhs);
+            u8 opcode = 0x69;
+            if (val > -129 && val < 128) opcode = 0x6B; // 8-bit offset
+            target->code().write<u8>(opcode);
+            emitargs(lhs, dest, actual_size); // operands are reversed...not sure why :p
+            if (opcode == 0x6B) write_immediate(val, BYTE);
+            else write_immediate(val, actual_size);
         }
     }
 
@@ -1043,6 +1156,21 @@ namespace x64 {
         emitprefix(src, actual_size);
         target->code().write<u8>(actual_size == BYTE ? 0xf6 : 0xf7);
         emitargs(src, actual_size, 2);
+	}
+
+	void neg(const Arg& src, Size size) {
+        verify_buffer();
+        Size actual_size = resolve_size(src, size);
+				
+		if (is_immediate(src.type)) {
+            fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted "
+                "in 'not' instruction.\n");
+            exit(1);
+		}
+
+        emitprefix(src, actual_size);
+        target->code().write<u8>(actual_size == BYTE ? 0xf6 : 0xf7);
+        emitargs(src, actual_size, 3);
 	}
 
 	void inc(const Arg& src, Size size) {

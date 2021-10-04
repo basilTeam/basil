@@ -79,7 +79,7 @@ namespace jasmine {
     void expect(char ch, stream& io) {
         consume_leading_space(io);
         if (io.peek() != ch) {
-            fprintf(stderr, "Expected '%c'.\n", ch);
+            fprintf(stderr, "Expected '%c', got '%c'.\n", ch, io.peek());
             exit(1);
         }
         else io.read();
@@ -1068,6 +1068,7 @@ namespace jasmine {
         u64 first, last;
         u64 stack;
         vector<LiveRange> ranges;
+        vector<vector<LiveRange*>> starts_by_insn, ends_by_insn;
 
         void format(const vector<Insn>& insns, stream& io) const {
             for (u64 i = first; i <= last; i ++) {
@@ -1248,6 +1249,9 @@ namespace jasmine {
 #include "x64.h"
 
 namespace jasmine {
+
+    // Codegen analysis
+
     void populate_arg_registers(Architecture arch, vector<u32>& regs) {
         switch (arch) {
             case X86_64: {
@@ -1280,11 +1284,13 @@ namespace jasmine {
         }
     }
 
-    void populate_registers(Architecture arch, vector<u32>& regs) {
+    void populate_registers(Architecture arch, bitset& regs) {
         switch (arch) {
             case X86_64: {
                 using namespace x64;
-                for (u32 i = 0; i < 16; i ++) regs.push(i); // rax - r15
+                for (u32 i = 0; i < 16; i ++) regs.insert(i); // rax - r15
+                regs.erase(x64::RBP); // don't allocate stack pointers
+                regs.erase(x64::RSP);
                 break;
             }
             default:
@@ -1294,59 +1300,110 @@ namespace jasmine {
         }
     }
 
+    void clobber_x64(Function& f, const Insn& insn, const vector<u32>& args, 
+        bitset& regs, vector<LiveRange*>& mappings, Architecture arch) {
+        static bitset clobbers;
+        clobbers.clear();
+        switch (insn.opcode) {
+            case OP_DIV:
+            case OP_REM:
+                clobbers.insert(x64::RAX);
+                clobbers.insert(x64::RDX);
+                if (insn.params[2].kind == PK_IMM) clobbers.insert(x64::RCX); // we need a register to hold immediate divisors
+                break;
+            case OP_MUL:    // these instructions don't permit memory destinations or immediates,
+            case OP_ZXT:    // so we reserve rax just in case
+            case OP_EXT:
+                clobbers.insert(x64::RAX);
+                break;
+            case OP_CALL: {
+                clobbers.insert(return_register(arch)); // return value
+                u32 p = 0;
+                for (u32 i = 2; i < insn.params.size(); i ++) {
+                    if (insn.params[i].annotation && insn.params[i].annotation->kind != K_STRUCT
+                        && p < args.size()) {
+                        clobbers.insert(args[p]); // reserve register parameters
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        vector<LiveRange*> fixup;
+        for (u32 i : clobbers) {
+            regs.erase(i);
+            if (mappings[i]) fixup.push(mappings[i]); // reallocate conflicting variables
+        }
+        for (LiveRange* r : fixup) {
+            if (regs.begin() != regs.end()) {
+                r->loc = { true, *regs.begin() };
+                regs.erase(*regs.begin());
+                mappings[r->loc.val] = r;
+                // println("reallocated %", r->reg.id, " to ", x64::REGISTER_NAMES[r->loc.val]);
+            }
+            else r->loc = { false, u32(f.stack += 8ul) }; // spill
+        }
+        // release clobbered registers for use after this instruction
+        for (u32 i : clobbers) {
+            mappings[i] = nullptr;
+            regs.insert(i); 
+        }
+    }
+
     void allocate_registers(Function& f, const vector<Insn>& insns, Architecture arch)  {
-        vector<u32> args, regs;
+        vector<u32> args;
         populate_arg_registers(arch, args);
+        bitset regs;
         populate_registers(arch, regs);
 
         u32 cur_arg = 0;
 
-        vector<u32> available;
-        for (i64 i = i64(regs.size()) - 1; i >= 0; i --) {
-            available.push(regs[i]);
-        }
-        map<u64, LiveRange*> mappings;
-        for (u32 r : regs) mappings.put(r, nullptr);
+        // we want a mapping for every available register id
+        vector<LiveRange*> mappings;
+        for (u32 r : regs) while (mappings.size() < r) mappings.push(nullptr);
 
-        vector<vector<LiveRange*>> starts_by_insn, ends_by_insn;
         for (u64 i = f.first; i <= f.last; i ++) {
-            starts_by_insn.push({});
-            ends_by_insn.push({});
+            f.starts_by_insn.push({});
+            f.ends_by_insn.push({});
         }
         for (LiveRange& r : f.ranges) {
-            starts_by_insn[r.first - f.first].push(&r);
-            ends_by_insn[r.last - f.first].push(&r);
+            f.starts_by_insn[r.first - f.first].push(&r);
+            f.ends_by_insn[r.last - f.first].push(&r);
         }
 
         for (u64 i = f.first; i <= f.last; i ++) {
-            for (LiveRange* r : ends_by_insn[i - f.first]) {
+            for (LiveRange* r : f.ends_by_insn[i - f.first]) {
                 if (r->loc.is_reg) {
-                    available.push(r->loc.val);
+                    regs.insert(r->loc.val);
                     mappings[r->loc.val] = nullptr;
                 }
             }
-            for (LiveRange* r : starts_by_insn[i - f.first]) {
+            for (LiveRange* r : f.starts_by_insn[i - f.first]) {
                 if (r->arg_hint) {
                     r->loc = { true, args[cur_arg] };
-                    bool found = false;
-                    for (u32 i = 0; i < available.size(); i ++) { // remove arg register
-                        if (available[i] == r->loc.val) found = true;
-                        if (found && i < available.size() - 1) available[i] = available[i + 1];
-                    }
-                    if (found) available.pop();
+                    regs.erase(args[cur_arg]);
                     LiveRange* existing = mappings[r->loc.val];
-                    mappings.put(r->loc.val, r);
+                    mappings[r->loc.val] = r;
                     cur_arg ++;
 
                     if (existing) r = existing;
                     else continue;
                 }
-                if (available.size()) {
-                    r->loc = { true, available.back() };
-                    available.pop();
-                    mappings.put(r->loc.val, r);
+                if (regs.begin() != regs.end()) {
+                    r->loc = { true, *regs.begin() };
+                    regs.erase(*regs.begin());
+                    mappings[r->loc.val] = r;
                 }
                 else r->loc = { false, u32(f.stack += 8ul) }; // spill
+            }
+
+            switch (arch) {
+                case X86_64:
+                    clobber_x64(f, insns[i], args, regs, mappings, arch);
+                    break;
+                default:
+                    break;
             }
         }
 
@@ -1362,6 +1419,267 @@ namespace jasmine {
         }
         println("");
     }
+
+    // X86_64 Codegen
+
+    optional<x64::Arg> to_x64_arg(const map<u64, LiveRange*>& reg_bindings, const Param& p) {
+        switch (p.kind) {
+            case PK_IMM:
+                return some<x64::Arg>(x64::imm(p.data.imm.val));
+            case PK_REG:
+                if (reg_bindings.find(p.data.reg.id) == reg_bindings.end()) return none<x64::Arg>();
+                if (reg_bindings[p.data.reg.id]->loc.is_reg) // bound to register
+                    return some<x64::Arg>(x64::r64((x64::Register)reg_bindings[p.data.reg.id]->loc.val));
+                else 
+                    return some<x64::Arg>(x64::m64(x64::RBP, -i64(reg_bindings[p.data.reg.id]->loc.val)));
+            case PK_MEM: {
+                const auto& m = p.data.mem;
+                switch (m.kind) {
+                    case MK_REG_OFF:
+                        if (reg_bindings[m.reg.id]->loc.is_reg) {
+                            return some<x64::Arg>(m64((x64::Register)reg_bindings[m.reg.id]->loc.val, m.off));
+                        }
+                        else {
+                            panic("can't efficiently handle memory parameter");
+                        }
+                    case MK_REG_TYPE:
+
+                    case MK_LABEL_OFF:
+                    case MK_LABEL_TYPE:
+                        break;
+                }
+                return some<x64::Arg>(x64::imm(0));
+            }
+            case PK_LABEL:
+                return some<x64::Arg>(x64::label32(p.data.label));
+        }
+    }
+
+    void move_x64(const x64::Arg& dest, const x64::Arg& src) {
+        using namespace x64;
+        if (is_register(dest.type) && dest == src)
+            return; // no no-op moves
+        if (is_register(dest.type) && is_immediate(src.type) && immediate_value(src) == 0)
+            return xor_(dest, dest); // faster clear register
+        if (is_register(dest.type) || is_register(src.type) || is_immediate(src.type))
+            return mov(dest, src); // simple move
+        else {
+            push(src); // push/pop memory move
+            pop(dest);
+        }
+    }
+
+    i64 log2(i64 n) {
+        i64 acc = 0;
+        while (n > 1) {
+            n >>= 1;
+            acc ++;
+        }
+        return acc;
+    }
+
+    // ensures, for ternary jasmine instructions, that any immediate src is in args[2]
+    void commute_ternary(vector<x64::Arg>& args) {
+        using namespace x64;
+        if (is_immediate(args[1].type)) {
+            auto tmp = args[2];
+            args[2] = args[1];
+            args[1] = tmp;
+        }
+    }
+    
+    void generate_x64_insn(Function& f, const Insn& insn, vector<x64::Arg>& args, Object& obj) {
+        if (insn.label) obj.define(*insn.label);
+        using namespace x64;
+        switch (insn.opcode) {
+            case OP_ADD:
+                commute_ternary(args);
+                if (is_register(args[1].type) && !is_memory(args[2].type)) {
+                    if (is_immediate(args[2].type)) {
+                        i64 val = immediate_value(args[2]);
+                        if (val == 0) return move_x64(args[0], args[1]);
+                        else if (val == 1) {
+                            move_x64(args[0], args[1]);
+                            return inc(args[0]);
+                        }
+                        else if (val == -1) {
+                            move_x64(args[0], args[1]);
+                            return dec(args[0]);
+                        }
+                        else if (is_register(args[0].type)) {
+                            return lea(args[0], m64(args[1].data.reg, val));
+                        }
+                    }
+                    else if (is_register(args[0].type)) {
+                        return lea(args[0], m64(args[1].data.reg, args[2].data.reg, SCALE1, 0));
+                    }
+                }
+                move_x64(args[0], args[1]);
+                add(args[0], args[2]);
+                return;
+            case OP_SUB:
+                if (!is_memory(args[1].type) && !is_memory(args[2].type)) {
+                    if (is_immediate(args[1].type)) {
+                        i64 val = immediate_value(args[2]);
+                        if (val == 0) {
+                            move_x64(args[0], args[1]);
+                            return neg(args[0]);
+                        }
+                    }
+                    else if (is_immediate(args[2].type)) {
+                        i64 val = immediate_value(args[2]);
+                        if (val == 0) return move_x64(args[0], args[1]);
+                        else if (val == 1) {
+                            move_x64(args[0], args[1]);
+                            return inc(args[0]);
+                        }
+                        else if (val == -1) {
+                            move_x64(args[0], args[1]);
+                            return dec(args[0]);
+                        }
+                        else if (is_register(args[0].type)) {
+                            return lea(args[0], m64(args[1].data.reg, val));
+                        }
+                    }
+                    else if (is_register(args[0].type)) {
+                        return lea(args[0], m64(args[1].data.reg, args[2].data.reg, SCALE1, 0));
+                    }
+                }
+                move_x64(args[0], args[1]);
+                sub(args[0], args[2]);
+                return;
+            case OP_MUL: {
+                commute_ternary(args);
+                if (is_immediate(args[2].type)) {
+                    i64 val = immediate_value(args[2]);
+                    if (val == 0) return move_x64(args[0], imm(0));
+                    else if (val == 1) return move_x64(args[0], args[1]);
+                    else if (val == -1) {
+                        move_x64(args[0], args[1]);
+                        return neg(args[0]);
+                    }
+                    else if (!(val & (val - 1))) {
+                        move_x64(args[0], args[1]);
+                        return shl(args[0], imm(log2(val))); // shl for po2 multiplies
+                    }
+                }
+                auto dest = args[0];
+                if (!is_register(dest.type)) dest = r64(RAX);
+                if (is_immediate(args[2].type)) { // imul does not permit immediate src
+                    imul(dest, args[1], args[2]);
+                }
+                else {
+                    move_x64(dest, args[1]);
+                    imul(dest, args[2]);
+                }
+                if (dest != args[0]) move_x64(args[0], dest);
+                return;
+            }
+            case OP_DIV: {
+                if (is_immediate(args[1].type)) {
+                    i64 val = immediate_value(args[1]);
+                    if (val == 0) return move_x64(args[0], imm(0));
+                }
+                if (is_immediate(args[2].type)) {
+                    i64 val = immediate_value(args[2]);
+                    if (val == 1) return move_x64(args[0], args[1]);
+                    else if (val == -1) {
+                        move_x64(args[0], args[1]);
+                        return neg(args[0]);
+                    }
+                    else if (!(val & (val - 1))) {
+                        move_x64(args[0], args[1]);
+                        return shr(args[0], imm(log2(val))); // shr for po2 divisions
+                    }
+                }
+                auto src = args[2];
+                if (is_immediate(args[2].type)) { // idiv does not permit immediate divisor
+                    move_x64(r64(RCX), args[2]);
+                    src = r64(RCX);
+                }
+                move_x64(r64(RAX), args[1]);
+                cdq();
+                idiv(src);
+                move_x64(args[0], r64(RAX));
+                return;
+            }
+            case OP_REM: {
+                if (is_immediate(args[1].type)) {
+                    i64 val = immediate_value(args[1]);
+                    if (val == 0) return move_x64(args[0], imm(0));
+                }
+                if (is_immediate(args[2].type)) {
+                    i64 val = immediate_value(args[2]);
+                    if (val == 1) return move_x64(args[0], imm(0));
+                    else if (val == -1) return move_x64(args[0], imm(0));
+                    else if (!(val & (val - 1))) {
+                        move_x64(args[0], args[1]);
+                        mov(r64(RAX), imm(val - 1));
+                        and_(args[0], r64(RAX));
+                    }
+                }
+                auto src = args[2];
+                if (is_immediate(args[2].type)) { // idiv does not permit immediate divisor
+                    move_x64(r64(RCX), args[2]);
+                    src = r64(RCX);
+                }
+                move_x64(r64(RAX), args[1]);
+                cdq();
+                idiv(src);
+                move_x64(args[0], r64(RDX));
+                return;
+            }
+            case OP_FRAME:
+                if (f.stack) {
+                    push(r64(RBP));
+                    mov(r64(RBP), r64(RSP));
+                    sub(r64(RSP), imm(f.stack));
+                }
+                return;
+            case OP_MOV: return move_x64(args[0], args[1]);
+            case OP_RET:
+                move_x64(r64((Register)return_register(X86_64)), args[0]);
+                if (f.stack) {
+                    mov(r64(RSP), r64(RBP));
+                    pop(r64(RBP));
+                }
+                ret();
+                return;
+            default:
+                return;
+        }
+    }
+
+    void generate_x64(Function& f, vector<Insn>& insns, Object& obj) {
+        using namespace x64;
+        writeto(obj);        
+
+        static vector<x64::Arg> args;
+        map<u64, LiveRange*> reg_bindings;
+        for (u32 i = f.first; i <= f.last; i ++) {
+            const Insn& insn = insns[i];
+            for (LiveRange* r : f.starts_by_insn[i - f.first]) {
+                reg_bindings[r->reg.id] = r;
+            }
+            // look ahead for destination registers
+            if (insn.params.size() && insn.params[0].kind == PK_REG && i < f.last) 
+                for (LiveRange* r : f.starts_by_insn[(i + 1) - f.first])
+                    if (r->reg.id == insn.params[0].data.reg.id) 
+                        reg_bindings[r->reg.id] = r;
+
+            args.clear();
+            bool useless = false; // useless instructions can happen when 
+                                  // the destination of this instruction is unused
+            for (const Param& p : insn.params) {
+                auto arg = to_x64_arg(reg_bindings, p);
+                if (!arg) useless = true;
+                else args.push(*arg);
+            }
+            if (useless) continue;
+            
+            generate_x64_insn(f, insn, args, obj);
+        }
+    }
     
     Object jasmine_to_x86(const vector<Insn>& insns_in) {
         vector<Insn> insns = insns_in;
@@ -1369,6 +1687,9 @@ namespace jasmine {
         for (Function& f : functions) compute_ranges(f, insns);
         for (Function& f : functions) allocate_registers(f, insns, X86_64);
 
-        return Object(X86_64);
+        Object obj(X86_64);
+        for (Function& f : functions) generate_x64(f, insns, obj);
+
+        return obj;
     }
 }

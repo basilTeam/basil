@@ -3,6 +3,18 @@
 
 using namespace jasmine;
 
+void write_asm(bytebuf buf, stream& io) {
+    while (buf.size()) {
+        u8 byte = buf.read();
+        u8 upper = byte >> 4, lower = byte & 15;
+        const char* hex = "0123456789abcdef";
+        io.write(hex[upper]);
+        io.write(hex[lower]);
+        io.write(' ');
+    }
+    io.write('\n');
+}
+
 TEST(simple_parse) {
     buffer b;
     write(b, R"(
@@ -89,16 +101,27 @@ TEST(labeled_branches) {
 TEST(x86_regalloc) {
     buffer in;
     write(in,R"(
-foo:    frame
-        param i64 %0
-        local i64 %1
-_L0:    jeq i64 _L1 %0, %1
-        sub i64 %0, %0, 1
-        jump _L0
-_L1:    ret i64 %0)");
+foo: frame
+     mov i64 %0, 1
+     mov i64 %1, 2
+     add i64 %2, %0, %1
+     mul i64 %2, %2, 3 
+     ret i64 %3
+)");
+    // buffer copy(in);
     Context ctx;
     vector<Insn> insns;
-    for (u8 i = 0; i < 7; i ++) insns.push(parse_insn(ctx, in));
+    for (u8 i = 0; i < 6; i ++) insns.push(parse_insn(ctx, in));
+    // println("");
+    // println(string(copy));
+    Object obj = jasmine_to_x86(insns);
+    // print("ASM: "); write_asm(obj.code(), _stdout);
+    // println("");
     
-    jasmine_to_x86(insns);
+    obj.load();
+    auto foo = (i64(*)())obj.find(global("foo"));
+    // printf("symbol 'foo' loaded to address 0x%lx\n", (uintptr_t)foo);
+    // println("foo() = ", foo());
+    // println("");
+    ASSERT_EQUAL(foo(), 9);
 }

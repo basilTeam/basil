@@ -38,11 +38,11 @@ TEST(assign) {
 TEST(apply) {
     auto a = some<int>(3);
     ASSERT_EQUAL(*a, 3);
-    a = apply(a, [](int i) -> int { return i + 1; });
+    a = apply(a, [](int i) -> optional<int> { return some<int>(i + 1); });
     ASSERT_TRUE(a);
     ASSERT_EQUAL(*a, 4);
     a = none<int>();
     ASSERT_FALSE(a);
-    a = apply(a, [](int i) -> int { return i * 2; });
+    a = apply(a, [](int i) -> optional<int> { return some<int>(i * 2); });
     ASSERT_FALSE(a);
 }

@@ -1228,6 +1228,7 @@ namespace basil {
             case K_TYPE: return v_runtime(src.pos, t_runtime(T_TYPE), ast_type(src.pos, t_lowered, src.data.type));
             case K_VOID: return v_runtime(src.pos, t_runtime(T_VOID), ast_void(src.pos));
             case K_BOOL: return v_runtime(src.pos, t_runtime(T_BOOL), ast_bool(src.pos, t_lowered, src.data.b));
+            case K_ERROR:
             case K_RUNTIME: return src;
             default:   
                 err(src.pos, "Attempted to lower compile-time-only value '", src, "' of type '", t_lowered, "'.");

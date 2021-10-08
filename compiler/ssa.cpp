@@ -89,17 +89,17 @@ namespace basil {
 
     void IRBlock::format(stream& io) const {
         write(io, BOLDYELLOW, "BB", id, RESET, ":\t", GRAY);
-        // write(io, "(in =");
-        // for (rc<IRBlock> bb : in) write(io, " ", bb->id);
-        // write(io, ")\t");
-        // write(io, "(out =");
-        // for (rc<IRBlock> bb : out) write(io, " ", bb->id);
-        // write(io, ")\t");
-        // if (dom.begin() != dom.end()) {
-        //     write_seq(io, dom, "(DOM = ", ", ", ")\t");
-        //     write(io, "idom = ", idom ? ::format<ustring>(idom->id) : "Ø", "\t");
-        //     write_seq(io, dom_frontier, "(DF = ", ", ", ")\t");
-        // }
+        write(io, "(in =");
+        for (rc<IRBlock> bb : in) write(io, " ", bb->id);
+        write(io, ")\t");
+        write(io, "(out =");
+        for (rc<IRBlock> bb : out) write(io, " ", bb->id);
+        write(io, ")\t");
+        if (dom.begin() != dom.end()) {
+            write_seq(io, dom, "(DOM = ", ", ", ")\t");
+            write(io, "idom = ", idom ? ::format<ustring>(idom->id) : "Ø", "\t");
+            write_seq(io, dom_frontier, "(DF = ", ", ", ")\t");
+        }
         write(io, RESET, "\n");
         
         for (const auto& insn : insns) {
@@ -626,26 +626,15 @@ namespace basil {
     }
 
     void enforce_ssa_block(rc<IRFunction> func, rc<IRBlock> block) {
-        // compute numbering on block entry, from predecessors
-        map<Symbol, bitset> problematic;
-        for (const auto& pred : block->in) {
-            for (const auto& [k, v] : pred->vars_out) {
-                auto it = block->vars_in.find(k);
-                if (it != block->vars_in.end()) {
-                    problematic[k].insert(v); // build set of conflicts so we can make a phi later
-                    problematic[k].insert(it->second); 
-                }
-                else block->vars_in[k] = v;
-            }
+        // create stub phis
+        vector<rc<IRInsn>> phis;
+        for (const auto& [k, v] : block->phis) {
+            auto it = func->var_numbers.find(k);
+            phis.push(ir_phi(func, T_VOID, ir_var(func, k), {}));
         }
 
-        vector<rc<IRInsn>> phis;
-        for (const auto& [k, v] : problematic) {
-            IRParam dest = find_var(func, { k, ++ func->var_numbers[k] }); // fresh number as result of phi
-            vector<IRParam> params;
-            for (u32 i : v) params.push(find_var(func, { k, i }));
-            phis.push(ir_phi(func, T_ANY, dest, params));
-        }
+        for (rc<IRInsn>& insn : block->insns) phis.push(insn);
+        block->insns = move(phis);
 
         // number instructions in this block
         for (auto& insn : block->insns) {
@@ -669,15 +658,32 @@ namespace basil {
                 block->vars_out[s] = it->second;
             }
         }
-
-        // insert phis after the rest of our instructions have been processed
-        vector<rc<IRInsn>> existing = move(block->insns);
-        block->insns = move(phis);
-        for (const auto& insn : existing) block->insns.push(insn);
     }
     
     void enforce_ssa(rc<IRFunction> func) {
         require(func, DOMINANCE_FRONTIER);
+
+        // find defining blocks
+        for (auto& block : func->blocks) for (auto& insn : block->insns) {
+            if (insn->src.size() && insn->src[0].kind == IK_VAR)
+                func->defining_blocks[func->vars[insn->src[0].data.var].name].push(block);
+        }
+
+        // determine phis
+        for (auto& [k, v] : func->defining_blocks) {
+            bool done = false;
+            while (!done) {
+                done = true;
+                vector<rc<IRBlock>> new_defs;
+                for (auto& block : v) for (u32 other : block->dom_frontier) {
+                    if (func->blocks[other]->phis.contains(k)) continue;
+                    func->blocks[other]->phis.put(k, {});
+                    new_defs.push(func->blocks[other]);
+                    done = false;
+                }
+                for (auto& block : new_defs) v.push(block);
+            }
+        }
 
         // reset any previous attempts at ssa
         func->var_numbers.clear();
@@ -692,6 +698,30 @@ namespace basil {
 
         // compute SSA numberings for each block
         for (auto& block : func->blocks) enforce_ssa_block(func, block);
+
+        // fill out empty phi nodes
+        for (auto& block : func->blocks) {
+            for (u32 i = 0; i < block->phis.size(); i ++) if (block->insns[i]->src.size() == 0) { // empty phis
+                Symbol var = func->vars[block->insns[i]->dest->data.var].name;
+                for (auto& bin : block->in) if (bin->vars_out.contains(var))
+                    block->insns[i]->src.push(find_var(func, { var, bin->vars_out[var] }));
+            }
+        }
+
+        // remove unnecessary phi nodes
+        for (auto& block : func->blocks) {
+            rc<IRInsn>* out = &block->insns[0];
+            u32 removed = 0, n_phis = block->phis.size();
+            for (u32 i = 0; i < block->insns.size(); i ++) {
+                if (i < n_phis && block->insns[i]->src.size() < 2) {
+                    Symbol var = func->vars[block->insns[i]->dest->data.var].name;
+                    block->phis.erase(var);
+                    removed ++;
+                }
+                else *out ++ = block->insns[i];
+            }
+            for (u32 j = 0; j < removed; j ++) block->insns.pop();
+        }
     }
 
     void dominance_frontiers(rc<IRFunction> func) {

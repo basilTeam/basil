@@ -7,17 +7,17 @@
 #include "string.h"
 
 namespace jasmine {
-    Object::Object(Architecture architecture):
-        arch(architecture), loaded_code(nullptr) {
+    Object::Object(const Target& target_in):
+        target(target_in), loaded_code(nullptr) {
         //
     }
 
-    Object::Object(const char* path, Architecture architecture): Object(architecture) {
+    Object::Object(const char* path, const Target& target): Object(target) {
         read(path);
     }
 
     Object::Object(Object&& other):
-        arch(other.arch), buf(other.buf), defs(other.defs), def_positions(other.def_positions),
+        target(other.target), buf(other.buf), defs(other.defs), def_positions(other.def_positions),
         refs(other.refs), loaded_code(other.loaded_code) {}
 
     Object::~Object() {
@@ -141,11 +141,13 @@ namespace jasmine {
         bytebuf b;
         b.write("#!jasmine\n", 10);
 
-        b.write<u8>(JASMINE_VERSION); // version major
-        b.write<u8>(arch); // architecture
+        b.write(little_endian<u16>(JASMINE_VERSION)); // jasmine version
         b.write("\xf0\x9f\xa6\x9d", 4); // friendly flamingo
 
         b.write(little_endian<u64>(buf.size())); // length of code
+        b.write(little_endian<u16>(target.arch)); // architecture
+        b.write(little_endian<u16>(target.os)); // OS
+        b.write<u32>(0); // unused
         bytebuf code_copy = buf;
         while (code_copy.size()) b.write(code_copy.read()); // copy over code
 
@@ -210,8 +212,7 @@ namespace jasmine {
             exit(1);
         }
 
-        u8 version = b.read(); // get version
-        arch = (Architecture)b.read(); // get arch
+        u16 version = from_little_endian(b.read<u16>()); // get version
 
         u8 magic[4];
         for (int i = 0; i < 4; i ++) magic[i] = b.read();
@@ -221,6 +222,11 @@ namespace jasmine {
         }
 
         u64 code_length = from_little_endian(b.read<u64>()); // code length
+        
+        Architecture arch = (Architecture)from_little_endian(b.read<u16>()); // get arch
+        OS os = (OS)from_little_endian(b.read<u16>()); // get os
+        target = { arch, os };
+        
         while (code_length) {
             if (!b.size()) {
                 fprintf(stderr, "[ERROR] File contains less code than announced.\n");
@@ -282,35 +288,28 @@ namespace jasmine {
         fclose(file);
     }
     
-    Architecture Object::architecture() const {
-        return arch;
+    const Target& Object::get_target() const {
+        return target;
     }
     
-    Object Object::retarget(Architecture architecture) {
+    Object Object::retarget(const Target& new_target) {
         if (loaded_code) {
             fprintf(stderr, "[ERROR] Cannot retarget already-loaded jasmine object.\n");
             exit(1);
         }
-        switch (arch) {
+        switch (target.arch) {
             case JASMINE: {
                 vector<Insn> insns;
                 bytebuf b = code();
                 Context ctx;
                 while (b.size()) insns.push(disassemble_insn(ctx, b, *this));
-                switch (architecture) {
-                    case X86_64: 
-                        return jasmine_to_x86(insns);
-                    default: 
-                        break;
-                }
-                break;
+                return compile_jasmine(insns, new_target);
             }
             default:
-                break;
+                fprintf(stderr, "[ERROR] Tried to retarget to incompatible architecture.\n");
+                exit(1);
+                return Object(DEFAULT_TARGET);
         }
-        fprintf(stderr, "[ERROR] Tried to retarget to incompatible architecture.\n");
-        exit(1);
-        return Object(architecture);
     }
 
     void* Object::find(Symbol symbol) const {
@@ -444,7 +443,7 @@ namespace jasmine {
         for (int i = 7; i < 16; i ++) elf.write('\0');
 
         elf.write<u16>(1); // relocatable
-        elf.write<u16>(elf_machine_for(arch));
+        elf.write<u16>(elf_machine_for(target.arch));
         elf.write<u32>(1); // original elf version
         elf.write<u64>(0); // entry point
         elf.write<u64>(0); // no program header
@@ -497,7 +496,7 @@ namespace jasmine {
             rel.write<u64>(sym + entry.second.field_offset);
             u64 info = 0;
             info |= sym_indices[entry.second.symbol] << 32l;
-            info |= elf_reloc_for(arch, entry.second.type, entry.second.symbol.type);
+            info |= elf_reloc_for(target.arch, entry.second.type, entry.second.symbol.type);
             rel.write<u64>(info);
         }
 

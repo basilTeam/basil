@@ -5,6 +5,10 @@
 using namespace jasmine;
 using namespace x64;
 
+SETUP {
+    onlyin(X86_64);
+}
+
 void write_asm(bytebuf buf, stream& io) {
     while (buf.size()) {
         u8 byte = buf.read();
@@ -18,7 +22,7 @@ void write_asm(bytebuf buf, stream& io) {
 }
 
 TEST(simple_arithmetic) {
-    Object obj(X86_64);
+    Object obj;
     writeto(obj);
 
     label(global("foo"));
@@ -42,7 +46,7 @@ TEST(simple_arithmetic) {
 }
 
 TEST(small_loop) {
-    Object obj(X86_64);
+    Object obj;
     writeto(obj);
 
     label(global("foo"));
@@ -69,7 +73,7 @@ TEST(small_loop) {
 }
 
 TEST(recursive) {
-    Object obj(X86_64);
+    Object obj;
     writeto(obj);
 
     label(global("factorial"));
@@ -94,7 +98,7 @@ TEST(recursive) {
 }
 
 TEST(extends) {
-    Object obj(X86_64);
+    Object obj;
     writeto(obj);
 
     label(global("add_zerox"));
@@ -125,7 +129,7 @@ TEST(extends) {
 }
 
 TEST(indexing) {
-    Object obj(X86_64);
+    Object obj;
     writeto(obj);
 
     label(global("sum_array"));
@@ -165,4 +169,49 @@ TEST(indexing) {
     ASSERT_EQUAL(array2[0], 0);
     ASSERT_EQUAL(array2[1], 1);
     ASSERT_EQUAL(array2[7], 1);
+}
+
+TEST(nops) {
+    Object obj;
+    writeto(obj);
+
+    label(global("foo"));
+        mov(r64(RAX), imm(13));
+        for (u32 i = 1; i <= 9; i ++) nop(i);
+        ret();
+
+    obj.load();
+    auto foo = (i64(*)())obj.find(global("foo"));
+    ASSERT_EQUAL(foo(), 13);
+}
+
+TEST(nop_payloads) {
+    Object obj;
+    writeto(obj);
+
+    label(global("foo"));
+        nop(3);
+        nop32(4000);
+        nop(2);
+        nop32(3000);
+        nop(1);
+        nop32(2000);
+        nop32(1000);
+    label(local("ret"));
+        ret();
+
+    obj.load();
+    auto foo = (void(*)())obj.find(global("foo"));
+    foo();
+
+    auto ret = (uint32_t*)obj.find(local("ret"));
+    ret --;
+    ASSERT_EQUAL(*ret --, 1000);
+    ret --;
+    ASSERT_EQUAL(*ret --, 2000);
+    ret --;
+    ASSERT_EQUAL(*ret --, 3000);
+    ret --;
+    ASSERT_EQUAL(*ret --, 4000);
+    ret --;
 }

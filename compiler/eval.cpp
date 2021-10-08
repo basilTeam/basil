@@ -894,14 +894,29 @@ namespace basil {
                     return v_error({});
                 }
                 perfinfo.begin_call(call_term, 1); // builtins are considered cheap
-                rc<AST> ast = builtin->runtime(env, call_term, args);
                 perfinfo.end_call();
+                rc<AST> ast = builtin->runtime(env, call_term, args);
+                if (!ast) return v_error({});
                 return v_runtime({}, t_runtime(ast->type(env)), ast);
             }
             else {
                 perfinfo.begin_call(call_term, 1);
                 if (!builtin->runtime) perfinfo.make_comptime();
                 Value result = builtin->comptime(env, call_term, args);
+                if ((perfinfo.current_count() >= perfinfo.max_count || perfinfo.counts.size() >= perfinfo.max_depth)
+                    && !perfinfo.is_comptime()) {
+                    perfinfo.end_call_without_add();
+
+                    // lower args if necessary
+                    args = coerce_args(env, params, true, preserve_quotes, args, t_arg(fntype));
+                    if (args.type == T_ERROR) return v_error({});
+                    
+                    perfinfo.begin_call(call_term, 1);
+                    perfinfo.end_call();
+                    rc<AST> ast = builtin->runtime(env, call_term, args);
+                    if (!ast) return v_error({});
+                    return v_runtime({}, t_runtime(ast->type(env)), ast);
+                }
                 perfinfo.end_call();
                 return result;
             }
@@ -1115,6 +1130,9 @@ namespace basil {
                         : v_tuple(span(args.front().pos, args.back().pos), infer_tuple(args), move(args));
 
                     Value result = call(env, term, head, args_value);
+                    if (result.type == T_ERROR && !error_count()) {
+                        println("exceeded op limit in call term '", term, "'");
+                    }
                     if (!result.form) result.form = infer_form(result.type);
                     result.pos = term.pos; // prefer term pos over any other pos determined within call()
                     return result;

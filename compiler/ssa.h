@@ -72,6 +72,7 @@ namespace basil {
 
         // Tracks the SSA register numbers going in and out of this block.
         map<Symbol, u32> vars_in, vars_out;
+        map<Symbol, bitset> phis;
 
         void add_exit(rc<IRBlock> dest);
         void add_entry(rc<IRBlock> dest);
@@ -97,6 +98,7 @@ namespace basil {
         u32 temp_idx = 0;
         vector<VarInfo> vars;
         map<VarInfo, u32> var_indices;
+        map<Symbol, vector<rc<IRBlock>>> defining_blocks;
         map<Symbol, u32> var_numbers;
 
         u32 block_idx = 0;

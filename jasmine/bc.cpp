@@ -4,6 +4,7 @@
 #include "util/str.h"
 #include "util/hash.h"
 #include "util/sets.h"
+#include "x64.h"
 
 namespace jasmine {
     struct Insn;
@@ -989,6 +990,15 @@ namespace jasmine {
         return insn;
     }
 
+    vector<Insn> parse_all_insns(Context& context, stream& io) {
+        vector<Insn> insns;
+        while (io) {
+            while (io && isspace(io.peek())) io.read(); // consume leading spaces
+            if (io) insns.push(parse_insn(context, io));
+        }
+        return insns;
+    }
+
     Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj) {
         Insn insn;
         u64 offset = obj.code().size() - buf.size();
@@ -1019,6 +1029,12 @@ namespace jasmine {
         return insn;
     }
 
+    vector<Insn> disassemble_all_insns(Context& context, bytebuf& buf, const Object& obj) {
+        vector<Insn> insns;
+        while (buf.size()) insns.push(disassemble_insn(context, buf, obj));
+        return insns;
+    }
+
     void assemble_insn(Context& context, Object& obj, const Insn& insn) {
         // [opcode 6         ] [p1 2] [p2 2] [p3 2] [typekind 4]
         if (insn.label) obj.define(*insn.label);
@@ -1045,30 +1061,14 @@ namespace jasmine {
         write(io, "\n");
     }
 
-    Object jasmine_to_x86(Object& obj) {
-        return Object(X86_64);
-    }
-    
-    struct Location {
-        bool is_reg;
-        u32 val;
-    };
-
-    struct LiveRange {
-        Reg reg;
-        u64 first, last;
-        Location loc;
-        bool arg_hint = false;
-
-        LiveRange(Reg reg_in, u64 f, u64 l):
-            reg(reg_in), first(f), last(l) {}
-    };
+    LiveRange::LiveRange(Reg reg_in, Type type_in, u64 f, u64 l):
+        reg(reg_in), type(type_in), first(f), last(l) {}
 
     struct Function {
         u64 first, last;
         u64 stack;
         vector<LiveRange> ranges;
-        vector<vector<LiveRange*>> starts_by_insn, ends_by_insn;
+        vector<vector<LiveRange*>> starts_by_insn, ends_by_insn, preserved_regs;
 
         void format(const vector<Insn>& insns, stream& io) const {
             for (u64 i = first; i <= last; i ++) {
@@ -1141,6 +1141,7 @@ namespace jasmine {
         map<Symbol, u64> local_syms;
         for (u64 i = function.first; i <= function.last; i ++) {
             sets.push({});
+            function.preserved_regs.push({});
             if (insns[i].label) local_syms.put(*insns[i].label, i);
         }
 
@@ -1178,6 +1179,7 @@ namespace jasmine {
                 changed = liveout(insns[i], sets[i - function.first].first, sets[i - function.first].second) || changed;
             }
         }
+
         // println("");
         // for (u64 i = function.first; i <= function.last; i ++) {
         //     print("{");
@@ -1212,18 +1214,26 @@ namespace jasmine {
             for (const Param& p : in.params) if (p.kind == PK_REG)
                 ranges[p.data.reg.id] = none<LiveRange>();
         }
+        u32 param_idx = 0;
         for (u64 i = function.first; i <= function.last; i ++) {
             const auto& live = sets[i - function.first];
             for (auto& [reg, range] : ranges) {
+                if (range && (insns[i].type.kind != range->type.kind
+                    || (insns[i].type.kind == K_STRUCT && insns[i].type.id != range->type.id))) {
+                    fprintf(stderr, "[ERROR] Found inconsistent types for virtual register %%%lu.\n", reg);
+                    exit(1);
+                }
+
                 if (!range && live.second.contains(reg)) { // new definition
-                    range = some<LiveRange>(Reg{false, reg}, i, i);
-                    if (insns[i].opcode == OP_PARAM) range->arg_hint = true; // arg
+                    range = some<LiveRange>(Reg{false, reg}, insns[i].type, i, i);
                 }
                 else if (range && !live.first.contains(reg)) { // range ended last instruction
                     range->last = i - 1;
                     function.ranges.push(*range);
                     range = none<LiveRange>();
                 }
+                
+                if (range && insns[i].opcode == OP_PARAM) range->param_idx = some<u32>(param_idx ++); // arg
                 
                 if (range && !live.second.contains(reg)) { // range ends this instruction
                     range->last = i;
@@ -1234,134 +1244,81 @@ namespace jasmine {
         }
         for (auto& [reg, range] : ranges) if (range) range->last = function.last, function.ranges.push(*range); // add any ranges we didn't catch
 
-        // for (const LiveRange& r : function.ranges) {
-        //     Param p;
-        //     p.kind = PK_REG;
-        //     p.data.reg = r.reg;
-        //     print("register ");
-        //     print_param({}, p, _stdout, "");
-        //     println(" live from ", r.first, " to ", r.last);
-        // }
+        for (LiveRange& r : function.ranges) {
+            for (u64 i = r.first + 1; i < r.last; i ++) if (insns[i].opcode == OP_CALL)
+                function.preserved_regs[i - function.first].push(&r);
+        }
+
+        for (const LiveRange& r : function.ranges) {
+            Param p;
+            p.kind = PK_REG;
+            p.data.reg = r.reg;
+            // print("register ");
+            // print_param({}, p, _stdout, "");
+            // println(" live from ", r.first, " to ", r.last);
+        }
         // println("");
     }
-}
 
-#include "x64.h"
+    void clobber(Function& f, const Insn& insn, u32 insn_idx, const_slice<bitset*> regs, 
+        vector<LiveRange*>& mappings, const Target& target) {
+        bitset clobbers = target.clobbers(insn);
 
-namespace jasmine {
-
-    // Codegen analysis
-
-    void populate_arg_registers(Architecture arch, vector<u32>& regs) {
-        switch (arch) {
-            case X86_64: {
-                using namespace x64;
-                regs.push(x64::RDI); // just sysv for now...
-                regs.push(x64::RSI);
-                regs.push(x64::RDX);
-                regs.push(x64::RCX);
-                regs.push(x64::R8);
-                regs.push(x64::R9);
-                break;
-            }
-            default:
-                fprintf(stderr, "Unsupported architecture.\n");
-                exit(1);
-                break;
-        }
-    }
-
-    u32 return_register(Architecture arch) {
-        switch (arch) {
-            case X86_64: {
-                using namespace x64;
-                return x64::RAX;
-            }
-            default:
-                fprintf(stderr, "Unsupported architecture.\n");
-                exit(1);
-                return 0;
-        }
-    }
-
-    void populate_registers(Architecture arch, bitset& regs) {
-        switch (arch) {
-            case X86_64: {
-                using namespace x64;
-                for (u32 i = 0; i < 16; i ++) regs.insert(i); // rax - r15
-                regs.erase(x64::RBP); // don't allocate stack pointers
-                regs.erase(x64::RSP);
-                break;
-            }
-            default:
-                fprintf(stderr, "Unsupported architecture.\n");
-                exit(1);
-                break;
-        }
-    }
-
-    void clobber_x64(Function& f, const Insn& insn, const vector<u32>& args, 
-        bitset& regs, vector<LiveRange*>& mappings, Architecture arch) {
-        static bitset clobbers;
-        clobbers.clear();
-        switch (insn.opcode) {
-            case OP_DIV:
-            case OP_REM:
-                clobbers.insert(x64::RAX);
-                clobbers.insert(x64::RDX);
-                if (insn.params[2].kind == PK_IMM) clobbers.insert(x64::RCX); // we need a register to hold immediate divisors
-                break;
-            case OP_MUL:    // these instructions don't permit memory destinations or immediates,
-            case OP_ZXT:    // so we reserve rax just in case
-            case OP_EXT:
-                clobbers.insert(x64::RAX);
-                break;
-            case OP_CALL: {
-                clobbers.insert(return_register(arch)); // return value
-                u32 p = 0;
-                for (u32 i = 2; i < insn.params.size(); i ++) {
-                    if (insn.params[i].annotation && insn.params[i].annotation->kind != K_STRUCT
-                        && p < args.size()) {
-                        clobbers.insert(args[p]); // reserve register parameters
-                    }
-                }
-                break;
-            }
-            default:
-                break;
-        }
         vector<LiveRange*> fixup;
+        vector<pair<bitset*, u32>> to_release;
         for (u32 i : clobbers) {
-            regs.erase(i);
-            if (mappings[i]) fixup.push(mappings[i]); // reallocate conflicting variables
+            for (bitset* b : regs) if (b->contains(i)) {
+                b->erase(i);
+                to_release.push({ b, i });
+            }
+            if (mappings[i] && mappings[i]->first != insn_idx) { // don't worry about dests
+                fixup.push(mappings[i]); // reallocate conflicting variables
+                to_release.push({ regs[mappings[i]->type.kind], i });
+            }
         }
         for (LiveRange* r : fixup) {
-            if (regs.begin() != regs.end()) {
-                r->loc = { true, *regs.begin() };
-                regs.erase(*regs.begin());
-                mappings[r->loc.val] = r;
-                // println("reallocated %", r->reg.id, " to ", x64::REGISTER_NAMES[r->loc.val]);
+            bitset& kregs = *regs[r->type.kind];
+            bool remapped = false;
+            for (u32 i : kregs) {
+                if (r->illegal.contains(i)) continue; // can't reallocate to previously-clobbered reg
+
+                r->loc = loc_reg(i);
+                kregs.erase(i);
+                mappings[*r->loc.reg] = r;
+                // println("\treallocated %", r->reg.id, " to ", x64::REGISTER_NAMES[*r->loc.reg]);
+                remapped = true;
+                break; // we've remapped to a valid register, so we're done
             }
-            else r->loc = { false, u32(f.stack += 8ul) }; // spill
+            if (!remapped) r->loc = loc_stack(-i64(f.stack += 8ul)); // spill
         }
         // release clobbered registers for use after this instruction
-        for (u32 i : clobbers) {
-            mappings[i] = nullptr;
-            regs.insert(i); 
+        for (const auto& [kregs, r] : to_release) {
+            if (mappings[r] && mappings[r]->first != r) mappings[r] = nullptr;
+            kregs->insert(r); 
+            // println("\treleased ", x64::REGISTER_NAMES[r]);
         }
     }
 
-    void allocate_registers(Function& f, const vector<Insn>& insns, Architecture arch)  {
-        vector<u32> args;
-        populate_arg_registers(arch, args);
-        bitset regs;
-        populate_registers(arch, regs);
+    void allocate_registers(Function& f, const vector<Insn>& insns, const Target& target) {
+        bitset* regs[NUM_KINDS];
+        map<u64, bitset> dedup_map;
+        // we want to associate bitsets with each kind, but multiple kinds can map to the
+        // same registers on most architectures. we use dedup_map to store the unique bitsets
+        // returned by the target (using addresses as keys), and store pointers to them in
+        // regs.
+        for (u32 k = 0; k < NUM_KINDS; k ++) {
+            const bitset& set = target.register_set((Kind)k);
+            auto it = dedup_map.find(u64(&set));
+            if (it != dedup_map.end()) regs[k] = &it->second;
+            else regs[k] = &(dedup_map[u64(&set)] = bitset(set));
+        }
 
         u32 cur_arg = 0;
 
         // we want a mapping for every available register id
         vector<LiveRange*> mappings;
-        for (u32 r : regs) while (mappings.size() < r) mappings.push(nullptr);
+        for (u32 k = 0; k < NUM_KINDS; k ++) for (u32 r : *regs[k])
+            while (mappings.size() < r) mappings.push(nullptr);
 
         for (u64 i = f.first; i <= f.last; i ++) {
             f.starts_by_insn.push({});
@@ -1373,51 +1330,51 @@ namespace jasmine {
         }
 
         for (u64 i = f.first; i <= f.last; i ++) {
+            static vector<LiveRange*> ranges;
+            ranges.clear();
+            for (const Param& p : insns[i].params) 
+                if (p.kind == PK_REG && mappings[p.data.reg.id]) ranges.push(mappings[p.data.reg.id]);
+                else ranges.push(nullptr);
+            for (LiveRange* r : f.starts_by_insn[i - f.first]) 
+                if (insns[i].params[0].kind == PK_REG && r->reg.id == insns[i].params[0].data.reg.id)
+                    ranges[0] = r; // pull dest from freshly-started range
+            target.hint(insns[i], ranges);
+        }
+
+        for (u64 i = f.first; i <= f.last; i ++) {
+            clobber(f, insns[i], i, { NUM_KINDS, regs }, mappings, target);
+
             for (LiveRange* r : f.ends_by_insn[i - f.first]) {
-                if (r->loc.is_reg) {
-                    regs.insert(r->loc.val);
-                    mappings[r->loc.val] = nullptr;
+                if (r->loc.type == LT_REGISTER) {
+                    regs[r->type.kind]->insert(*r->loc.reg);
+                    mappings[*r->loc.reg] = nullptr;
                 }
             }
+
             for (LiveRange* r : f.starts_by_insn[i - f.first]) {
-                if (r->arg_hint) {
-                    r->loc = { true, args[cur_arg] };
-                    regs.erase(args[cur_arg]);
-                    LiveRange* existing = mappings[r->loc.val];
-                    mappings[r->loc.val] = r;
-                    cur_arg ++;
-
-                    if (existing) r = existing;
-                    else continue;
+                bitset& kregs = *regs[r->type.kind];
+                if (kregs.begin() != kregs.end()) {
+                    auto reg = r->hint ? *r->hint : *kregs.begin();
+                    // println("\tallocated %", r->reg.id, " to ", x64::REGISTER_NAMES[reg]);
+                    r->loc = loc_reg(reg);
+                    kregs.erase(reg);
+                    mappings[*r->loc.reg] = r;
                 }
-                if (regs.begin() != regs.end()) {
-                    r->loc = { true, *regs.begin() };
-                    regs.erase(*regs.begin());
-                    mappings[r->loc.val] = r;
-                }
-                else r->loc = { false, u32(f.stack += 8ul) }; // spill
-            }
-
-            switch (arch) {
-                case X86_64:
-                    clobber_x64(f, insns[i], args, regs, mappings, arch);
-                    break;
-                default:
-                    break;
+                else r->loc = loc_stack(-i64(f.stack += 8ul)); // spill
             }
         }
 
-        for (const LiveRange& r : f.ranges) {
-            Param p;
-            p.kind = PK_REG;
-            p.data.reg = r.reg;
-            print("register ");
-            print_param({}, p, _stdout, "");
-            print(" from ", r.first, " to ", r.last);
-            if (r.loc.is_reg) println(" allocated to register %", x64::REGISTER_NAMES[r.loc.val]);
-            else println(" spilled to [%rbp - ", r.loc.val, "]");
-        }
-        println("");
+        // for (const LiveRange& r : f.ranges) {
+        //     Param p;
+        //     p.kind = PK_REG;
+        //     p.data.reg = r.reg;
+        //     print("register ");
+        //     print_param({}, p, _stdout, "");
+        //     print(" from ", r.first, " to ", r.last);
+        //     if (r.loc.type == LT_REGISTER) println(" allocated to register %", x64::REGISTER_NAMES[*r.loc.reg]);
+        //     else println(" spilled to [%rbp - ", -*r.loc.offset, "]");
+        // }
+        // println("");
     }
 
     // X86_64 Codegen
@@ -1428,16 +1385,16 @@ namespace jasmine {
                 return some<x64::Arg>(x64::imm(p.data.imm.val));
             case PK_REG:
                 if (reg_bindings.find(p.data.reg.id) == reg_bindings.end()) return none<x64::Arg>();
-                if (reg_bindings[p.data.reg.id]->loc.is_reg) // bound to register
-                    return some<x64::Arg>(x64::r64((x64::Register)reg_bindings[p.data.reg.id]->loc.val));
+                if (reg_bindings[p.data.reg.id]->loc.type == LT_REGISTER) // bound to register
+                    return some<x64::Arg>(x64::r64((x64::Register)*reg_bindings[p.data.reg.id]->loc.reg));
                 else 
-                    return some<x64::Arg>(x64::m64(x64::RBP, -i64(reg_bindings[p.data.reg.id]->loc.val)));
+                    return some<x64::Arg>(x64::m64(x64::RBP, -i64(*reg_bindings[p.data.reg.id]->loc.offset)));
             case PK_MEM: {
                 const auto& m = p.data.mem;
                 switch (m.kind) {
                     case MK_REG_OFF:
-                        if (reg_bindings[m.reg.id]->loc.is_reg) {
-                            return some<x64::Arg>(m64((x64::Register)reg_bindings[m.reg.id]->loc.val, m.off));
+                        if (reg_bindings[m.reg.id]->loc.type == LT_REGISTER) {
+                            return some<x64::Arg>(m64((x64::Register)*reg_bindings[m.reg.id]->loc.reg, m.off));
                         }
                         else {
                             panic("can't efficiently handle memory parameter");
@@ -1488,8 +1445,14 @@ namespace jasmine {
         }
     }
     
-    void generate_x64_insn(Function& f, const Insn& insn, vector<x64::Arg>& args, Object& obj) {
-        if (insn.label) obj.define(*insn.label);
+    void generate_x64_insn(Function& f, const Insn& insn, u32 insn_idx, vector<x64::Arg>& args, Object& obj) {
+        if (insn.label) {
+            if (obj.code().size() % 8 != 0) {
+                u32 ideal = ((obj.code().size() + 7) / 8) * 8;
+                x64::nop(ideal - obj.code().size()); // align branch targets to 8 bytes
+            }
+            obj.define(*insn.label);
+        }
         using namespace x64;
         switch (insn.opcode) {
             case OP_ADD:
@@ -1531,14 +1494,14 @@ namespace jasmine {
                         if (val == 0) return move_x64(args[0], args[1]);
                         else if (val == 1) {
                             move_x64(args[0], args[1]);
-                            return inc(args[0]);
+                            return dec(args[0]);
                         }
                         else if (val == -1) {
                             move_x64(args[0], args[1]);
-                            return dec(args[0]);
+                            return inc(args[0]);
                         }
                         else if (is_register(args[0].type)) {
-                            return lea(args[0], m64(args[1].data.reg, val));
+                            return lea(args[0], m64(args[1].data.reg, -val));
                         }
                     }
                     else if (is_register(args[0].type)) {
@@ -1629,6 +1592,16 @@ namespace jasmine {
                 move_x64(args[0], r64(RDX));
                 return;
             }
+            case OP_LOCAL:
+                return;
+            case OP_PARAM:
+                return;
+            case OP_PUSH:
+                push(args[0]);
+                return;
+            case OP_POP:
+                pop(args[0]);
+                return;
             case OP_FRAME:
                 if (f.stack) {
                     push(r64(RBP));
@@ -1636,15 +1609,84 @@ namespace jasmine {
                     sub(r64(RSP), imm(f.stack));
                 }
                 return;
-            case OP_MOV: return move_x64(args[0], args[1]);
             case OP_RET:
-                move_x64(r64((Register)return_register(X86_64)), args[0]);
+                move_x64(r64((Register)*obj.get_target().locate_return_value(insn.type.kind).reg), args[0]);
                 if (f.stack) {
                     mov(r64(RSP), r64(RBP));
                     pop(r64(RBP));
                 }
                 ret();
                 return;
+            case OP_CALL: {
+                for (LiveRange* r : f.preserved_regs[insn_idx - f.first]) if (r->loc.type == LT_REGISTER)
+                    push(r64((Register)*r->loc.reg));
+
+                auto fn = insn.params[1].kind == PK_LABEL ? args[1] : r64(RAX);
+                if (insn.params[1].kind != PK_LABEL) move_x64(r64(RAX), args[1]);
+
+                vector<Kind> param_kinds;
+                for (u32 i = 2; i < insn.params.size(); i ++) param_kinds.push(insn.params[i].annotation->kind);
+                auto params = obj.get_target().place_parameters(param_kinds); // compute parameter locations
+
+                for (u32 i = 2; i < insn.params.size(); i ++) {
+                    if (params[i - 2].type == LT_REGISTER) 
+                        move_x64(r64((Register)*params[i - 2].reg), args[i]);
+                    else if (params[i - 2].type == LT_STACK_MEMORY && params[i - 2].offset)
+                        move_x64(m64(RBP, *params[i - 2].offset), args[i]);
+                    else if (params[i - 2].type == LT_PUSHED_L2R)
+                        push(args[i]);
+                }
+                for (i64 i = i64(insn.params.size()) - 1; i >= 2; i --) {
+                    if (params[i - 2].type == LT_PUSHED_R2L) 
+                        push(args[i]);
+                }
+                call(fn);
+
+                Location ret = obj.get_target().locate_return_value(insn.type.kind);
+                if (ret.type == LT_REGISTER) move_x64(args[0], r64((Register)*ret.reg));
+
+                for (i64 i = i64(f.preserved_regs[insn_idx - f.first].size()) - 1; i >= 0; i --) {
+                    const auto& r = f.preserved_regs[insn_idx - f.first][i];
+                    if (r->loc.type == LT_REGISTER) pop(r64((Register)*r->loc.reg));
+                }
+
+                return;
+            }
+            case OP_JEQ:
+            case OP_JNE:
+            case OP_JL:
+            case OP_JLE:
+            case OP_JG:
+            case OP_JGE:
+            case OP_JO:
+            case OP_JNO:
+                static Condition conds_x64[8] = {
+                    EQUAL, NOT_EQUAL,
+                    LESS, LESS_OR_EQUAL,
+                    GREATER, GREATER_OR_EQUAL,
+                    OVERFLOW, NOT_OVERFLOW
+                };
+                cmp(args[1], args[2]);
+                jcc(args[0], conds_x64[insn.opcode - OP_JEQ]);
+                return;
+            case OP_NOP:
+                return;
+            case OP_CEQ:
+            case OP_CNE:
+            case OP_CL:
+            case OP_CLE:
+            case OP_CG:
+            case OP_CGE:
+                cmp(args[1], args[2]);
+                setcc(args[0], conds_x64[insn.opcode - OP_CEQ]);
+                return;
+            case OP_JUMP:
+                jmp(args[0]);
+                return;
+            case OP_MOV: 
+                return move_x64(args[0], args[1]);
+            // case OP_XCHG: 
+            //     return move_x64(args[0], args[1]);
             default:
                 return;
         }
@@ -1677,18 +1719,31 @@ namespace jasmine {
             }
             if (useless) continue;
             
-            generate_x64_insn(f, insn, args, obj);
+            generate_x64_insn(f, insn, i, args, obj);
         }
     }
     
-    Object jasmine_to_x86(const vector<Insn>& insns_in) {
+    Object compile_jasmine(const vector<Insn>& insns_in, const Target& target) {
         vector<Insn> insns = insns_in;
+
+        // platform-independent analysis
         vector<Function> functions = find_functions(insns);
         for (Function& f : functions) compute_ranges(f, insns);
-        for (Function& f : functions) allocate_registers(f, insns, X86_64);
 
-        Object obj(X86_64);
-        for (Function& f : functions) generate_x64(f, insns, obj);
+        // associate virtual registers with native ones
+        for (Function& f : functions) allocate_registers(f, insns, target);
+
+        Object obj(target); // create our destination object
+
+        // generate native instructions
+        switch (target.arch) {
+            case X86_64: 
+                for (Function& f : functions) generate_x64(f, insns, obj);
+                break;
+            default:
+                panic("Unimplemented architecture!");
+                break;
+        }
 
         return obj;
     }

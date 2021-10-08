@@ -55,7 +55,7 @@ namespace basil {
         vector<Value> values;
         while (!out_of_input(view) && view.peek().kind != closer) {
             values.push(parse_expr(view, ctx));
-            while (view.peek().kind == TK_NEWLINE) view.read(); // consume blank lines
+            while (!out_of_input(view) && view.peek().kind == TK_NEWLINE) view.read(); // consume blank lines
         }
         if (view.peek().kind != closer) {
             err(view.peek().pos, "Missing closing punctuation - expected '", closer, "'.");
@@ -90,11 +90,7 @@ namespace basil {
             while (view.peek().kind == TK_NEWLINE) view.read(); // consume all leading newlines
             if (!out_of_input(view) && view.peek().pos.col_start > ctx.indent)
                 return parse_indented(opener, view, ParseContext{ctx.indent, u16(view.peek().pos.col_start), ctx.enclosing});
-            else {
-                err(view.peek().pos, 
-                    "Expected indented block, but line isn't indented past the previous non-empty line. Prev indent = ", ctx.indent, ", cur indent = ", view.peek().pos.col_start);
-                return v_error(view.peek().pos);
-            }
+            else return v_error(initial);
         }
         else { // inline block
             vector<Value> values;
@@ -111,8 +107,10 @@ namespace basil {
 
     // Pulls a simple expression from the token stream.
     Value parse_primary(TokenView& view, ParseContext ctx) {
-        if (!view) 
-            panic("Attempted to get tokens from exhausted token view!");
+        if (!view) {
+            err(view.tokens.back().pos, "Unexpected end of file.");
+            return v_error(view.peek().pos);
+        }
         
         Source::Pos pos = view.peek().pos;
         Symbol contents = view.peek().contents;
@@ -227,7 +225,7 @@ namespace basil {
 
     // Pulls a full expression from the token stream, handling any indented blocks.
     Value parse_expr(TokenView& view, ParseContext ctx) {
-        while (view.peek().kind == TK_NEWLINE) view.read(); // consume leading newlines
+        while (!out_of_input(view) && view.peek().kind == TK_NEWLINE) view.read(); // consume leading newlines
         Value suffixed = parse_suffix(view, ctx);
         if (view && view.peek().kind == TK_BLOCK && !suffixed.type.of(K_LIST)) { // consider block
             if (suffixed.type == T_SYMBOL && 
@@ -253,6 +251,7 @@ namespace basil {
             else break;
         }
 
-        return some<Value>(parse_expr(view, ParseContext{0, indent, none<TokenKind>()})); // start with indentation of first token
+        Value v = parse_expr(view, ParseContext{0, indent, none<TokenKind>()});
+        return v.type == T_ERROR ? none<Value>() : some<Value>(v);
     }
 }

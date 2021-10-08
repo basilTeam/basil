@@ -5,6 +5,11 @@
 #include "util/hash.h"
 #include "util/io.h"
 #include "util/ustr.h"
+#include "jasmine/target.h"
+
+bool __internal_require(jasmine::Architecture arch);
+
+#define onlyin(arch) if (__internal_require((arch))) return;
 
 struct exc_message {
     ustring msg;

@@ -9,13 +9,6 @@
 #include "sym.h"
 
 namespace jasmine {
-    enum Kind {
-        K_STRUCT, K_PTR, K_F32, K_F64,
-        K_I8, K_I16, K_I32, K_I64,
-        K_U8, K_U16, K_U32, K_U64,
-        NUM_KINDS
-    };
-
     enum Opcode {
         OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_REM,     // basic arithmetic
         OP_AND, OP_OR, OP_XOR, OP_NOT,              // logic
@@ -34,6 +27,7 @@ namespace jasmine {
         OP_CL, OP_CLE, OP_CG, OP_CGE,               // relational comparisons
         OP_MOV, OP_XCHG,                            // move and exchange
         OP_TYPE, OP_GLOBAL,                         // top-level definitions
+        OP_SYSCALL,                                 // user intrinsics
         NUM_OPS
     };
 
@@ -125,6 +119,19 @@ namespace jasmine {
         vector<Param> params;
 
         void format(stream& io) const;
+    };    
+    
+    // Largely-internal-facing data structure to represent a live range of a virtual register.
+    struct LiveRange {
+        Reg reg;
+        Type type;
+        u64 first, last;
+        Location loc;
+        bitset illegal; // a set of registers this live range is forbidden from binding to
+        optional<u32> param_idx = none<u32>(); // which parameter this is
+        optional<GenericRegister> hint = none<GenericRegister>();
+
+        LiveRange(Reg reg_in, Type type_in, u64 f, u64 l);
     };
 
     namespace bc {
@@ -229,10 +236,12 @@ namespace jasmine {
     
     Insn parse_insn(Context& context, stream& io);
     Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj);
+    vector<Insn> parse_all_insns(Context& context, stream& io);
+    vector<Insn> disassemble_all_insns(Context& context, stream& io);
     void assemble_insn(Context& context, Object& obj, const Insn& insn);
     void print_insn(Context& context, stream& io, const Insn& insn);
 
-    Object jasmine_to_x86(const vector<Insn>& obj);
+    Object compile_jasmine(const vector<Insn>& obj, const Target& target);
 }
 
 #endif

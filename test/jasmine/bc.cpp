@@ -57,7 +57,7 @@ TEST(round_trip) {
     Insn insns[3];
     for (u8 i = 0; i < 3; i ++) insns[i] = parse_insn(ctx, in);
 
-    Object object(JASMINE);
+    Object object({ JASMINE, UNSUPPORTED_OS });
     for (u8 i = 0; i < 3; i ++) assemble_insn(ctx, object, insns[i]);
 
     bytebuf buf = object.code();
@@ -85,7 +85,7 @@ TEST(labeled_branches) {
     Insn insns[7];
     for (u8 i = 0; i < 7; i ++) insns[i] = parse_insn(ctx, in);
 
-    Object object(JASMINE);
+    Object object({ JASMINE, UNSUPPORTED_OS });
     for (u8 i = 0; i < 7; i ++) assemble_insn(ctx, object, insns[i]);
 
     bytebuf buf = object.code();
@@ -98,7 +98,9 @@ TEST(labeled_branches) {
     ASSERT_EQUAL(a, b);
 }
 
-TEST(x86_regalloc) {
+TEST(x86_arithmetic_spills) {
+    onlyin(X86_64);
+
     buffer in;
     write(in,R"(
 foo: frame
@@ -106,15 +108,16 @@ foo: frame
      mov i64 %1, 2
      add i64 %2, %0, %1
      mul i64 %2, %2, 3 
+     div i64 %3, %1, %0
+     add i64 %3, %2, %3
      ret i64 %3
 )");
     // buffer copy(in);
     Context ctx;
-    vector<Insn> insns;
-    for (u8 i = 0; i < 6; i ++) insns.push(parse_insn(ctx, in));
+    vector<Insn> insns = parse_all_insns(ctx, in);
     // println("");
     // println(string(copy));
-    Object obj = jasmine_to_x86(insns);
+    Object obj = compile_jasmine(insns, DEFAULT_TARGET);
     // print("ASM: "); write_asm(obj.code(), _stdout);
     // println("");
     
@@ -123,5 +126,69 @@ foo: frame
     // printf("symbol 'foo' loaded to address 0x%lx\n", (uintptr_t)foo);
     // println("foo() = ", foo());
     // println("");
-    ASSERT_EQUAL(foo(), 9);
+    ASSERT_EQUAL(foo(), 11);
+}
+
+TEST(x86_simple_loop) {
+    onlyin(X86_64);
+
+    buffer in;
+    write(in,R"(
+foo: frame
+     mov i64 %0, 1
+rep: jeq i64 end %0, 10
+     add i64 %0, %0, 1
+     jump rep
+end: ret i64 %0
+)");
+    // buffer copy(in);
+    Context ctx;
+    vector<Insn> insns = parse_all_insns(ctx, in);
+    // println("");
+    // println(string(copy));
+    Object obj = compile_jasmine(insns, DEFAULT_TARGET);
+    
+    obj.load();
+    // print("ASM: "); write_asm(obj.code(), _stdout);
+    // println("");
+
+    auto foo = (i64(*)())obj.find(global("foo"));
+    // printf("symbol 'foo' loaded to address 0x%lx\n", (uintptr_t)foo);
+    // println("foo() = ", foo());
+    // println("");
+    ASSERT_EQUAL(foo(), 10);
+}
+
+TEST(x86_fibonacci) {
+    onlyin(X86_64);
+
+    buffer in;
+    write(in,R"(
+fib: frame
+     param i64 %0
+     jge i64 rec %0, 2
+     ret i64 %0
+rec: sub i64 %0, %0, 1
+     call i64 %1, fib(i64 %0)
+     sub i64 %0, %0, 1
+     call i64 %2, fib(i64 %0)
+     add i64 %1, %1, %2
+     ret i64 %1
+)");
+    // buffer copy(in);
+    Context ctx;
+    vector<Insn> insns = parse_all_insns(ctx, in);
+    // println("");
+    // println(string(copy));
+    Object obj = compile_jasmine(insns, DEFAULT_TARGET);
+    
+    obj.load();
+    print("ASM: "); write_asm(obj.code(), _stdout);
+    println("");
+
+    auto fib = (i64(*)(i64))obj.find(global("fib"));
+    // printf("symbol 'foo' loaded to address 0x%lx\n", (uintptr_t)foo);
+    // println("foo() = ", foo());
+    // println("");
+    ASSERT_EQUAL(fib(10), 55);
 }

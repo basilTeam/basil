@@ -2,7 +2,7 @@
 #include "stdio.h"
 #include "stdlib.h"
 
-namespace x64 {
+namespace jasmine::x64 {
     const char* REGISTER_NAMES[] = {
         "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
         "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
@@ -471,7 +471,7 @@ namespace x64 {
             fprintf(stderr, "[ERROR] Cannot assemble; no target buffer set.\n");
             exit(1);
         }
-        if (target->architecture() != X86_64) {
+        if (target->get_target().arch != jasmine::X86_64) {
             fprintf(stderr, "[ERROR] Target buffer is not targeting the x86_64 architecture.");
             exit(1);
         }
@@ -1207,7 +1207,7 @@ namespace x64 {
         verify_buffer();
         Size actual_size = resolve_size(src, size);
 
-        emitprefix(src, actual_size);
+        if (actual_size != QWORD) emitprefix(src, actual_size);
         if (is_immediate(src.type)) {
             if (actual_size == BYTE) target->code().write<u8>(0x6a);
             else target->code().write<u8>(0x68);
@@ -1226,7 +1226,7 @@ namespace x64 {
         verify_buffer();
         Size actual_size = resolve_size(src, size);
 
-        emitprefix(src, actual_size);
+        if (actual_size != QWORD) emitprefix(src, actual_size);
         if (is_immediate(src.type)) {
             fprintf(stderr, "[ERROR] Invalid operand; immediate not permitted "
                 "in 'pop' instruction.\n");
@@ -1408,4 +1408,77 @@ namespace x64 {
             emitargs(dest, actual_size, 0);
         }
 	}
+
+    void nop(u32 n_bytes) {
+        verify_buffer();
+        static const u8 nop1[] = {0x90};
+        static const u8 nop2[] = {0x66, 0x90};
+        static const u8 nop3[] = {0x0f, 0x1f, 0x00};
+        static const u8 nop4[] = {0x0f, 0x1f, 0x40, 0x00};
+        static const u8 nop5[] = {0x0f, 0x1f, 0x44, 0x00, 0x00};
+        static const u8 nop6[] = {0x66, 0x0f, 0x1f, 0x44, 0x00, 0x00};
+        static const u8 nop7[] = {0x0f, 0x1f, 0x80, 0x00, 0x00, 0x00, 0x00};
+        static const u8 nop8[] = {0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00};
+        static const u8 nop9[] = {0x66, 0x0f, 0x1f, 0x84, 0x00, 0x00, 0x00, 0x00, 0x00};
+        static const u8* nops[] = {nullptr, nop1, nop2, nop3, nop4, nop5, nop6, nop7, nop8, nop9};
+        if (n_bytes >= 1 && n_bytes <= 9) {
+            for (u32 i = 0; i < n_bytes; i ++) target->code().write<u8>(nops[n_bytes][i]);
+        }
+        else {
+            fprintf(stderr, "[ERROR] Invalid 'nop' instruction size %u: can only generate nops between "
+                "1 and 9 bytes (inclusive).\n", n_bytes);
+            exit(1);
+        }
+    }
+    
+    void lit8(u8 val) {
+        verify_buffer();
+        target->code().write<u8>(val);
+    }
+
+    void lit16(u16 val) {
+        verify_buffer();
+        target->code().write(little_endian<u16>(val));
+    }
+
+    void lit32(u32 val) {
+        verify_buffer();
+        target->code().write(little_endian<u32>(val));
+    }
+
+    void lit64(u64 val) {
+        verify_buffer();
+        target->code().write(little_endian<u64>(val));
+    }
+
+    void litf32(float f) {
+        verify_buffer();
+        u32 u = *(u32*)&f;
+        target->code().write(little_endian<u32>(u));
+    }
+
+    void litf64(double d) {
+        verify_buffer();
+        u64 u = *(u64*)&d;
+        target->code().write(little_endian<u64>(u));
+    }
+
+    void rel32(jasmine::Symbol symbol) {
+        verify_buffer();
+        target->code().write<u32>(0);
+        target->reference(symbol, jasmine::RefType::REL32_LE, -4);
+    }
+
+    void nop32(u32 val) {
+        const u8 nops[][4] = {
+            { 0x0f, 0x1f, 0x84, 0x00 },
+            { 0x0f, 0x1f, 0x80 },
+            { 0x48, 0xa9 },
+            { 0xa9 }
+        };
+        u8 which = target->code().size() % 4;
+        u8 n = 4 - which;
+        for (u8 i = 0; i < n; i ++) target->code().write<u8>(nops[which][i]);
+        target->code().write(little_endian<u32>(val));
+    }
 }

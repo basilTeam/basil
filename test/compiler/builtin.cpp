@@ -109,3 +109,14 @@ do:
     ASSERT_EQUAL(t_runtime_base(collatz.type), T_UNDEFINED);
     get_perf_info().set_max_count(99999);
 }
+
+TEST(annotated) {
+    Value two = compile(R"(
+do:
+    def x : Int = 1
+    def f (x? : Int) : Int = x + 1
+    f x
+)", load_step, lex_step, parse_step, eval_step);
+    ASSERT_EQUAL(two.type, T_INT);
+    ASSERT_EQUAL(two.data.i, 2);
+}

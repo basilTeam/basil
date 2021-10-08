@@ -96,3 +96,18 @@ TEST(indent) {
     ASSERT_EQUAL(a, compile("(a b (c d) e f (g h i))", load_step, lex_step, parse_step));
     ASSERT_EQUAL(b, v_symbol(b.pos, symbol_from("j")));
 }
+
+TEST(trailing_paren) {
+    rc<Source> src = create_source("a (");
+    Source::View view(*src);
+    auto tokens = lex_all(view);
+    TokenView tview(src, tokens);
+
+    Value a = *parse(tview);
+    ASSERT_NO_ERRORS(src);
+
+    auto b = parse(tview);
+    ASSERT_FALSE(b);
+    ASSERT_TRUE(error_count());
+    discard_errors();
+}

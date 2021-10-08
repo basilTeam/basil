@@ -20,7 +20,7 @@ namespace jasmine {
     };
 
     class Object {
-        Architecture arch;
+        Target target;
         bytebuf buf;
         map<Symbol, u64> defs;
         map<u64, Symbol> def_positions;
@@ -30,8 +30,8 @@ namespace jasmine {
         void resolve_refs();
         void resolve_ELF_addends();
     public:
-        Object(Architecture architecture = DEFAULT_ARCH);
-        Object(const char* path, Architecture architecture = DEFAULT_ARCH);
+        Object(const Target& target = DEFAULT_TARGET);
+        Object(const char* path, const Target& target = DEFAULT_TARGET);
         ~Object();
         Object(Object&& other);
         Object(const Object&) = delete;
@@ -49,8 +49,8 @@ namespace jasmine {
         void write(const char* path);
         void read(const char* path);
         void writeELF(const char* path);
-        Architecture architecture() const;
-        Object retarget(Architecture architecture);
+        const Target& get_target() const;
+        Object retarget(const Target& new_target);
 
         void* find(Symbol symbol) const;
         

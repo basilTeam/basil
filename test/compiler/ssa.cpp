@@ -6,7 +6,7 @@ using namespace basil;
 
 SETUP {
     init();
-    get_perf_info().set_max_count(10); // compile everything
+    get_perf_info().set_max_count(3); // compile everything
 }
 
 TEST(simple_increment) {
@@ -71,5 +71,5 @@ do:
 )", load_step, lex_step, parse_step, eval_step, ast_step, ssa_step)[symbol_from("#main")];
 
     enforce_ssa(main);
-    // println(main);
+    println(main);
 }

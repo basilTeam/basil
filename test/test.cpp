@@ -4,9 +4,19 @@
 test_node* test_list;
 
 void (*setup_fn)() = nullptr;
+bool setup_failed = false;
+
+bool __internal_require(jasmine::Architecture arch) {
+    if (jasmine::DEFAULT_ARCH != arch)
+        return setup_failed = true;
+    return false;
+}
 
 int main(int argc, char** argv) {
-    if (setup_fn) setup_fn();
+    if (setup_fn) {
+        setup_fn();
+        if (setup_failed) return 0;
+    }
     
     println("---------------- ", (const char*)argv[0], " ----------------");
     int n = 0, c = 0;

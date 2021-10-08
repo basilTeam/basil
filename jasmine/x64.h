@@ -4,7 +4,7 @@
 #include "utils.h"
 #include "obj.h"
 
-namespace x64 {
+namespace jasmine::x64 {
     enum Register : u8 {
         RAX = 0,
         RCX = 1,
@@ -22,6 +22,22 @@ namespace x64 {
         R13 = 13,
         R14 = 14,
         R15 = 15,
+        XMM0 = 16,
+        XMM1 = 17,
+        XMM2 = 18,
+        XMM3 = 19,
+        XMM4 = 20,
+        XMM5 = 21,
+        XMM6 = 22,
+        XMM7 = 23,
+        XMM8 = 24,
+        XMM9 = 25,
+        XMM10 = 26,
+        XMM11 = 27,
+        XMM12 = 28,
+        XMM13 = 29,
+        XMM14 = 30,
+        XMM15 = 31,
         INVALID = 255
     };
 
@@ -192,17 +208,17 @@ namespace x64 {
     Arg m64(Register base, ScaledRegister index, i64 offset);
     Arg mem(Register base, ScaledRegister index, i64 offset);
 
-		Arg abs8(i64 offset);
-		Arg abs16(i64 offset);
-		Arg abs32(i64 offset);
-		Arg abs64(i64 offset);
-		Arg abs(i64 offset);
-		
-		Arg riprel8(i64 offset);
-		Arg riprel16(i64 offset);
-		Arg riprel32(i64 offset);
-		Arg riprel64(i64 offset);
-		Arg riprel(i64 offset);
+    Arg abs8(i64 offset);
+    Arg abs16(i64 offset);
+    Arg abs32(i64 offset);
+    Arg abs64(i64 offset);
+    Arg abs(i64 offset);
+    
+    Arg riprel8(i64 offset);
+    Arg riprel16(i64 offset);
+    Arg riprel32(i64 offset);
+    Arg riprel64(i64 offset);
+    Arg riprel(i64 offset);
 
     Arg label8(jasmine::Symbol symbol);
     Arg label16(jasmine::Symbol symbol);
@@ -246,6 +262,18 @@ namespace x64 {
     void jcc(const Arg& dest, Condition condition);
     void call(const Arg& dest, Size size = AUTO);
 	void setcc(const Arg& dest, Condition condition, Size size = AUTO);
+    void nop(u32 n_bytes);
+
+    // Pseudo-instructions that embed raw data in the text section of an
+    // object file.
+    void lit8(u8 val);
+    void lit16(u16 val);
+    void lit32(u32 val);
+    void lit64(u64 val);
+    void litf32(float f);
+    void litf64(double d);
+    void rel32(jasmine::Symbol symbol);
+    void nop32(u32 val); // embeds 32-bit immediate in nop. 4-byte aligned
 }
 
 #endif

@@ -1,3 +1,12 @@
+/*
+ * Copyright (c) 2021, the Basil authors
+ * All rights reserved.
+ *
+ * This source code is licensed under the 3-Clause BSD License, the full text
+ * of which can be found in the LICENSE file in the root directory
+ * of this project.
+ */
+
 #ifndef BASIL_DRIVER_H
 #define BASIL_DRIVER_H
 

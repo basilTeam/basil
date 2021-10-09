@@ -7,7 +7,9 @@ void* operator new(unsigned long n);
 void* operator new[](unsigned long n);
 void* operator new(unsigned long n, void* p);
 void operator delete(void* ptr);
+void operator delete(void* ptr, unsigned long n);
 void operator delete[](void* ptr);
+void operator delete[](void* ptr, unsigned long n);
 
 #define move(x) static_cast<decltype(x)&&>(x)
 

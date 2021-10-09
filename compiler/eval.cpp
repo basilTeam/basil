@@ -532,7 +532,7 @@ namespace basil {
         }
     }
 
-    static int call_count = 0;
+    static u32 call_count = 0;
 
     // stores information for reporting an overload mismatch error
     using PriorityError = pair<Type, u32>;
@@ -612,7 +612,7 @@ namespace basil {
         }
     
         i64 max_priority = -1; // compute max priority
-        for (int i = 0; i < priorities.size(); i ++) {
+        for (u32 i = 0; i < priorities.size(); i ++) {
             if (priorities[i].is_left()) {
                 max_priority = priorities[i].left() > max_priority 
                     ? priorities[i].left() : max_priority;
@@ -747,7 +747,7 @@ namespace basil {
         vector<Type> fixed_args_type;
 
         // resolve types of each runtime argument
-        if (args.type.of(K_TUPLE)) for (int i = 0; i < v_len(args); i ++) {
+        if (args.type.of(K_TUPLE)) for (u32 i = 0; i < v_len(args); i ++) {
             if (v_at(args, i).type.of(K_RUNTIME)) fixed_args_type.push(v_at(args, i).data.rt->ast->type(env));
             else fixed_args_type.push(v_at(args, i).type);
         }
@@ -942,7 +942,7 @@ namespace basil {
 
                 perfinfo.begin_call(call_term, 1); // user-defined functions are considered more expensive
                 // println("beginning call to ", func_term, " ", args_in);
-                static int n = 0;
+                static u32 n = 0;
                 n ++;
                 rc<InstTable> fn_body = v_resolve_body(*func.data.fn, args); // resolve function body
 

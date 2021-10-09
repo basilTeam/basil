@@ -53,19 +53,6 @@ struct either {
         return _right;
     }
 
-    template<typename V>
-    bool is() const;
-
-    template<>
-    bool is<T>() const {
-        return is_left();
-    }
-
-    template<>
-    bool is<U>() const {
-        return is_right();
-    }
-
     const T& left() const {
         if (_right) panic("Attempted to read left value of right-containing either!");
         return *(const T*)data.left;

@@ -8,7 +8,7 @@ struct stream;
 extern stream &_stdout, &_stdin;
 
 void exit(u64 code);
-extern "C" void memcpy(void* dst, const void* src, int size);
+extern "C" void* memcpy(void* dst, const void* src, unsigned long size);
 
 void write(stream& io, const char* str, u32 n);
 void write(stream& io, const char& c);

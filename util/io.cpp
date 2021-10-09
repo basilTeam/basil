@@ -17,7 +17,7 @@ file::file(FILE* f_in): f(f_in), done(!f) {
 }
 
 file::~file() {
-    if (f) fclose(f);
+    if (f && f != stdin && f != stdout) fclose(f);
 }
 
 void file::write(u8 c) {

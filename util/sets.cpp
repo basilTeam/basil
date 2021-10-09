@@ -83,7 +83,7 @@ bool bitset::const_iterator::operator!=(const bitset::const_iterator& other) con
 
 bitset::const_iterator& bitset::const_iterator::operator--() {
     i --;
-    while (i < -1 && !b.contains(i)) i --;
+    while (i < -1u && !b.contains(i)) i --;
     return *this;
 }
 

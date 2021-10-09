@@ -229,7 +229,7 @@ namespace jasmine {
                         string field = next_string(io);
                         const TypeInfo& info = context.type_info[t.id];
                         i64 off = 0;
-                        for (int i = 0; i < info.members.size(); i ++) 
+                        for (u32 i = 0; i < info.members.size(); i ++) 
                             if (field == info.members[i].name) off = i;
                         p.data.mem.kind = ptr.kind == PK_REG ? MK_REG_TYPE : MK_LABEL_TYPE;
                         if (ptr.kind == PK_REG) p.data.mem.reg = ptr.data.reg;
@@ -1029,8 +1029,9 @@ namespace jasmine {
         return insn;
     }
 
-    vector<Insn> disassemble_all_insns(Context& context, bytebuf& buf, const Object& obj) {
+    vector<Insn> disassemble_all_insns(Context& context, const Object& obj) {
         vector<Insn> insns;
+        bytebuf buf(obj.code());
         while (buf.size()) insns.push(disassemble_insn(context, buf, obj));
         return insns;
     }
@@ -1409,6 +1410,8 @@ namespace jasmine {
             }
             case PK_LABEL:
                 return some<x64::Arg>(x64::label32(p.data.label));
+            default:
+                return none<x64::Arg>();
         }
     }
 

@@ -4,8 +4,21 @@
 
 // Runs the "help" mode of the compiler.
 void help(int argc, const char** argv) {
-    println(" ――――――――◅ ", BOLDGREEN, "Basil ", RESET, 
-        BASIL_MAJOR_VERSION, ".", BASIL_MINOR_VERSION, ".", BASIL_PATCH_VERSION, RESET, " ▻―――――――― ");   
+    buffer b;
+    writeln(b, "    ○ ...as a portable bytecode object:    ", argv[0], 
+        " compile -j, --jasmine <filename> ");
+    u32 len = ustring(b).size();
+    buffer ver;
+    writeln(ver, " Basil ", BASIL_MAJOR_VERSION, ".", BASIL_MINOR_VERSION, ".", BASIL_PATCH_VERSION, " ");
+    u32 edge = len - ustring(ver).size() - 16;
+    if (edge < 16) edge = 16;
+    
+    for (u32 i = 0; i < 16; i ++) print("━");
+    print(" ", BOLDGREEN, "Basil ", RESET, 
+        BASIL_MAJOR_VERSION, ".", BASIL_MINOR_VERSION, ".", BASIL_PATCH_VERSION, RESET, " ");
+    for (u32 i = 0; i < edge; i ++) print("━");
+    println("");
+       
     println("");
     println("Usage: ");
     println(" • Start a REPL:                           ", BOLD, argv[0], RESET);

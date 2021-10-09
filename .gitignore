@@ -3,5 +3,6 @@
 *.test
 *.ignore
 basil
+build/*
 librt.a
 TODO

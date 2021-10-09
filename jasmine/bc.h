@@ -237,7 +237,7 @@ namespace jasmine {
     Insn parse_insn(Context& context, stream& io);
     Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj);
     vector<Insn> parse_all_insns(Context& context, stream& io);
-    vector<Insn> disassemble_all_insns(Context& context, stream& io);
+    vector<Insn> disassemble_all_insns(Context& context, const Object& obj);
     void assemble_insn(Context& context, Object& obj, const Insn& insn);
     void print_insn(Context& context, stream& io, const Insn& insn);
 

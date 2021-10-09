@@ -33,9 +33,10 @@ namespace jasmine {
         Object(const Target& target = DEFAULT_TARGET);
         Object(const char* path, const Target& target = DEFAULT_TARGET);
         ~Object();
-        Object(Object&& other);
         Object(const Object&) = delete;
         Object& operator=(const Object&) = delete;
+        Object(Object&& other);
+        Object& operator=(Object&& other);
 
         const map<Symbol, u64>& symbols() const;
         const map<u64, SymbolRef>& references() const;
@@ -48,7 +49,10 @@ namespace jasmine {
         void load();
         void write(const char* path);
         void read(const char* path);
+        void write(FILE* file);
+        void read(FILE* file);
         void writeELF(const char* path);
+        void writeELF(FILE* file);
         const Target& get_target() const;
         Object retarget(const Target& new_target);
 

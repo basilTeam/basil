@@ -118,10 +118,11 @@ inline void _write(u64 fd, const char* text, u64 len) {
     );   
 }
 
-void memcpy(void* dst, const void* src, int size) {
+void* memcpy(void* dst, const void* src, unsigned long size) {
     int i = 0;
     while (i < (size & ~7)) *(u64*)dst = *(u64*)src, i += 8;
     while (i < size) *(u8*)dst = *(u8*)src, i ++;
+    return nullptr;
 }
 
 void exit(u64 code) {

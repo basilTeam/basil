@@ -7,9 +7,9 @@
 #include "util/option.h"
 
 namespace jasmine {
-    const u8 JASMINE_VERSION = 1;
+    const u16 JASMINE_MAJOR_VERSION = 1, JASMINE_MINOR_VERSION = 0, JASMINE_PATCH_VERSION = 0;
 
-    enum Architecture : u8 {
+    enum Architecture : u16 {
         UNSUPPORTED_ARCH = 0,
         X86_64 = 1,
         AMD64 = 1,
@@ -18,7 +18,7 @@ namespace jasmine {
         JASMINE = 4, // architecture for jasmine bytecode
     };
 
-    enum OS : u8 {
+    enum OS : u16 {
         UNSUPPORTED_OS = 0,
         LINUX = 1,
         WINDOWS = 2,

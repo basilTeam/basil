@@ -19,6 +19,20 @@ namespace jasmine {
     Object::Object(Object&& other):
         target(other.target), buf(other.buf), defs(other.defs), def_positions(other.def_positions),
         refs(other.refs), loaded_code(other.loaded_code) {}
+        
+    Object& Object::operator=(Object&& other) {
+        if (&other != this) {
+            if (loaded_code) free_exec(loaded_code, buf.size());
+            target = other.target;
+            buf = other.buf;
+            defs = other.defs;
+            def_positions = other.def_positions;
+            refs = other.refs;
+            loaded_code = other.loaded_code;
+            other.loaded_code = nullptr;
+        }
+        return *this;
+    }
 
     Object::~Object() {
         if (loaded_code) free_exec(loaded_code, buf.size());
@@ -125,7 +139,7 @@ namespace jasmine {
         resolve_refs();
 
         u32 len = code().size();
-        for (int i = 0; i < len; i ++) code_copy.write(((u8*)loaded_code)[i]);
+        for (u32 i = 0; i < len; i ++) code_copy.write(((u8*)loaded_code)[i]);
         buf = code_copy;
 
         protect_exec(loaded_code, buf.size());
@@ -137,16 +151,21 @@ namespace jasmine {
             fprintf(stderr, "[ERROR] Could not open file '%s'.\n", path);
             exit(1);
         }
-        
+        write(file);
+        fclose(file);
+    }
+
+    void Object::write(FILE* file) {
         bytebuf b;
         b.write("#!jasmine\n", 10);
-
-        b.write(little_endian<u16>(JASMINE_VERSION)); // jasmine version
-        b.write("\xf0\x9f\xa6\x9d", 4); // friendly flamingo
-
-        b.write(little_endian<u64>(buf.size())); // length of code
+        b.write("\xf0\x9f\xa6\x9d", 4); // friendly raccoon
+        b.write(little_endian<u16>(JASMINE_MAJOR_VERSION)); // jasmine major version
+        b.write(little_endian<u16>(JASMINE_MINOR_VERSION)); // jasmine minor version
+        b.write(little_endian<u16>(JASMINE_PATCH_VERSION)); // jasmine patch version
         b.write(little_endian<u16>(target.arch)); // architecture
         b.write(little_endian<u16>(target.os)); // OS
+        b.write(little_endian<u64>(buf.size())); // length of code
+
         b.write<u32>(0); // unused
         bytebuf code_copy = buf;
         while (code_copy.size()) b.write(code_copy.read()); // copy over code
@@ -191,7 +210,6 @@ namespace jasmine {
         }
 
         while (b.size()) fputc(b.read(), file);
-        fclose(file);
     }
 
     void Object::read(const char* path) {
@@ -200,6 +218,11 @@ namespace jasmine {
             fprintf(stderr, "[ERROR] Could not open file '%s'.\n", path);
             exit(1);
         }
+        read(file);
+        fclose(file);
+    }
+
+    void Object::read(FILE* file) {
         char symbol[1024];
 
         bytebuf b;
@@ -212,8 +235,6 @@ namespace jasmine {
             exit(1);
         }
 
-        u16 version = from_little_endian(b.read<u16>()); // get version
-
         u8 magic[4];
         for (int i = 0; i < 4; i ++) magic[i] = b.read();
         if (strncmp((const char*)magic, "\xf0\x9f\xa6\x9d", 4)) {
@@ -221,12 +242,23 @@ namespace jasmine {
             exit(1);
         }
 
-        u64 code_length = from_little_endian(b.read<u64>()); // code length
+        u16 major = from_little_endian(b.read<u16>()), // get major version
+            minor = from_little_endian(b.read<u16>()), // ...minor version
+            patch = from_little_endian(b.read<u16>()); // ...and patch
+        if (major > JASMINE_MAJOR_VERSION) {
+            fprintf(stderr, "[ERROR] Jasmine object compiled with Jasmine version %u.%u.%u, "
+                "but Jasmine installation only supports up to %u.x.x.\n", major, minor, patch, JASMINE_MAJOR_VERSION);
+            exit(1);
+        }
         
         Architecture arch = (Architecture)from_little_endian(b.read<u16>()); // get arch
         OS os = (OS)from_little_endian(b.read<u16>()); // get os
         target = { arch, os };
+
+        u64 code_length = from_little_endian(b.read<u64>()); // code length
         
+        b.read<u32>(); // unused
+
         while (code_length) {
             if (!b.size()) {
                 fprintf(stderr, "[ERROR] File contains less code than announced.\n");
@@ -249,7 +281,7 @@ namespace jasmine {
                 }
                 symbol[size ++] = b.read();
             }
-            symbol[size ++] = b.read();
+            symbol[size ++] = b.read(); // null char
 
             internal_syms.push(type == GLOBAL_SYMBOL ? global(symbol) : local(symbol));
             -- sym_count;
@@ -285,7 +317,6 @@ namespace jasmine {
             refs.put(offset, { sym, type, field_offset });
             -- ref_count;
         }
-        fclose(file);
     }
     
     const Target& Object::get_target() const {
@@ -433,7 +464,11 @@ namespace jasmine {
             fprintf(stderr, "[ERROR] Could not open file '%s'.\n", path);
             exit(1);
         }
+        writeELF(file);
+        fclose(file);
+    }
 
+    void Object::writeELF(FILE* file) {
         bytebuf elf;
         elf.write((char)0x7f, 'E', 'L', 'F');
         elf.write<u8>(0x02); // ELFCLASS64
@@ -538,7 +573,6 @@ namespace jasmine {
         }
         
         while (elf.size()) fputc(elf.read(), file);
-        fclose(file);
     }
 }
 

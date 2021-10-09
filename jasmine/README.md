@@ -186,4 +186,4 @@ Compilers using Jasmine can easily define their own meta-instructions for differ
 
 ## **License**
 
-Jasmine is distributed as part of the larger Basil project, under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause). See [LICENSE](https://github.com/basilTeam/basil/LICENSE) for details.
+Jasmine is distributed as part of the larger Basil project, under the [3-Clause BSD License](https://opensource.org/licenses/BSD-3-Clause). See [LICENSE](https://github.com/basilTeam/basil/blob/master/LICENSE) for details.

@@ -12,8 +12,6 @@
 
 #include "defs.h"
 #include "stdio.h"
-#include "str.h"
-#include "ustr.h"
 
 class stream {
 public:
@@ -21,7 +19,7 @@ public:
     virtual u8 read() = 0; 
     virtual u8 peek() const = 0;
     virtual void unget(u8 c) = 0;
-    virtual operator bool() const = 0;
+    virtual operator bool() = 0;
 };
 
 bool exists(const char* path);
@@ -40,7 +38,7 @@ public:
     u8 read() override;
     u8 peek() const override;
     void unget(u8 c) override;
-    operator bool() const override;
+    operator bool() override;
 };
 
 class buffer : public stream {
@@ -64,7 +62,7 @@ public:
     void unget(u8 c) override;
     u32 size() const;
     u32 capacity() const;
-    operator bool() const override;
+    operator bool() override;
     u8* begin();
     const u8* begin() const;
     u8* end();
@@ -74,6 +72,7 @@ public:
 extern stream &_stdin, &_stdout;
 void setprecision(u32 p);
 
+void write(stream& io);
 void write(stream& io, u8 c);
 void write(stream& io, u16 n);
 void write(stream& io, u32 n);
@@ -111,6 +110,9 @@ void writeln(stream& s, const Args&... args) {
     write(s, args...);
     write(s, '\n');
 }
+
+class string;
+class ustring;
 
 bool isspace(u8 c);
 

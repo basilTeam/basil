@@ -74,3 +74,21 @@ template<>
 u64 hash(const ustring& s) {
     return raw_hash((const u8*)s.raw(), s.bytes());
 }
+
+template<>
+u64 hash(const u64& u) {
+	// return raw_hash(u);
+	return u;
+	// const u64 m = 0xc6a4a7935bd1e995;
+	// const u32 r = 47;
+
+	// u64 h = 7576351903513440497ul ^ (8 * m);
+
+	// u64 k = u;
+	// k *= m; 
+	// k ^= k >> r; 
+	// k *= m; 
+	// h ^= k;
+	// h *= m; 
+	// return h;
+}

@@ -12,6 +12,7 @@
 
 #include "defs.h"
 #include "io.h"
+#include "panic.h"
 
 template<typename T, typename U>
 struct either {

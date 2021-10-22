@@ -8,6 +8,7 @@
  */
 
 #include "type.h"
+#include "forms.h"
 
 namespace basil {
     struct Class;
@@ -100,6 +101,8 @@ namespace basil {
         "void",
         "error",
         "undefined",
+        "form-level function",
+        "form-level intersect",
         "any",
         "named",
         "list",
@@ -985,6 +988,80 @@ namespace basil {
         }
     };
 
+    struct FormFnClass : public Class {
+        u32 arity;
+
+        FormFnClass(u32 arity_in): Class(K_FORM_FN), arity(arity_in) {}
+
+        u64 lazy_hash() const override {
+            return raw_hash(kind()) * 5822540408738177351ul ^ raw_hash(arity);
+        }
+
+        void format(stream& io) const override {
+            write(io, "form-function(", arity, ")");
+        }
+
+        bool operator==(const Class& other) const override {
+            return other.kind() == K_FORM_FN 
+                && as<FormFnClass>(other).arity == arity;
+        }
+    };
+    
+    Type t_form_fn(u32 arity) {
+        return t_create(ref<FormFnClass>(arity));
+    }
+
+    struct FormIsectClass : public Class {
+        map<rc<Form>, rc<Class>> members;
+
+        FormIsectClass(const map<rc<Form>, Type>& members_in):    
+            Class(K_FORM_ISECT) {
+            for (const auto& [f, t] : members_in) members[f] = TYPE_LIST[t.id];
+        }
+
+        u64 lazy_hash() const override {
+            u64 base = raw_hash(kind());
+            for (auto [s, t] : members) {
+                base ^= s->hash() * 515562480546324473ul;
+                base ^= t->hash() * 16271366544726016991ul;
+            }
+            return base;
+        }
+
+        void format(stream& io) const override {
+            write_pairs(io, members, "overloaded(", ": ", " & ", ")");
+        }
+
+        bool coerces_to(const Class& other) const override {
+            if (Class::coerces_to(other)) return true;
+
+            if (other.kind() == K_FORM_ISECT) {
+                for (const auto& [f, t] : as<FormIsectClass>(other).members) {
+                    if (!members.contains(f)) return false;
+                    if (*t != *members[f]) return false;
+                }
+                return true; // we contain every member of the target
+            }
+            return false;
+        }
+
+        bool operator==(const Class& other) const override {
+            if (other.kind() != K_FORM_ISECT
+                || as<FormIsectClass>(other).members.size() != members.size())
+                return false;
+            
+            // at this point we know the size of both types' member sets is the same.
+            for (const auto& [f, t] : members) {
+                if (!as<FormIsectClass>(other).members.contains(f)) return false;
+            }
+            return true;
+        }
+    };
+
+    Type t_form_isect(const map<rc<Form>, Type>& members) {
+        return t_create(ref<FormIsectClass>(members));
+    }
+
     static vector<Type> tvar_bindings;
     static vector<vector<Type>> tvar_isects;
     static set<u64> tvar_isecting;
@@ -1014,6 +1091,10 @@ namespace basil {
         void format(stream& io) const override {
             write(io, name);
             if (tvar_bindings[id] != T_UNDEFINED) write(io, "(", tvar_bindings[id], ")");
+        }
+
+        rc<Class> concrete() const {
+            return TYPE_LIST[tvar_bindings[id].id];
         }
 
         bool coerces_to_generic(const Class& other) const override {
@@ -1124,8 +1205,12 @@ namespace basil {
     }
 
     bool Class::coerces_to_generic(const Class& other) const {
-        if (other.kind() == K_TVAR && !t_is_concrete(t_from(other.id())))
-            if (other.coerces_to_generic(*this)) return true;
+        if (other.kind() == K_TVAR) {
+            if (!t_is_concrete(t_from(other.id())) && other.coerces_to_generic(*this)) 
+                return true;
+            else if (t_is_concrete(t_from(other.id())) && coerces_to_generic(*as<TVarClass>(other).concrete()))
+                return true;
+        }
         return *this == other 
             || other.kind() == K_ANY
             || other.kind() == K_ERROR;
@@ -1133,6 +1218,9 @@ namespace basil {
 
     bool Class::coerces_to(const Class& other) const {
         return coerces_to_generic(other)
+            || (other.kind() == K_TVAR 
+                && t_is_concrete(t_from(other.id())) 
+                && coerces_to(*as<TVarClass>(other).concrete()))
             || (other.kind() == K_RUNTIME && TYPE_LIST[_id]->coerces_to(*as<RuntimeClass>(other).base))
             || (other.kind() == K_UNION && as<UnionClass>(other).members.contains(TYPE_LIST[_id]));
     }
@@ -1316,6 +1404,27 @@ namespace basil {
         return t_from(as<RuntimeClass>(*TYPE_LIST[t.id]).base->id());
     }
 
+    u32 t_form_fn_arity(Type func) {
+        if (!func.of(K_FORM_FN)) panic("Expected form-level function type!");
+        return as<FormFnClass>(*TYPE_LIST[func.id]).arity;
+    }
+
+    map<rc<Form>, Type> t_form_isect_members(Type isect) {
+        if (!isect.of(K_FORM_ISECT)) panic("Expected form-level intersection type!");
+        map<rc<Form>, Type> members;
+        for (const auto& [k, v] : as<FormIsectClass>(*TYPE_LIST[isect.id]).members)
+            members[k] = t_from(v->id());
+        return members;
+    }
+
+    optional<Type> t_overload_for(Type overloaded, rc<Form> form) {
+        if (!overloaded.of(K_FORM_ISECT)) panic("Expected form-level intersection type!");
+        const auto& members = as<FormIsectClass>(*TYPE_LIST[overloaded.id]).members;
+        auto it = members.find(form);
+        if (it == members.end()) return none<Type>();
+        else return some<Type>(t_from(it->second->id()));
+    }
+
     void t_unbind(Type t) {
         switch (t.is_tvar() ? K_TVAR : t.kind()) {
             case K_TVAR:
@@ -1339,6 +1448,11 @@ namespace basil {
             }
             case K_STRUCT: {
                 for (const auto& [f, t] : as<StructClass>(*TYPE_LIST[t.id]).fields) 
+                    t_unbind(t_from(t->id()));
+                return;
+            }
+            case K_FORM_ISECT: {
+                for (const auto& [f, t] : as<FormIsectClass>(*TYPE_LIST[t.id]).members) 
                     t_unbind(t_from(t->id()));
                 return;
             }
@@ -1366,6 +1480,8 @@ namespace basil {
             case K_ALIAS:
             case K_MACRO:
             case K_ERROR:
+            case K_FORM_FN:      // despite the name, undefined functions should not be generically
+            case K_FORM_ISECT:   // converted to/from
                 return true;
             case K_ANY:
             case K_UNDEFINED:
@@ -1427,6 +1543,8 @@ namespace basil {
             case K_ALIAS:
             case K_MACRO:
             case K_ERROR:
+            case K_FORM_FN:      // form-level types aside from undefined should
+            case K_FORM_ISECT:   // not be lowered.
                 return T_ERROR;
             case K_ANY:
                 return t_var();

@@ -114,9 +114,9 @@ do:
 
     collatz 100
 )", load_step, lex_step, parse_step, eval_step);
-    ASSERT_TRUE(collatz.type.of(K_RUNTIME));
-    ASSERT_EQUAL(t_runtime_base(collatz.type), T_UNDEFINED);
     get_perf_info().set_max_count(99999);
+    ASSERT_TRUE(collatz.type.of(K_RUNTIME));
+    ASSERT_EQUAL(t_concrete(t_runtime_base(collatz.type)), T_UNDEFINED);
 }
 
 TEST(annotated) {
@@ -128,4 +128,29 @@ do:
 )", load_step, lex_step, parse_step, eval_step);
     ASSERT_EQUAL(two.type, T_INT);
     ASSERT_EQUAL(two.data.i, 2);
+}
+
+TEST(capture) {
+    Value result = compile(R"(
+do:
+    def curried-add x? = lambda y? = x + y
+    (curried-add 1 2, curried-add 3 4)
+)", load_step, lex_step, parse_step, eval_step);
+
+    ASSERT_TRUE(result.type.of(K_TUPLE))
+    ASSERT_EQUAL(v_len(result), 2);
+    ASSERT_EQUAL(v_at(result, 0), v_int({}, 3));
+    ASSERT_EQUAL(v_at(result, 1), v_int({}, 7));
+}
+
+TEST(keyword_lambda) {
+    Value result = compile(R"(
+do:
+    def kw-foo x? =
+        lambda kw-bar y? kw-baz =
+            x * y
+    def kw-var = kw-foo 2
+    kw-var kw-bar 3 kw-baz
+)", load_step, lex_step, parse_step, eval_step);
+    ASSERT_EQUAL(result, v_int({}, 6));
 }

@@ -15,7 +15,7 @@ using namespace basil;
 
 SETUP {
     init();
-    get_perf_info().set_max_count(3); // compile everything
+    get_perf_info().set_max_count(1); // compile everything
 }
 
 TEST(simple_increment) {

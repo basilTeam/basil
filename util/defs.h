@@ -11,6 +11,7 @@
 #define BASIL_DEFS_H
 
 #include "stdint.h"
+#include "stddef.h"
 
 typedef uint8_t u8;
 typedef uint16_t u16;
@@ -55,6 +56,27 @@ typedef int64_t i64;
 #define ITALICMAGENT	"\033[3m\033[35m"      /* Italic Magenta */
 #define ITALICCYAN  	"\033[3m\033[36m"      /* Italic Cyan */
 #define ITALICWHITE 	"\033[3m\033[37m"      /* Italic White */
+
+// OS flags 
+
+#if defined(__amd64) || defined(__amd64__) || defined(__x86_64) || defined(__x86_64__)
+    #define BASIL_X86_64
+#elif defined(__i386) || defined(__i386__) || defined(__x86) || defined(__x86__)
+    #define BASIL_X86_32
+#elif defined(__aarch64) || defined(__aarch64__)
+    #define BASIL_AARCH64
+#endif
+
+#if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
+    #define BASIL_WINDOWS
+#elif defined(__APPLE__) || defined(__MACH__)
+    #define BASIL_UNIX
+    #define BASIL_MACOS
+#elif defined(__linux__)
+    #define BASIL_UNIX
+    #define BASIL_LINUX
+#endif
+
 
 // hash.h
 

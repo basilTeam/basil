@@ -343,3 +343,11 @@ TEST(inner_type_variables) {
     ASSERT_TRUE(c.coerces_to(d));
     ASSERT_EQUAL(t_tvar_concrete(b), T_STRING);
 }
+
+TEST(bound_tvar_coercion) {
+    Type a = t_var();
+    a.coerces_to(T_INT);
+
+    ASSERT_TRUE(T_INT.coerces_to_generic(a));
+    ASSERT_TRUE(T_INT.coerces_to(a));
+}

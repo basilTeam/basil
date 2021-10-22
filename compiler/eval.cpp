@@ -26,6 +26,7 @@ namespace basil {
                 if (t_intersect_procedural(type)) {
                     vector<rc<Form>> forms;
                     for (Type t : t_intersect_members(type)) forms.push(infer_form(t));
+                    if (forms.size() == 1) return forms[0];
                     return *f_overloaded(forms[0]->precedence, forms[0]->assoc, forms);
                 }
                 else return F_TERM; // non-procedural intersects are not applied
@@ -85,6 +86,7 @@ namespace basil {
                 }
                 else { // otherwise, we continue past this group
                     it = gr.next;
+                    resolve_form(env, gr.value);
                     while (gr.value.form->has_prefix_case() && it != end) {
                         GroupResult ogr = retry_group(env, gr, it, end);
                         it = ogr.next;
@@ -190,7 +192,7 @@ namespace basil {
 
         Value term = *it;
         resolve_form(env, term);
-        if (term.form->has_prefix_case()) { // try prefix application regardless of minprecedence
+        while (term.form->has_prefix_case()) { // try prefix application regardless of minprecedence
             vector<Value> params;
             params.push(term); // include term as a param
 
@@ -204,17 +206,20 @@ namespace basil {
             if (gr.is_left()) { // if grouping succeeded
                 resolve_form(env, gr.left().value);
                 term = gr.left().value;
-                it = gr.left().next; 
+                // we iterate up to next. since it_copy was incremented earlier, this leaves
+                // it_copy at gr.left().next, and it immediately before it
+                while (it_copy != gr.left().next) it_copy ++, it ++;
             }
             else if (params.size() == 1) { // if we didn't match any other parameters
                 ++ it; // leave the term in place, not applied to anything
+                break;
             }
             else {
                 report_group_error(gr.right(), term, params);
                 ++ it; // advance just past this term
             }
         }
-        else ++ it; // move past this single term
+        ++ it; // move to the next term
 
         while (it != end) { // loop until we fail to find a suitable infix operator
             Value op = *it;
@@ -438,12 +443,13 @@ namespace basil {
                     auto callback = ((const rc<Callable>)v_head(term).form->invokable)->callback;
                     if (callback) {
                         term.form = (*callback)(env, term); // apply callback and finish resolving
+                        // println("resolved ", term, " form to ", term.form);
                         return;
                     }
                     else if (v_head(term).type.of(K_SYMBOL)) {
                         auto lookup = env->find(v_head(term).data.sym);
-                        if (lookup && lookup->type.of(K_FUNCTION) && !lookup->data.fn->builtin
-                            && lookup->form->kind == FK_CALLABLE) {
+                        if (lookup && ((lookup->type.of(K_FUNCTION) && !lookup->data.fn->builtin) 
+                            || lookup->type.of(K_FORM_FN)) && lookup->form->kind == FK_CALLABLE) {
                             vector<rc<Form>> args;
                             rc<Callable> form = (rc<Callable>)v_head(term).form->start();
                             bool on_variadic = false;
@@ -460,8 +466,9 @@ namespace basil {
 
                                 if (!is_variadic(form->current_param()->kind) && on_variadic) {
                                     args.push(F_TERM); // variadics are always terms
+                                    on_variadic = false;
                                 }
-                                if (is_variadic(form->current_param()->kind)) {
+                                else if (is_variadic(form->current_param()->kind)) {
                                     on_variadic = true;
                                 }
                                 else if (form->current_param()->kind == PK_TERM) { // terms are always terms
@@ -473,8 +480,15 @@ namespace basil {
                                 form->advance(arg);
                             }
                             if (on_variadic) args.push(F_TERM);
-
-                            term.form = v_resolve_body(*lookup->data.fn, args)->base->form;
+                            
+                            auto body = v_resolve_body(
+                                lookup->type.of(K_FUNCTION) 
+                                    ? (AbstractFunction&)*lookup->data.fn 
+                                    : (AbstractFunction&)*lookup->data.fl_fn,
+                                args
+                            );
+                            if (body && body->is_resolving()) term.form = F_TERM;
+                            else term.form = body->base->form;
                             if (!term.form) term.form = F_TERM; // default to term
                             return;
                         }
@@ -507,6 +521,7 @@ namespace basil {
 
     void free_root_env() {
         if (root) unbind(root);
+        root.manual_dec();
         root = nullptr;
     }
 
@@ -514,6 +529,7 @@ namespace basil {
         if (root) return root; // return existing root if possible
 
         root = ref<Env>(); // allocate empty, parentless environment
+        root.manual_inc(); // keep this around throughout dealloc
         add_builtins(root);
         return root;
     }
@@ -664,46 +680,82 @@ namespace basil {
     }
 
     Value coerce_rt(rc<Env> env, const Param& param, bool is_runtime, 
-        bool preserve_quotes, const Value& v, Type dest) {
+        BuiltinFlags flags, const Value& v, Type dest) {
         if ((v.type.of(K_RUNTIME) || is_runtime) && !dest.of(K_RUNTIME)) {
             dest = t_runtime(t_lower(dest));
         }
-        if (dest.of(K_RUNTIME) && !v.type.of(K_RUNTIME) 
-            && !is_evaluated(param.kind)) { // evaluate quoted stuff before runtime
-            if (preserve_quotes) return v;
+        if (dest.of(K_RUNTIME) && !v.type.of(K_RUNTIME)) { // evaluate quoted stuff before runtime
             Value v2 = v;
-            v2 = eval(env, v2);
-            if (v2.type == T_ERROR) return v_error({});
-            return coerce(env, v2, t_runtime(v2.type));
+            if (!is_evaluated(param.kind)) {
+                if (flags & BF_PRESERVING) return v;
+                v2 = eval(env, v2);
+                if (v2.type == T_ERROR) return v_error({});
+            }
+            else if (is_variadic(param.kind) && (flags & BF_AST_ANYLIST)) {
+                if (is_runtime) {
+                    vector<Value> vs;
+                    for (const Value& v : iter_list(v2)) {
+                        Value c = lower(env, v);
+                        if (c.type == T_ERROR) return v_error({});
+                        else vs.push(c);
+                    }
+                    if (vs.size() == 0) return v_void(v.pos);
+                    return v_list(span(vs.front().pos, vs.back().pos), t_list(T_ANY), move(vs));
+                }
+                else return v2;
+            }
+            else if (is_variadic(param.kind)) {
+                if (!dest.of(K_LIST) && (!dest.of(K_RUNTIME) || !t_runtime_base(dest).of(K_LIST))) {
+                    err(v.pos, "Tried to coerce variadic parameter list '", v, "' to non-list type '",
+                        dest, "'.");
+                    return v_error({});
+                }
+
+                if (dest.of(K_RUNTIME)) dest = t_runtime_base(dest);
+                dest = t_runtime(t_list_element(dest));
+
+                vector<Value> vs;
+                for (const Value& v : iter_list(v2)) {
+                    Value c = coerce(env, v, dest);
+                    if (c.type == T_ERROR) return v_error({});
+                    else vs.push(c);
+                }
+                if (vs.size() == 0) return v_void(v.pos);
+                return v_list(span(vs.front().pos, vs.back().pos), t_list(dest), move(vs));
+            }
+            return coerce(env, v2, dest);
         }
         return coerce(env, v, dest);
     }
 
     Value coerce_args(rc<Env> env, const vector<Param>& params, bool is_runtime, 
-        bool preserve_quotes, const Value& args, Type dest) {
-        if (args.type.of(K_TUPLE)) {
+        BuiltinFlags flags, const Value& args, Type dest) {
+        if (dest.of(K_TUPLE) && args.type.of(K_TUPLE)) {
             vector<Value> coerced;
             for (u32 i = 0; i < v_tuple_len(args); i ++) {
-                coerced.push(coerce_rt(env, params[i], is_runtime, preserve_quotes, v_at(args, i), t_tuple_at(dest, i)));
+                coerced.push(coerce_rt(env, params[i], is_runtime, flags, v_at(args, i), t_tuple_at(dest, i)));
                 if (coerced.back().type == T_ERROR) return v_error({});
             }
             return v_tuple(args.pos, infer_tuple(coerced), move(coerced));
         }
-        else return coerce_rt(env, params[0], is_runtime, preserve_quotes, args, dest);
+        else return coerce_rt(env, params[0], is_runtime, flags, args, dest);
     }
 
     PerfInfo::PerfInfo():
         max_depth(50), max_count(50), exceeded(false) {}
 
-    void PerfInfo::begin_call(const Value& term, u32 base_cost) {
+    void PerfInfo::begin_call(const Value& term, rc<InstTable> fn, u32 base_cost) {
         if (counts.size() >= max_depth) exceeded = true;
-        counts.push({term, base_cost, false});
+        counts.push({term, fn, base_cost, counts.size() 
+            && counts.back().comptime, counts.size() // inherent comptime from parent frame
+            && counts.back().ismeta // likewise for meta status
+        });
     }
 
     void PerfInfo::end_call() {
-        u32 count = counts.back().count;
+        u32 count = counts.back().comptime ? 0 : counts.back().count;
         counts.pop();
-        if (counts.size()) counts.back().count += count;
+        if (counts.size() > 0) counts.back().count += count;
     }
 
     void PerfInfo::end_call_without_add() {
@@ -731,6 +783,14 @@ namespace basil {
         return counts.size() > 0 ? counts.back().comptime : false;
     }
 
+    void PerfInfo::make_meta() {
+        if (counts.size()) counts.back().ismeta = counts.back().comptime = true;
+    }
+
+    bool PerfInfo::is_meta() const {
+        return counts.size() > 0 ? counts.back().ismeta : false;
+    }
+
     bool PerfInfo::depth_exceeded() {
         bool exc = exceeded;
         exceeded = false;
@@ -746,7 +806,7 @@ namespace basil {
     Value call(rc<Env> env, Value call_term, Value func, const Value& args_in) {
         if ((perfinfo.current_count() >= perfinfo.max_count || perfinfo.counts.size() >= perfinfo.max_depth)
             && !perfinfo.is_comptime()) {
-            // println("skipping call to ", func_term, " ", args_in, " - current cost is ", perfinfo.current_count());
+            // println("skipping call to ", call_term, " ", args_in, " - current cost is ", perfinfo.current_count(), ", current depth is ", perfinfo.counts.size());
             return v_error({}); // return error value if current function is too expensive
         }
 
@@ -762,7 +822,6 @@ namespace basil {
         }
         else if (args.type.of(K_RUNTIME)) fixed_args_type.push(args.data.rt->ast->type(env));
         else fixed_args_type.push(args.type);
-
 
         // overload resolution is done independently of runtime typing, so we clean up
         // our argument type to accommodate that.
@@ -785,15 +844,21 @@ namespace basil {
 
         Type fntype = t_runtime_base(func.type);
 
+        if (fntype.of(K_FORM_ISECT)) {
+            auto it = func.data.fl_isect->overloads.find(func_term.form);
+            if (it == func.data.fl_isect->overloads.end()) {
+                err(func_term.pos, "Function '", func_term, "' has unresolved overloaded form.");
+                return v_error({});
+            }
+            func = it->second;
+            fntype = it->second.type;
+        }
+
         if (fntype.of(K_INTERSECT)) { // we'll perform overload resolution among the intersection's cases
             vector<Type> valid;
-            // println("func form = ", func.form);
             for (const auto& [t, v] : func.data.isect->values) {
-                // println("  value form = ", v.form);
                 Type bt = t_runtime_base(t);
-                if (v.form && v.form == func_term.form && bt.of(K_FUNCTION)) {
-                    valid.push(t_runtime_base(bt)); // select only those cases that have the same form we selected
-                }
+                if (bt.of(K_FUNCTION)) valid.push(t_runtime_base(bt)); // select only functions
             }
 
             if (valid.size() == 0) {
@@ -863,11 +928,17 @@ namespace basil {
         bool preserve_quotes = false;
 
         if (func.type.of(K_FUNCTION) && func.data.fn->builtin) {
-            if (!func.data.fn->builtin->comptime) is_runtime = true; // check for runtime-only functions
-            if (func.data.fn->builtin->preserve_quotes) preserve_quotes = true;
+            if (!(func.data.fn->builtin->flags & BF_COMPTIME) 
+                || (func.data.fn->builtin->flags & BF_STATEFUL && !perfinfo.is_meta())) 
+                    is_runtime = true; // check for runtime-only or stateful functions
+            if (func.data.fn->builtin->flags & BF_PRESERVING) preserve_quotes = true;
         }
 
-        args = coerce_args(env, params, is_runtime, preserve_quotes, 
+        BuiltinFlags flags = BF_NONE;
+        if (func.type.of(K_FUNCTION) && func.data.fn->builtin) flags = func.data.fn->builtin->flags;
+
+        Value orig_args = args;
+        args = coerce_args(env, params, is_runtime, flags, 
             args, func.type.of(K_INTERSECT) ? args_type : t_arg(fntype));
         // println("args_type = ", args_type, " and coerced to ", args);
         if (args.type == T_ERROR) return v_error({});
@@ -897,30 +968,30 @@ namespace basil {
         else if (func.type.of(K_FUNCTION) && func.data.fn->builtin) {
             const auto& builtin = func.data.fn->builtin;
             if (is_runtime) {
-                if (!builtin->runtime) {
+                if (!(builtin->flags & BF_RUNTIME)) {
                     err(call_term.pos, "Compile-time only function '", func_term, 
                         "' was invoked on runtime-only arguments.");
                     return v_error({});
                 }
-                perfinfo.begin_call(call_term, 1); // builtins are considered cheap
+                perfinfo.begin_call(call_term, nullptr, 1); // builtins are considered cheap
                 perfinfo.end_call();
                 rc<AST> ast = builtin->runtime(env, call_term, args);
                 if (!ast) return v_error({});
                 return v_runtime({}, t_runtime(ast->type(env)), ast);
             }
             else {
-                perfinfo.begin_call(call_term, 1);
-                if (!builtin->runtime) perfinfo.make_comptime();
+                perfinfo.begin_call(call_term, func.data.fn, 1);
+                if (!(builtin->flags & BF_RUNTIME)) perfinfo.make_comptime();
                 Value result = builtin->comptime(env, call_term, args);
                 if ((perfinfo.current_count() >= perfinfo.max_count || perfinfo.counts.size() >= perfinfo.max_depth)
                     && !perfinfo.is_comptime()) {
-                    perfinfo.end_call_without_add();
+                    perfinfo.end_call();
 
                     // lower args if necessary
-                    args = coerce_args(env, params, true, preserve_quotes, args, t_arg(fntype));
+                    args = coerce_args(env, params, true, builtin->flags, args, t_arg(fntype));
                     if (args.type == T_ERROR) return v_error({});
                     
-                    perfinfo.begin_call(call_term, 1);
+                    perfinfo.begin_call(call_term, nullptr, 1);
                     perfinfo.end_call();
                     rc<AST> ast = builtin->runtime(env, call_term, args);
                     if (!ast) return v_error({});
@@ -945,55 +1016,58 @@ namespace basil {
         else {
             // if it's a compile-time call, we try to evaluate the body - but it might run into 
             Value result;
+            rc<InstTable> fn_body = v_resolve_body(*func.data.fn, orig_args); // resolve function body
+            perfinfo.begin_call(call_term, fn_body, 1); // user-defined functions are considered more expensive
             if (!is_runtime) {
                 if (func.type.of(K_RUNTIME)) // check just in case
                     panic("Somehow got runtime function in compile-time function call!");
 
-                perfinfo.begin_call(call_term, 1); // user-defined functions are considered more expensive
-                // println("beginning call to ", func_term, " ", args_in);
                 static u32 n = 0;
                 n ++;
-                rc<InstTable> fn_body = v_resolve_body(*func.data.fn, args); // resolve function body
-
+                
                 if (fn_body->is_instantiating(args_type)) {
                     // we've called a function that is currently in the process of being compiled,
                     // so we skip its compile-time evaluation to avoid infinite recursion in the
                     // compiler
                     is_runtime = true;
                 }
+                else if (fn_body->insts.contains(args_type)) {
+                    // if we've already instantiated this function on these types, use that instead
+                    is_runtime = true;
+                }
                 else {
                     rc<Env> fn_env = fn_body->env;
                     const vector<Symbol>& fn_args = func.data.fn->args;
-                    vector<pair<Symbol, Value>> existing;
-                    for (const auto& p : fn_env->values) existing.push(p); // save existing environment 
+                    
+                    rc<Env> record = fn_env->clone();
                     if (fn_args.size() == 1) { // bind args to single argument
-                        fn_env->def(fn_args[0], args);
+                        record->def(fn_args[0], args);
                     }
                     else for (u32 i = 0; i < v_len(args); i ++) { // bind args to multiple arguments
-                        fn_env->def(fn_args[i], v_at(args, i));
+                        record->def(fn_args[i], v_at(args, i));
                     }
-                    result = eval(fn_body->env, *fn_body->base); // eval it
-                    for (u32 i = 0; i < existing.size(); i ++) 
-                        fn_env->def(existing[i].first, existing[i].second); // restore any previous values
+                    result = eval(record, *fn_body->base); // eval it
+                    record->parent->detach(record); // GC record if we can
                 }
             }
             
             // if we couldn't resolve a compile-time value (either the function/args were runtime, or
             // the compiler determined it was too expensive), instantiate a runtime call and return
             // that.
-            if (is_runtime 
+            if ((is_runtime 
                 || perfinfo.current_count() >= perfinfo.max_count 
-                || perfinfo.depth_exceeded()) {
-                // if we exceeded the perf limit, pretend the call didn't happen - clear its perf
-                // frame
+                || perfinfo.depth_exceeded()) && !perfinfo.is_comptime()) {
 
-                if (!is_runtime) {
-                    perfinfo.end_call_without_add();
+                perfinfo.end_call();
+                for (i64 i = i64(perfinfo.counts.size()) - 1; i >= 0; i --) {
+                    if (perfinfo.counts[i].fn.is(fn_body)) {
+                        return v_error({}); // defer to outer call
+                    }
                 }
 
-                rc<AST> fn_ast = nullptr;
+                // we pretend the runtime call is a builtin with cost one
 
-                // println("trying to lower call to ", func_term, " ", args, " of type ", func.type);
+                rc<AST> fn_ast = nullptr;
 
                 if (func.type.of(K_FUNCTION)) {
                     // instantiate runtime call
@@ -1010,25 +1084,22 @@ namespace basil {
                     panic("Somehow got neither a function nor runtime value in function call!");
                 }
 
-                // we pretend the runtime call is a builtin with cost one
-                perfinfo.begin_call(call_term, 1);
-                perfinfo.end_call();
-
                 // try coercion again, with is_runtime always true
                 if (fntype == T_ERROR) return v_error({});
-                args = coerce_args(env, params, true, preserve_quotes, args, t_arg(fntype));
-                if (args.type == T_ERROR) return v_error({});
+                Value rt_args = coerce_args(env, params, true, BF_NONE, args, t_arg(fntype));
+                if (rt_args.type == T_ERROR) return v_error({});
 
                 vector<rc<AST>> arg_nodes;
-                if (args.type.of(K_TUPLE)) for (const Value& v : v_tuple_elements(args))
+                if (args.type.of(K_TUPLE)) for (const Value& v : v_tuple_elements(rt_args))
                     arg_nodes.push(v.data.rt->ast);
-                else arg_nodes.push(args.data.rt->ast);
+                else arg_nodes.push(rt_args.data.rt->ast);
 
-                return v_runtime({}, t_runtime(t_ret(fntype)), ast_call(
-                    args.pos, 
+                Value result = v_runtime({}, t_runtime(t_ret(fntype)), ast_call(
+                    rt_args.pos, 
                     fn_ast,
                     arg_nodes
                 ));
+                return result;
             }
 
             perfinfo.end_call();
@@ -1072,9 +1143,26 @@ namespace basil {
                     return head.with(infer_form(head.type)); // return the function if no args, e.g. (+)
 
                 if (t_runtime_base(head.type).of(K_FUNCTION) 
-                    || (t_runtime_base(head.type).of(K_INTERSECT) && t_intersect_procedural(head.type))) {
+                    || (t_runtime_base(head.type).of(K_INTERSECT) && t_intersect_procedural(head.type))
+                    || head.type.of(K_FORM_ISECT)) {
                     vector<Value> args;
-                    vector<Value> varargs; // we use this to accumulate arguments for an individual variadic parameter
+                    vector<Value> varargs; // we use this to accumulate arguments for an individual variadic parameter;
+                    
+                    if (!v_head(term).form || v_head(term).form->kind != FK_CALLABLE)
+                        v_head(term).form = infer_form(head.type);
+                    if (v_head(term).form->kind == FK_OVERLOADED) {
+                        err(v_head(term).pos, "Call to function '", v_head(term), "' is syntactically ambiguous.");
+                        for (rc<Callable> callable : ((rc<Overloaded>)v_head(term).form->invokable)->overloads) {
+                            note(v_head(term).pos, "Found candidate form '", callable, "'.");
+                        }
+                        return v_error({});
+                    }
+                    else if (v_head(term).form->kind != FK_CALLABLE) {
+                        err(v_head(term).pos, "Couldn't figure out how to apply function '",
+                            v_head(term), "' syntactically - term has non-applicable form '",
+                            v_head(term).form, "'.");
+                        return v_error({});
+                    }
                     rc<Callable> form = (rc<Callable>)v_head(term).form->start();
 
                     // we basically re-run the form over the argument list here to figure out where to evaluate
@@ -1140,7 +1228,7 @@ namespace basil {
 
                     Value result = call(env, term, head, args_value);
                     if (result.type == T_ERROR && !error_count()) {
-                        println("exceeded op limit in call term '", term, "'");
+                        return result;
                     }
                     if (!result.form) result.form = infer_form(result.type);
                     result.pos = term.pos; // prefer term pos over any other pos determined within call()
@@ -1150,7 +1238,7 @@ namespace basil {
                     return v_error(term.pos); // propagate error
                 }
                 else {
-                    err(term.pos, "Could not evaluate list '", term, "'.");
+                    err(term.pos, "Could not evaluate list '", term, " with type ", term.type, "'.");
                 }
             }
             case K_ERROR:

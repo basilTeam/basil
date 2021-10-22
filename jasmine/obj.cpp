@@ -174,8 +174,7 @@ namespace jasmine {
         b.write(little_endian<u16>(target.arch)); // architecture
         b.write(little_endian<u16>(target.os)); // OS
         b.write(little_endian<u64>(buf.size())); // length of code
-
-        b.write<u32>(0); // unused
+        
         bytebuf code_copy = buf;
         while (code_copy.size()) b.write(code_copy.read()); // copy over code
 
@@ -237,10 +236,11 @@ namespace jasmine {
         bytebuf b;
         int ch;
         while ((ch = fgetc(file)) != EOF) b.write<u8>(ch);
-        u8 shebang[10];
+        u8 shebang[11];
         for (int i = 0; i < 10; i ++) shebang[i] = b.read();
+        shebang[10] = '\0';
         if (strncmp((const char*)shebang, "#!jasmine\n", 10)) {
-            fprintf(stderr, "[ERROR] Incorrect shebang.\n");
+            fprintf(stderr, "[ERROR] Incorrect shebang - found '%s'.\n", shebang);
             exit(1);
         }
 
@@ -265,8 +265,6 @@ namespace jasmine {
         target = { arch, os };
 
         u64 code_length = from_little_endian(b.read<u64>()); // code length
-        
-        b.read<u32>(); // unused
 
         while (code_length) {
             if (!b.size()) {
@@ -327,6 +325,10 @@ namespace jasmine {
             -- ref_count;
         }
     }
+
+    void Object::set_context(const Context& ctx_in) {
+        ctx = ctx_in;
+    }
     
     const Target& Object::get_target() const {
         return target;
@@ -341,9 +343,8 @@ namespace jasmine {
             case JASMINE: {
                 vector<Insn> insns;
                 bytebuf b = code();
-                Context ctx;
                 while (b.size()) insns.push(disassemble_insn(ctx, b, *this));
-                return compile_jasmine(insns, new_target);
+                return compile_jasmine(ctx, insns, new_target);
             }
             default:
                 fprintf(stderr, "[ERROR] Tried to retarget to incompatible architecture.\n");
@@ -586,11 +587,9 @@ namespace jasmine {
 }
 
 template<>
-u64 hash(const u64& u) {
-    return raw_hash(u);
-}
-
-template<>
 u64 hash(const jasmine::SymbolRef& symbol) {
-    return raw_hash(symbol);
+    return hash<u64>((u64)symbol.symbol.id
+        | (u64)symbol.field_offset << 32
+        | (u64)symbol.type << 40
+        | (u64)symbol.symbol.type << 48);
 }

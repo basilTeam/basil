@@ -11,11 +11,11 @@
 #include "sys.h"
 #include "stdlib.h"
 
-void* operator new[](unsigned long n) {
+void* operator new[](size_t n) {
     return malloc(n);
 }
 
-void* operator new(unsigned long n, void* p) {
+void* operator new(size_t n, void* p) {
     return p;
 }
 

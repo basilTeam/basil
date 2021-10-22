@@ -13,6 +13,7 @@
 #include "utils.h"
 #include "target.h"
 #include "sym.h"
+#include "bc.h"
 
 namespace jasmine {
     enum RefType : u8 {
@@ -28,9 +29,12 @@ namespace jasmine {
         i8 field_offset;
     };
 
+    struct Context;
+
     class Object {
         Target target;
         bytebuf buf;
+        Context ctx;
         map<Symbol, u64> defs;
         map<u64, Symbol> def_positions;
         map<u64, SymbolRef> refs;
@@ -62,6 +66,7 @@ namespace jasmine {
         void read(FILE* file);
         void writeELF(const char* path);
         void writeELF(FILE* file);
+        void set_context(const Context& ctx);
         const Target& get_target() const;
         Object retarget(const Target& new_target);
 
@@ -76,8 +81,5 @@ namespace jasmine {
 
 template<>
 u64 hash(const jasmine::SymbolRef& symbol);
-
-template<>
-u64 hash(const u64& u);
 
 #endif

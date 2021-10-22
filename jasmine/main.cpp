@@ -72,7 +72,7 @@ enum OutputType {
     OUT_FILE
 };
 
-CMDType cmd = CMD_HELP;
+CMDType cmd = CMD_RUN;
 InputType in = IN_STDIN;
 OutputType out = OUT_STDOUT;
 const char* in_file = "";
@@ -168,10 +168,9 @@ int main(int argc, const char** argv) {
                 || obj.get_target().os != DEFAULT_OS) 
                 obj.retarget(DEFAULT_TARGET);
             obj.load();
-            auto func = (void(*)())obj.find(global(method));
+            auto func = (int(*)())obj.find(global(method));
             if (!func) usage_error(argc, argv, "Could not find entry-point symbol '", method, "'.");
-            func();
-            return 0;
+            return func();
         }
         case CMD_AS: {
             file inf(fin);
@@ -196,7 +195,7 @@ int main(int argc, const char** argv) {
             return 0;
         }
         case CMD_COMPILE: {
-            Object obj;
+            Object obj({JASMINE, DEFAULT_OS});
             obj.read(fin);
             Object obj2 = obj.retarget(DEFAULT_TARGET);
             obj2.write(fout);

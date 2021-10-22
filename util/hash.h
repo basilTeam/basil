@@ -15,6 +15,7 @@
 #include "ustr.h"
 #include "slice.h"
 #include "io.h"
+#include "panic.h"
 
 template<typename T>
 bool equals(const T& a, const T& b) {
@@ -41,6 +42,15 @@ u64 hash(const T& t);
 
 template<>
 u64 hash(const char* const& s);
+
+template<>
+u64 hash(const string& s);
+
+template<>
+u64 hash(const ustring& s);
+
+template<>
+u64 hash(const u64& u);
 
 template<typename T>
 u64 key_hash(const T& a) {

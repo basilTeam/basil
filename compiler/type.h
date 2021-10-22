@@ -12,6 +12,7 @@
 
 #include "util/defs.h"
 #include "util/rc.h"
+#include "util/option.h"
 #include "util/hash.h"
 #include "util/vec.h"
 
@@ -35,6 +36,8 @@ namespace basil {
         K_VOID,
         K_ERROR,
         K_UNDEFINED,
+        K_FORM_FN,
+        K_FORM_ISECT,
         K_ANY,
         K_NAMED,
         K_LIST,
@@ -224,6 +227,18 @@ namespace basil {
         return basil::t_intersect(vector_of<Type>(args...));
     }
 
+    // Constructs an undefined function type with the provided arity.
+    Type t_form_fn(u32 arity);
+
+    struct Form;
+
+    // Constructs an overloaded type with the provided forms and type members.
+    Type t_form_isect(const map<rc<Form>, Type>& overloads);
+    template<typename ...Args>
+    Type t_form_isect(Args... args) {
+        return basil::t_form_isect(map_of<rc<Form>, Type>(args...));
+    }
+
     // Constructs a function type with the given argument and return types.
     Type t_func(Type arg, Type ret);
 
@@ -248,7 +263,7 @@ namespace basil {
     Type t_dict(Type key);
 
     // Constructs a macro type with the given arity.
-    Type t_macro(int arity);
+    Type t_macro(u32 arity);
 
     // Returns a fresh type variable.
     Type t_var();
@@ -343,6 +358,16 @@ namespace basil {
 
     // Returns the currently-bound type of the provided type variable.
     Type t_tvar_concrete(Type tvar);
+
+    // Returns the arity of the provided form-level function type.
+    u32 t_form_fn_arity(Type func);
+
+    // Returns the members of a form-level intersection type.
+    map<rc<Form>, Type> t_form_isect_members(Type isect);
+
+    // Returns the type associated with the provided form for the form-level
+    // intersection type, or an empty optional if no such type exists.
+    optional<Type> t_overload_for(Type f_isect, rc<Form> form);
 
     // Returns the concrete base of a type variable, or the provided type if
     // it's not a type variable.

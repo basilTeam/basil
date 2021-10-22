@@ -13,6 +13,7 @@
 #include "defs.h"
 #include "io.h"
 #include "rc.h"
+#include "panic.h"
 
 template<typename T>
 struct optional {

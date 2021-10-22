@@ -64,7 +64,7 @@ namespace jasmine {
     struct LiveRange;
 
     struct Location {
-        LocationType type; // What kind of location is this?
+        LocationType type = LT_NONE; // What kind of location is this?
         optional<GenericRegister> reg; // If it's a register, which register?
         optional<i64> offset; // If it's a stack or static memory location, what's its offset?
     };
@@ -107,21 +107,24 @@ namespace jasmine {
 
         // Applies an optional register hint to an instruction.
         void hint(const Insn& insn, const vector<LiveRange*>& params) const;
+
+        // Returns the size of a pointer in bytes for this target.
+        u64 pointer_size() const;
     };
 
-    #if defined(__amd64) || defined(__amd64__) || defined(__x86_64) || defined(__x86_64__)
+    #if defined(BASIL_X86_64)
         const Architecture DEFAULT_ARCH = X86_64;
-    #elif defined(__i386) || defined(__i386__) || defined(__x86) || defined(__x86__)
+    #elif defined(BASIL_X86_32)
         const Architecture DEFAULT_ARCH = X86;
-    #elif defined(__aarch64) || defined(__aarch64__)
+    #elif defined(BASIL_AARCH64)
         const Architecture DEFAULT_ARCH = AARCH64;
     #endif
 
-    #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
+    #if defined(BASIL_WINDOWS)
         const OS DEFAULT_OS = WINDOWS;
-    #elif defined(__APPLE__) || defined(__MACH__)
+    #elif defined(BASIL_MACOS)
         const OS DEFAULT_OS = MACOS;
-    #elif defined(__linux__)
+    #elif defined(BASIL_LINUX)
         const OS DEFAULT_OS = LINUX;
     #endif
 

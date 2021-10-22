@@ -13,7 +13,7 @@ extern void* _mmap(void*, u64, u64, u64) asm("_mmap");
 extern void _munmap(void*, u64) asm("_munmap");
 extern void _exit(u64) asm("_exit");
 extern i64 _read(u64, char*, u64) asm("_read");
-extern void _write(u64, const char*, u64) asm("_write");
+extern i64 _write(u64, const char*, u64) asm("_write");
 
 /* * * * * * * * * * * * * * * *
  *                             *
@@ -21,113 +21,160 @@ extern void _write(u64, const char*, u64) asm("_write");
  *                             *
  * * * * * * * * * * * * * * * */
 
+#ifdef BASIL_WINDOWS
+#include "fileapi.h"
+#include "memoryapi.h"
+#include "processthreadsapi.h"
+#endif
+
 inline void* _mmap(void* addr, u64 len, u64 prot, u64 flags) {
-    void* ret;
-    
-    #ifdef __APPLE__
-        #define MMAP_CODE "0x20000C5"
-    #elif defined(__linux__)
-        #define MMAP_CODE "9"
+    #if defined(BASIL_UNIX)
+        #ifdef __APPLE__
+            #define MMAP_CODE "0x20000C5"
+        #elif defined(__linux__)
+            #define MMAP_CODE "9"
+        #endif
+
+        #define PROT_READ 0x1		
+        #define PROT_WRITE 0x2		
+        #define PROT_EXEC 0x4		
+        #define PROT_NONE 0x0		
+        #define PROT_GROWSDOWN 0x01000000	
+        #define PROT_GROWSUP 0x02000000	
+
+        #define MAP_SHARED	0x01
+        #define MAP_PRIVATE	0x02
+        #define MAP_ANONYMOUS 0x20
+        void* ret;
+
+        asm volatile (
+            "mov $" MMAP_CODE ", %%rax\n\t"
+            "mov %1, %%rdi\n\t"
+            "mov %2, %%rsi\n\t"
+            "mov %3, %%rdx\n\t"
+            "mov %4, %%r10\n\t"
+            "mov $-1, %%r8\n\t"
+            "mov $0, %%r9\n\t"
+            "syscall\n\t"
+            "mov %%rax, %0"
+            : "=r" (ret)
+            : "r" (addr), "r" (len), "r" (prot), "r" (flags)
+            : "rdi", "rsi", "rdx", "r10", "r9", "r8", "rax"
+        );
+
+        return ret;
+    #elif defined(BASIL_WINDOWS)
+        #define PROT_READ 0x1		
+        #define PROT_WRITE 0x2		
+        #define PROT_EXEC 0x4		
+        static const DWORD PROT[8] = {
+            0, PAGE_READONLY, PAGE_READWRITE, PAGE_READWRITE,
+            PAGE_EXECUTE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE, PAGE_EXECUTE_READWRITE
+        };
+
+        return VirtualAlloc(nullptr, (SIZE_T)len, MEM_COMMIT | MEM_RESERVE, PROT[prot]);
     #endif
-
-    #define PROT_READ 0x1		
-    #define PROT_WRITE 0x2		
-    #define PROT_EXEC 0x4		
-    #define PROT_NONE 0x0		
-    #define PROT_GROWSDOWN 0x01000000	
-    #define PROT_GROWSUP 0x02000000	
-
-    #define MAP_SHARED	0x01
-    #define MAP_PRIVATE	0x02
-    #define MAP_ANONYMOUS 0x20
-
-    asm volatile ("mov $" MMAP_CODE ", %%rax\n\t"
-        "mov %1, %%rdi\n\t"
-        "mov %2, %%rsi\n\t"
-        "mov %3, %%rdx\n\t"
-        "mov %4, %%r10\n\t"
-        "mov $-1, %%r8\n\t"
-        "mov $0, %%r9\n\t"
-        "syscall\n\t"
-        "mov %%rax, %0"
-        : "=r" (ret)
-        : "r" (addr), "r" (len), "r" (prot), "r" (flags)
-        : "rdi", "rsi", "rdx", "r10", "r9", "r8", "rax"
-    );
-
-    return ret;
 }
 
 inline void _munmap(void* addr, u64 len) {
-    #ifdef __APPLE__
-        #define MUNMAP_CODE "0x2000049"
-    #elif defined(__linux__)
-        #define MUNMAP_CODE "11"
-    #endif
+    #if defined(BASIL_UNIX)
+        #ifdef __APPLE__
+            #define MUNMAP_CODE "0x2000049"
+        #elif defined(__linux__)
+            #define MUNMAP_CODE "11"
+        #endif
 
-    asm volatile ("mov $" MMAP_CODE ", %%rax\n\t"
-        "mov %0, %%rdi\n\t"
-        "mov %1, %%rsi\n\t"
-        "syscall\n\t"
-        : 
-        : "r" (addr), "r" (len)
-        : "rdi", "rsi", "rax"
-    );
+        asm volatile (
+            "mov $" MMAP_CODE ", %%rax\n\t"
+            "mov %0, %%rdi\n\t"
+            "mov %1, %%rsi\n\t"
+            "syscall\n\t"
+            : 
+            : "r" (addr), "r" (len)
+            : "rdi", "rsi", "rax"
+        );
+    #elif defined(BASIL_WINDOWS)
+        VirtualFree((LPVOID)addr, 0, (DWORD)MEM_RELEASE);
+    #endif
 }
 
 inline void _exit(u64 ret) {
-    #ifdef __APPLE__
-        #define EXIT_CODE "0x2000001"
-    #elif defined(__linux__)
-        #define EXIT_CODE "60"
+    #if defined(BASIL_UNIX)
+        #ifdef __APPLE__
+            #define EXIT_CODE "0x2000001"
+        #elif defined(__linux__)
+            #define EXIT_CODE "60"
+        #endif
+        asm volatile (
+            "mov $" EXIT_CODE ", %%rax\n\t"
+            "mov %0, %%rdi\n\t"
+            "syscall\n\t"
+            :
+            : "r" (ret)
+            : "rax", "rdi"
+        );
+    #elif defined(BASIL_WINDOWS)
+        ExitProcess((UINT)ret);
     #endif
-    asm volatile ("mov $" EXIT_CODE ", %%rax\n\t"
-        "mov %0, %%rdi\n\t"
-        "syscall\n\t"
-        :
-        : "r" (ret)
-        : "rax", "rdi"
-    );
 }
 
 inline i64 _read(u64 fd, char* buf, u64 len) {
-    u64 ret;
-    #ifdef __APPLE__
-        #define READ_CODE "0x2000003"
-    #elif defined(__linux__)
-        #define READ_CODE "0"
+    #if defined(BASIL_UNIX)
+        #ifdef __APPLE__
+            #define READ_CODE "0x2000003"
+        #elif defined(__linux__)
+            #define READ_CODE "0"
+        #endif
+        u64 ret;
+        asm volatile (
+            "mov $" READ_CODE ", %%rax\n\t"
+            "mov %1, %%rdi\n\t"
+            "mov %2, %%rsi\n\t"
+            "mov %3, %%rdx\n\t"
+            "syscall\n\t"
+            "mov %%rax, %0"
+            : "=r" (ret)
+            : "r" (fd), "r" (buf), "r" (len)
+            : "rax", "rdi", "rsi", "rdx"
+        );   
+        return ret;
+    #elif defined(BASIL_WINDOWS)
+        HANDLE hnd = (HANDLE)fd;
+        DWORD ret;
+        ReadFile(hnd, (LPVOID)buf, (DWORD)len, &ret, nullptr);
+        return ret;
     #endif
-    asm volatile ("mov $" READ_CODE ", %%rax\n\t"
-        "mov %1, %%rdi\n\t"
-        "mov %2, %%rsi\n\t"
-        "mov %3, %%rdx\n\t"
-        "syscall\n\t"
-        "mov %%rax, %0"
-        : "=r" (ret)
-        : "r" (fd), "r" (buf), "r" (len)
-        : "rax", "rdi", "rsi", "rdx"
-    );   
-    return ret;
 }
 
-inline void _write(u64 fd, const char* text, u64 len) {
-    #ifdef __APPLE__
-        #define WRITE_CODE "0x2000004"
-    #elif defined(__linux__)
-        #define WRITE_CODE "1"
+inline i64 _write(u64 fd, const char* text, u64 len) {
+    #if defined(BASIL_UNIX)
+        #if defined(BASIL_MACOS)
+            #define WRITE_CODE "0x2000004"
+        #elif defined(BASIL_LINUX)
+            #define WRITE_CODE "1"
+        #endif
+        i64 ret = 0;
+        asm volatile (
+            "mov $" WRITE_CODE ", %%rax\n\t"
+            "mov %1, %%rdi\n\t"
+            "mov %2, %%rsi\n\t"
+            "mov %3, %%rdx\n\t"
+            "syscall\n\t"
+            "mov %%rax, %0"
+            : "=r" (ret)
+            : "r" (fd), "r" (text), "r" (len)
+            : "rax", "rdi", "rsi", "rdx"
+        );   
+        return ret;
+    #elif defined(BASIL_WINDOWS)
+        HANDLE hnd = (HANDLE)fd;
+        DWORD ret;
+        WriteFile(hnd, (LPCVOID)text, (DWORD)len, &ret, nullptr);
+        return (i64)ret;
     #endif
-    asm volatile ("mov $" WRITE_CODE ", %%rax\n\t"
-        "mov %0, %%rdi\n\t"
-        "mov %1, %%rsi\n\t"
-        "mov %2, %%rdx\n\t"
-        "syscall\n\t"
-        :
-        : "r" (fd), "r" (text), "r" (len)
-        : "rax", "rdi", "rsi", "rdx"
-    );   
 }
 
-void* memcpy(void* dst, const void* src, unsigned long size) {
+extern "C" void* memcpy(void* dst, const void* src, size_t size) {
     int i = 0;
     while (i < (size & ~7)) *(u64*)dst = *(u64*)src, i += 8;
     while (i < size) *(u8*)dst = *(u8*)src, i ++;

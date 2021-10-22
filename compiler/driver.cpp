@@ -166,7 +166,10 @@ namespace basil {
         functions[symbol_from("#main")] = main_ir;
         for (const auto& [k, v] : root_env()->values) if (v.type.of(K_FUNCTION)) {
             for (const auto& [_, v] : v.data.fn->resolutions) for (const auto& [_, v] : v->insts) {
-                if (v->func && get_ssa_function(v->func)) functions[k] = get_ssa_function(v->func);
+                if (v->func && get_ssa_function(v->func)) {
+                    functions[k] = get_ssa_function(v->func);
+                    if (!functions[k]) err(v->func->pos, "Couldn't lower function '", v->func, "'.");
+                }
             }
         }
         return functions;

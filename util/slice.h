@@ -11,6 +11,7 @@
 #define BASIL_SLICE_H
 
 #include "defs.h"
+#include "panic.h"
 
 template<typename T, typename U>
 struct pair {

@@ -421,8 +421,6 @@ namespace basil {
     }
 
     rc<Form> f_overloaded(i64 precedence, Associativity assoc, const vector<rc<Form>>& overloads) {
-        for (const auto& form : overloads) if (form->kind == FK_TERM)
-            panic("Attempted to construct overloaded form with at least one non-invokable form!");
         rc<Form> form = ref<Form>(FK_OVERLOADED, precedence, assoc);
         vector<rc<Callable>> callables;
         for (rc<Form> form : overloads) {
@@ -449,8 +447,17 @@ namespace basil {
                 }
             }
         }
-        rc<Overloaded> invokable = ref<Overloaded>(callables);
-        form->invokable = invokable;
+        if (callables.size() == 0) {
+            return F_TERM;
+        }
+        else if (callables.size() == 1) {
+            form->kind = FK_CALLABLE;
+            form->invokable = callables[0];
+        }
+        else {
+            rc<Overloaded> invokable = ref<Overloaded>(callables);
+            form->invokable = invokable;
+        }
         return form;
     }
     
@@ -467,8 +474,14 @@ namespace basil {
             }
             if (!found_match) callables.push((rc<Callable>)form->invokable);
         }
-        rc<Overloaded> invokable = ref<Overloaded>(callables);
-        form->invokable = invokable;
+        if (callables.size() == 1) {
+            form->kind = FK_CALLABLE;
+            form->invokable = callables[0];
+        }
+        else {
+            rc<Overloaded> invokable = ref<Overloaded>(callables);
+            form->invokable = invokable;
+        }
         return form;
     }
 
@@ -542,6 +555,16 @@ void write_with_self(stream& io, const basil::Value& self, const rc<basil::Calla
         if (!first) write(io, " ");
         first = false;
         if (p.kind == basil::PK_SELF) write(io, self);
+        else write(io, p);
+    }
+}
+
+void write(stream& io, const rc<basil::Callable>& callable) {
+    bool first = true;
+    for (const basil::Param& p : *callable->parameters) {
+        if (!first) write(io, " ");
+        first = false;
+        if (p.kind == basil::PK_SELF) write(io, "<self>");
         else write(io, p);
     }
 }

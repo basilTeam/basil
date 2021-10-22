@@ -10,6 +10,7 @@
 #include "str.h"
 #include "slice.h"
 #include "io.h"
+#include "panic.h"
 
 void string::free() {
     if (_capacity > 16) delete[] data;

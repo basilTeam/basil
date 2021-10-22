@@ -33,6 +33,14 @@ namespace jasmine {
             XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7
         };
 
+        static const GenericRegister GP_ARGS_WINDOWS[] = {
+            RCX, RDX, R8, R9
+        };
+
+        static const GenericRegister FP_ARGS_WINDOWS[] = {
+            XMM0, XMM1, XMM2, XMM3
+        };
+
         static bitset from_slice(const_slice<GenericRegister> regs) {
             bitset b;
             for (GenericRegister reg : regs) b.insert(reg);
@@ -42,7 +50,9 @@ namespace jasmine {
         static const bitset GP_REGSET = from_slice({ 14, GP_REGS }),
                             FP_REGSET = from_slice({ 16, FP_REGS }),
                             GP_ARGSET_SYSV = from_slice({ 6, GP_ARGS_SYSV }),
-                            FP_ARGSET_SYSV = from_slice({ 8, FP_ARGS_SYSV });
+                            FP_ARGSET_SYSV = from_slice({ 8, FP_ARGS_SYSV }),
+                            GP_ARGSET_WINDOWS = from_slice({ 4, GP_ARGS_WINDOWS }),
+                            FP_ARGSET_WINDOWS = from_slice({ 4, FP_ARGS_WINDOWS });
 
         const_slice<GenericRegister> registers(Kind kind) {
             switch (kind) {
@@ -97,6 +107,8 @@ namespace jasmine {
                     case LINUX: 
                     case MACOS:
                         return { 8, FP_ARGS_SYSV };
+                    case WINDOWS:
+                        return { 4, FP_ARGS_WINDOWS };
                     default:
                         panic("Unimplemented OS!");
                         return { 0, nullptr };
@@ -113,6 +125,8 @@ namespace jasmine {
                     case LINUX: 
                     case MACOS:
                         return { 6, GP_ARGS_SYSV };
+                    case WINDOWS:
+                        return { 6, GP_ARGS_WINDOWS };
                     default:
                         panic("Unimplemented OS!");
                         return { 0, nullptr };
@@ -132,6 +146,8 @@ namespace jasmine {
                     case LINUX: 
                     case MACOS:
                         return FP_ARGSET_SYSV;
+                    case WINDOWS:
+                        return FP_ARGSET_WINDOWS;
                     default:
                         panic("Unimplemented OS!");
                         return EMPTY;
@@ -148,6 +164,8 @@ namespace jasmine {
                     case LINUX: 
                     case MACOS:
                         return GP_ARGSET_SYSV;
+                    case WINDOWS:
+                        return GP_ARGSET_WINDOWS;
                     default:
                         panic("Unimplemented OS!");
                         return EMPTY;
@@ -206,11 +224,11 @@ namespace jasmine {
             switch (insn.opcode) {
                 case OP_DIV:
                 case OP_REM:
-                    if (params[0]) params[0]->hint = some<GenericRegister>(RAX);
+                    if (params[0]) params[0]->hint = some<Location>(loc_reg(RAX));
                     break;
                 case OP_CALL: {
                     // return value hint
-                    if (params[0]) params[0]->hint = target.locate_return_value(params[0]->type.kind).reg;
+                    if (params[0]) params[0]->hint = some<Location>(target.locate_return_value(params[0]->type.kind));
 
                     const bitset& gp = target.parameter_register_set(K_PTR);
                     const bitset& fp = target.parameter_register_set(K_F64);
@@ -219,20 +237,23 @@ namespace jasmine {
                         if (params[i]) {
                             if ((params[i]->type.kind == K_F32 || params[i]->type.kind == K_F64) 
                                 && fp_it != fp.end())
-                                params[i]->hint = some<GenericRegister>(*fp_it), ++ fp_it;
-                            else if ((params[i]->type.kind != K_F32 && params[i]->type.kind != K_F64) 
+                                params[i]->hint = some<Location>(loc_reg(*fp_it)), ++ fp_it;
+                            else if ((params[i]->type.kind != K_F32 && params[i]->type.kind != K_F64 && params[i]->type.kind != K_STRUCT) 
                                 && gp_it != gp.end()) 
-                                params[i]->hint = some<GenericRegister>(*gp_it), ++ gp_it;
+                                params[i]->hint = some<Location>(loc_reg(*gp_it)), ++ gp_it;
                         }
                     }
                     break;
                 }
                 case OP_PARAM: {
                     // println((bool)params[0], " ", params[0] ? (bool)params[0]->param_idx : false);
-                    if (params[0] && params[0]->param_idx) {
-                        params[0]->hint = some<GenericRegister>(
+                    if (params[0] && params[0]->param_idx && params[0]->type.kind != K_STRUCT) {
+                        params[0]->hint = some<Location>(loc_reg(
                             target.parameter_registers(params[0]->type.kind)[*params[0]->param_idx]
-                        );
+                        ));
+                    }
+                    else if (params[0]->type.kind == K_STRUCT) {
+                        params[0]->hint = some<Location>(Location{ LT_PUSHED_R2L, none<GenericRegister>(), none<i64>() });
                     }
                     break;
                 }
@@ -298,6 +319,7 @@ namespace jasmine {
                     else switch (os) {
                         case MACOS:
                         case LINUX:
+                        case WINDOWS:
                             param_locs.push({ LT_PUSHED_R2L, none<GenericRegister>(), none<i64>() });
                             break;
                         default:
@@ -319,6 +341,7 @@ namespace jasmine {
                     else switch (os) {
                         case MACOS:
                         case LINUX:
+                        case WINDOWS:
                             param_locs.push({ LT_PUSHED_R2L, none<GenericRegister>(), none<i64>() });
                             break;
                         default:
@@ -341,7 +364,8 @@ namespace jasmine {
         switch (arch) {
             case X86_64: switch (os) {
                 case MACOS:
-                case LINUX: switch (kind) {
+                case LINUX: 
+                case WINDOWS: switch (kind) {
                     case K_F32:
                     case K_F64:
                         return { LT_REGISTER, some<GenericRegister>(x64::XMM0), none<i64>() };
@@ -386,6 +410,17 @@ namespace jasmine {
             default:
                 panic("Unimplemented architecture!");
                 return;
+        }
+    }
+
+    u64 Target::pointer_size() const {
+        switch (arch) {
+            case X86: return 4;
+            case X86_64: return 8;
+            case AARCH64: return 8;
+            default:
+                panic("Unimplemented architecture!");
+                return 0;
         }
     }
 }

@@ -14,8 +14,8 @@
 #include "util/io.h"
 #include "util/vec.h"
 #include "util/option.h"
-#include "obj.h"
 #include "sym.h"
+#include "target.h"
 
 namespace jasmine {
     enum Opcode {
@@ -62,9 +62,14 @@ namespace jasmine {
         MK_LABEL_TYPE
     };
 
+    struct Context;
+
     struct Type {
         Kind kind : 4;
         u64 id : 60;
+
+        u64 size(const Target& target, const Context& ctx) const;
+        u64 offset(const Target& target, const Context& ctx, i64 field) const;
     };
 
     struct Member {
@@ -138,10 +143,12 @@ namespace jasmine {
         Location loc;
         bitset illegal; // a set of registers this live range is forbidden from binding to
         optional<u32> param_idx = none<u32>(); // which parameter this is
-        optional<GenericRegister> hint = none<GenericRegister>();
+        optional<Location> hint = none<Location>();
 
         LiveRange(Reg reg_in, Type type_in, u64 f, u64 l);
     };
+
+    class Object;
 
     namespace bc {
         Param r(u64 id);
@@ -247,10 +254,10 @@ namespace jasmine {
     Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj);
     vector<Insn> parse_all_insns(Context& context, stream& io);
     vector<Insn> disassemble_all_insns(Context& context, const Object& obj);
-    void assemble_insn(Context& context, Object& obj, const Insn& insn);
-    void print_insn(Context& context, stream& io, const Insn& insn);
+    void assemble_insn(const Context& context, Object& obj, const Insn& insn);
+    void print_insn(const Context& context, stream& io, const Insn& insn);
 
-    Object compile_jasmine(const vector<Insn>& obj, const Target& target);
+    Object compile_jasmine(const Context& ctx, const vector<Insn>& obj, const Target& target);
 }
 
 #endif

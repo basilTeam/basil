@@ -14,6 +14,7 @@
 #include "slice.h"
 #include "vec.h"
 #include "utf8.h"
+#include "panic.h"
 
 class ustring {
     u8* data;

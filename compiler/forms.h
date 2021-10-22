@@ -198,7 +198,7 @@ namespace basil {
         u64 hash();
         
         // internal state used in the state machine
-        u32 index;
+        u32 index = 0;
         bool stopped;
         optional<u64> lazy_hash;
         u32 advances; // number of times this state machine has advanced without error
@@ -336,7 +336,8 @@ namespace basil {
 }
 
 void write(stream& io, const basil::Param& param);
-void write(stream& io, const rc<basil::Form>& param);
+void write(stream& io, const rc<basil::Callable>& callable);
+void write(stream& io, const rc<basil::Form>& form);
 void write_with_self(stream& io, const basil::Value& self, const rc<basil::Callable>& callable);
 void write(stream& io, basil::ParamKind fk);
 void write(stream& io, basil::FormKind fk);

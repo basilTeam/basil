@@ -11,6 +11,7 @@
 #define BASIL_SOURCE_H
 
 #include "util/vec.h"
+#include "util/str.h"
 #include "util/ustr.h"
 #include "util/option.h"
 

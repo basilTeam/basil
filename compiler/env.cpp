@@ -37,6 +37,16 @@ namespace basil {
         }
         else return some<Value&>(it->second);
     }
+    
+    void Env::detach(rc<Env> child) {
+        for (rc<Env>& env : children) if (env.is(child)) {
+            rc<Env> tmp = env;
+            env = children.back();
+            children.back() = tmp;
+            break;
+        }
+        if (children.size()) children.pop(); // remove child
+    }
 
     rc<Env> Env::clone() const {
         rc<Env> dup = ref<Env>(parent);

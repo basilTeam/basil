@@ -9,6 +9,7 @@
 
 #include "sets.h"
 #include "io.h"
+#include "panic.h"
 
 void bitset::grow(u32 n) {
     u64 new_capacity = n;
@@ -76,6 +77,48 @@ void bitset::clear() {
     for (u32 i = 0; i < size / 32; i ++) data[i] = 0;
 }
 
+bool bitset::operator|=(const bitset& other) {
+    bool changed = false;
+    if (size < other.size) grow(other.size), changed = true;
+    for (u32 i = 0; i < other.size / 32; i ++) 
+        changed = (data[i] |= other.data[i]) != data[i] || changed;
+    return changed;
+}
+
+bool bitset::operator&=(const bitset& other) {
+    bool changed = false;
+    for (u32 i = 0; i < size / 32; i ++) 
+        if (i * 32 >= other.size) data[i] = 0, changed = true;
+        else changed = (data[i] &= other.data[i]) != data[i] || changed;
+    return changed;
+}
+
+bool bitset::operator==(const bitset& other) {
+    u32 i = 0, j = 0;
+    for (; i < size / 32; i ++) 
+        if (i * 32 >= size || j * 32 >= other.size) break;
+        else if (data[i] != other.data[i]) return false;
+
+    u32* larger = size > other.size ? data : other.data;
+    u32 larger_size = size > other.size ? size : other.size;
+    for (; i < larger_size / 32; i ++) if (larger[i]) return false;
+
+    return true;
+}
+
+bool bitset::operator!=(const bitset& other) {
+    u32 i = 0, j = 0;
+    for (; i < size / 32; i ++) 
+        if (i * 32 >= size || j * 32 >= other.size) break;
+        else if (data[i] != other.data[i]) return true;
+
+    u32* larger = size > other.size ? data : other.data;
+    u32 larger_size = size > other.size ? size : other.size;
+    for (; i < larger_size / 32; i ++) if (larger[i]) return true;
+    
+    return false;
+}
+
 bitset::const_iterator::const_iterator(const bitset& b_in, u32 i_in): b(b_in), i(i_in) {}
 
 u32 bitset::const_iterator::operator*() const {
@@ -97,9 +140,26 @@ bitset::const_iterator& bitset::const_iterator::operator--() {
 }
 
 bitset::const_iterator& bitset::const_iterator::operator++() {
+#ifdef __builtin_ffsll
+    u32 old_i = i;
+    u32 d = b.data[i / 32] & ~((2 << (i % 32)) - 1); // clear bits below and including starting pos
+    if (d) {
+        i = (i & -32) + __builtin_ffsll(d) - 1;
+        return *this;
+    }
+    for (u32 j = i / 32 + 1; j < b.size / 32; ++ j) {
+        u32 d = b.data[j]; // block at pos
+        if (!d) continue;  // all zeroes means we continue
+        i = j * 32 + __builtin_ffsll(d) - 1;
+        return *this;      // we found the next 1-bit
+    }
+    i = b.size; // if we got to the end without a 1-bit, go to the end
+    return *this;
+#else
     i ++;
     while (i < b.size && !b.contains(i)) i ++;
     return *this;
+#endif 
 }
 
 bitset::const_iterator bitset::begin() const {

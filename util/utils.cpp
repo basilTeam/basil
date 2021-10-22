@@ -10,19 +10,20 @@
 #include "utils.h"
 #include "stdlib.h"
 #include "cxxabi.h"
+#include "panic.h"
 // #ifdef __GNUC__
 // #include "execinfo.h"
 // #endif
 
-void* operator new(unsigned long n) {
+void* operator new(size_t n) {
     return malloc(n);
 }
 
-void* operator new[](unsigned long n) {
+void* operator new[](size_t n) {
     return malloc(n);
 }
 
-void* operator new(unsigned long n, void* p) {
+void* operator new(size_t n, void* p) {
     return p;
 }
 
@@ -30,7 +31,7 @@ void operator delete(void* ptr) {
     free(ptr);
 }
 
-void operator delete(void* ptr, unsigned long n) {
+void operator delete(void* ptr, size_t n) {
     free(ptr);
 }
 
@@ -38,12 +39,8 @@ void operator delete[](void* ptr) {
     free(ptr);
 }
 
-void operator delete[](void* ptr, unsigned long n) {
+void operator delete[](void* ptr, size_t n) {
     free(ptr);
-}
-
-void exit_in_a_panic() {
-    exit(1);
 }
 
 void __cxa_pure_virtual() {

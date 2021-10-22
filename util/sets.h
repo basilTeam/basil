@@ -33,6 +33,11 @@ public:
     bool erase(u32 n);
     void clear();
 
+    bool operator|=(const bitset& other);
+    bool operator&=(const bitset& other);
+    bool operator==(const bitset& other);
+    bool operator!=(const bitset& other);
+
     struct const_iterator {
         const bitset& b;
         u32 i;

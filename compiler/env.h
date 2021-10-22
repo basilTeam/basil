@@ -48,6 +48,10 @@ namespace basil {
         optional<const Value&> find(Symbol name) const;
         optional<Value&> find(Symbol name);
 
+        // Removes a child environment from this environment, causing it to be garbage-collected
+        // if it is not tethered elsewhere.
+        void detach(rc<Env> child);
+
         // Duplicates this environment, creating an identical environment with the same parent.
         rc<Env> clone() const;
         

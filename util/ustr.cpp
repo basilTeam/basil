@@ -11,6 +11,7 @@
 #include "utf8.h"
 #include "str.h"
 #include "io.h"
+#include "hash.h"
 
 void ustring::free() {
     if (_capacity > 12) delete[] data;

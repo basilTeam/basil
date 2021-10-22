@@ -21,6 +21,8 @@ bool __internal_require(jasmine::Architecture arch) {
     return false;
 }
 
+exc_message* error = nullptr;
+
 int main(int argc, char** argv) {
     if (setup_fn) {
         setup_fn();
@@ -34,16 +36,23 @@ int main(int argc, char** argv) {
         test_list = node.next;
         print("Running test '", node.name, "'... ");
         n ++;
-        try {
-            node.callback();
-            if (basil::error_count()) throw exc_message{"Encountered compiler errors!"};
+        
+        node.callback();
+        if (basil::error_count()) error = new exc_message{"Encountered compiler errors!"};
+        if (error) {
+            println("...failed!");
+            println(">\t", error->msg);
+            println("");
+            if (basil::error_count()) {
+                basil::print_errors(_stdout, nullptr);
+                basil::discard_errors();
+            }
+            delete error;
+            error = nullptr;
+        }
+        else {
             println("...passed!");
             c ++;
-        } catch (const exc_message& msg) {
-            println("...failed!");
-            println(">\t", msg.msg);
-            println("");
-            if (basil::error_count()) basil::print_errors(_stdout, nullptr);
         }
     }
     println("");

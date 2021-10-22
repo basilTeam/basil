@@ -11,6 +11,7 @@
 #define BASIL_UTF8_H
 
 #include "defs.h"
+#include "panic.h"
 
 // representation of a single unicode character
 struct rune {

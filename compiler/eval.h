@@ -94,8 +94,9 @@ namespace basil {
     struct PerfInfo {
         struct PerfFrame {
             Value call_term;
+            rc<InstTable> fn;
             u32 count;
-            bool comptime;
+            bool comptime, ismeta;
         };
 
         u32 max_depth, max_count;
@@ -104,7 +105,7 @@ namespace basil {
         PerfInfo();
 
         // Open a perf frame for a function call.
-        void begin_call(const Value& term, u32 base_cost);
+        void begin_call(const Value& term, rc<InstTable> fn, u32 base_cost);
 
         // End call and add its cost to the enclosing call's cost.
         void end_call();
@@ -118,8 +119,19 @@ namespace basil {
         // Get the perf count of the top open frame.
         u32 current_count() const;
 
+        // Mark this call frame (and its descendents) as containing a compile-time-only
+        // operation.
         void make_comptime();
         bool is_comptime() const;
+
+        // Mark this call frame (and its descendents) as evaluated at compile-time,
+        // regardless of the contents (that is, no cost analysis will be done, and
+        // stateful operations are permitted).
+        // Meta call frames are also comptime.
+        void make_meta();
+
+        // I'm so meta even this acronym!
+        bool is_meta() const;
 
         // Return whether the max depth was exceeded within a function call.
         // Also unsets the flag denoting exceeded depth - callers should 

@@ -14,6 +14,7 @@
 #include "util/hash.h"
 #include "util/sets.h"
 #include "x64.h"
+#include "obj.h"
 
 namespace jasmine {
     struct Insn;
@@ -24,6 +25,49 @@ namespace jasmine {
         F32 = { K_F32, 8 }, F64 = { K_F64, 9 }, PTR = { K_PTR, 10 };
 
     static u64 TYPE_ID = 0;
+
+    
+    u64 Type::size(const Target& target, const Context& ctx) const {
+        switch (kind) {
+            case K_U8:
+            case K_I8:
+                return 1;
+            case K_U16:
+            case K_I16:
+                return 2;
+            case K_U32:
+            case K_I32:
+            case K_F32:
+                return 4;
+            case K_U64:
+            case K_I64:
+            case K_F64:
+                return 8;
+            case K_PTR:
+                return target.pointer_size();
+            case K_STRUCT: {
+                u64 sz = 0;
+                for (const auto& member : ctx.type_info[id].members) {
+                    if (member.type) sz += member.type->size(target, ctx) * member.count;
+                    else sz += member.count;
+                }
+                return sz;
+            }
+            default:
+                panic("Unimplemented type kind!");
+                return 0;
+        }
+    }
+
+    u64 Type::offset(const Target& target, const Context& ctx, i64 field) const {
+        u64 acc = 0;
+        for (i64 i = 0; i < field - 1; i ++) {
+            const auto& member = ctx.type_info[id].members[i];
+            if (member.type) acc += member.type->size(target, ctx) * member.count;
+            else acc += member.count;
+        }
+        return acc;
+    }
 
     // Populates an instruction with something from a text representation.
     using Parser = void(*)(Context&, stream&, Insn&);
@@ -79,9 +123,9 @@ namespace jasmine {
     }
 
     void consume_leading_space(stream& io) {
-        while (isspace(io.peek()) && io.peek()) io.read();
+        while (io && isspace(io.peek()) && io.peek()) io.read();
         if (io.peek() == ';') { // comment
-            while (io.peek() && io.read() != '\n');
+            while (io && io.peek() && io.read() != '\n');
             consume_leading_space(io); // continue onto next line
         }
     }
@@ -89,16 +133,16 @@ namespace jasmine {
     void expect(char ch, stream& io) {
         consume_leading_space(io);
         if (io.peek() != ch) {
-            fprintf(stderr, "Expected '%c', got '%c'.\n", ch, io.peek());
+            fprintf(stderr, "[ERROR] Expected '%c', got '%c'.\n", ch, io.peek());
             exit(1);
         }
         else io.read();
     }
 
     string next_string(stream& io) {
-        while (is_separator(io.peek())) io.read();
+        while (io && is_separator(io.peek())) io.read();
         string s;
-        while (!is_separator(io.peek())) s += io.read();
+        while (io && !is_separator(io.peek())) s += io.read();
         return s;
     }
 
@@ -292,7 +336,7 @@ namespace jasmine {
     void parse_variadic_param(Context& context, stream& io, Insn& insn) {
         expect('(', io);
         bool first = true;
-        while (io.peek() != ')') {
+        while (io && io.peek() != ')') {
             if (!first) expect(',', io);
             Type prev = insn.type;
             parse_type(context, io, insn);
@@ -333,7 +377,7 @@ namespace jasmine {
         vector<Member> members;
         expect('{', io);
         bool first = true;
-        while (io.peek() != '}') {
+        while (io && io.peek() != '}') {
             if (!first) expect(',', io);
             members.push(parse_member(context, io));
             first = false;
@@ -354,20 +398,18 @@ namespace jasmine {
         i64 o = i;
         i64 n = 0;
         u8 data[8];
-        while (i >= 4096) {
-            data[n ++] = i % 256;
+        data[n] = i % 16 | (extra_bit ? 1 : 0) << 4;
+        i /= 16;
+        while (i > 0) {
+            data[++ n] = i % 256;
             i /= 256;
         }
-        if (i >= 256) {
-            data[n ++] = i % 256;
-            i /= 256;
-        }
-        if (i >= 16) {
+        if (n >= 8) {
             fprintf(stderr, "[ERROR] Constant integer or id %ld is too big to be encoded within 60 bits!\n", o);
             exit(1);
         }
-        data[n] = i | n << 5 | (extra_bit ? 1 : 0) << 4;
-        while (n >= 0) io.write(data[n --]);
+        data[0] |= n << 5;
+        for (u8 j = 0; j <= n; j ++) io.write(data[j]);
     }
 
     // Disassemblers
@@ -377,10 +419,10 @@ namespace jasmine {
         u8 n = head >> 5 & 7;
         bool bit = head >> 4 & 1;
 
-        i64 acc = head & 15;
+        i64 acc = head & 15, pow = 16;
         while (n > 0) {
-            acc *= 256;
-            acc += buf.read<u8>();
+            acc += i64(buf.read<u8>()) * pow;
+            pow *= 256;
             n --;
         } 
 
@@ -978,17 +1020,27 @@ namespace jasmine {
     Insn parse_insn(Context& context, stream& io) {
         Insn insn;
         string op = next_string(io);
+        string label = "";
+        // println("op = ", op);
         if (io.peek() == ':') {
-            insn.label = some<Symbol>(local((const char*)op.raw()));
+            label = op;
             io.read();
             op = next_string(io);
+            // println("op2 = ", op);
         }
+        // println("op3 = ", op);
         auto it = OPCODE_TABLE.find(op);
         if (it == OPCODE_TABLE.end()) {
+            // println("op4 = ", op);
             fprintf(stderr, "Unknown opcode '%s'.\n", (const char*)op.raw());
             exit(1);
         }
         insn.opcode = it->second;
+        if (label.size()) {
+            insn.label = some<Symbol>(insn.opcode == OP_FRAME ? 
+                global((const char*)label.raw()) : local((const char*)label.raw()));
+        }
+        insn.type = Type{ K_I64, 0 };
         for (const auto& comp : OPS[insn.opcode].components) comp->parser(context, io, insn);
         i64 i = 0;
         for (const auto& comp : OPS[insn.opcode].components) if (comp->validator) {
@@ -1001,8 +1053,10 @@ namespace jasmine {
 
     vector<Insn> parse_all_insns(Context& context, stream& io) {
         vector<Insn> insns;
+        u32 i = 0;
         while (io) {
-            while (io && isspace(io.peek())) io.read(); // consume leading spaces
+            // if (i ++ % 10000 == 0) println("read ", i, " insns");
+            consume_leading_space(io);
             if (io) insns.push(parse_insn(context, io));
         }
         return insns;
@@ -1019,6 +1073,7 @@ namespace jasmine {
         insn.opcode = Opcode(opcode >> 2 & 63);
         insn.type.kind = Kind(typearg & 15);
         if (insn.type.kind == K_STRUCT) insn.type.id = disassemble_60bit(buf).first;
+        else insn.type.id = 0;
 
         ParamKind pk[3];
         pk[0] = ParamKind(opcode & 3);
@@ -1045,7 +1100,7 @@ namespace jasmine {
         return insns;
     }
 
-    void assemble_insn(Context& context, Object& obj, const Insn& insn) {
+    void assemble_insn(const Context& context, Object& obj, const Insn& insn) {
         // [opcode 6         ] [p1 2] [p2 2] [p3 2] [typekind 4]
         if (insn.label) obj.define(*insn.label);
         u8 opcode = (insn.opcode & 63) << 2;
@@ -1062,7 +1117,7 @@ namespace jasmine {
             i = comp->assembler(context, obj, insn, i);
     }
 
-    void print_insn(Context& context, stream& io, const Insn& insn) {
+    void print_insn(const Context& context, stream& io, const Insn& insn) {
         i64 i = 0;
         if (insn.label) write(io, name(*insn.label), ':');
         write(io, "\t", OPCODE_NAMES[insn.opcode]);
@@ -1075,10 +1130,15 @@ namespace jasmine {
         reg(reg_in), type(type_in), first(f), last(l) {}
 
     struct Function {
+        const Context& ctx;
         u64 first, last;
         u64 stack;
         vector<LiveRange> ranges;
+        vector<Location> params;
+        u32 n_params;
         vector<vector<LiveRange*>> starts_by_insn, ends_by_insn, preserved_regs;
+
+        Function(const Context& ctx_in): ctx(ctx_in) {}
 
         void format(const vector<Insn>& insns, stream& io) const {
             for (u64 i = first; i <= last; i ++) {
@@ -1087,7 +1147,7 @@ namespace jasmine {
         }
     };
 
-    vector<Function> find_functions(const vector<Insn>& insns) {
+    vector<Function> find_functions(const Context& ctx, const vector<Insn>& insns) {
         vector<Function> functions;
         optional<Function> fn = none<Function>();
         for (u32 i = 0; i < insns.size(); i ++) {
@@ -1104,7 +1164,7 @@ namespace jasmine {
                     }
                 }
                 if (!fn) {
-                    fn = some<Function>();
+                    fn = some<Function>(ctx);
                     fn->first = i, fn->last = i;
                 }
             }
@@ -1115,12 +1175,6 @@ namespace jasmine {
         if (fn && fn->first != fn->last) functions.push(*fn);
 
         return functions;
-    }
-
-    bool unify(bitset& out, bitset& in) {
-        bool changed = false;
-        for (u32 r : in) changed = out.insert(r) || changed;
-        return changed;
     }
 
     bool destructive(const Insn& in) {
@@ -1134,16 +1188,22 @@ namespace jasmine {
         live = out;
         if (destructive(in)) {
             live.erase(in.params[0].data.reg.id);
-            for (u32 i = 1; i < in.params.size(); i ++) if (in.params[i].kind == PK_REG)
-                live.insert(in.params[i].data.reg.id);
+            for (u32 i = 1; i < in.params.size(); i ++) {
+                if (in.params[i].kind == PK_REG) live.insert(in.params[i].data.reg.id);
+                if (in.params[i].kind == PK_MEM && 
+                    (in.params[i].data.mem.kind == MK_REG_OFF || in.params[i].data.mem.kind == MK_REG_TYPE))
+                    live.insert(in.params[i].data.mem.reg.id);
+            }
         }
         else {
-            for (u32 i = 0; i < in.params.size(); i ++) if (in.params[i].kind == PK_REG)
-                live.insert(in.params[i].data.reg.id);
+            for (u32 i = 0; i < in.params.size(); i ++) {
+                if (in.params[i].kind == PK_REG) live.insert(in.params[i].data.reg.id);
+                if (in.params[i].kind == PK_MEM && 
+                    (in.params[i].data.mem.kind == MK_REG_OFF || in.params[i].data.mem.kind == MK_REG_TYPE))
+                    live.insert(in.params[i].data.mem.reg.id);
+            }
         }
-        for (u32 i : live) if (!old.contains(i)) changed = true;
-        for (u32 i : old) if (!live.contains(i)) changed = true;
-        return changed;
+        return live != old || changed;
     }
 
     void compute_ranges(Function& function, const vector<Insn>& insns) {
@@ -1169,7 +1229,7 @@ namespace jasmine {
                         exit(1);
                     }
 
-                    changed = unify(sets[i - function.first].second, sets[it->second - function.first].first) || changed;
+                    changed |= sets[i - function.first].second |= sets[it->second - function.first].first;
                 }
                 else if (in.opcode >= OP_JEQ && in.opcode < OP_JUMP) { // conditional jump
                     auto it = local_syms.find(in.params[0].data.label);
@@ -1179,11 +1239,11 @@ namespace jasmine {
                         exit(1);
                     }
                     
-                    changed = unify(sets[i - function.first].second, sets[it->second - function.first].first) || changed;
-                    changed = unify(sets[i - function.first].second, sets[i + 1 - function.first].first) || changed;
+                    changed |= sets[i - function.first].second |= sets[it->second - function.first].first;
+                    changed |= sets[i - function.first].second |= sets[i + 1 - function.first].first;
                 }
                 else {
-                    changed = unify(sets[i - function.first].second, sets[i + 1 - function.first].first) || changed;
+                    changed |= sets[i - function.first].second |= sets[i + 1 - function.first].first;
                 }
                 
                 changed = liveout(insns[i], sets[i - function.first].first, sets[i - function.first].second) || changed;
@@ -1199,7 +1259,7 @@ namespace jasmine {
         //         p.kind = PK_REG;
         //         p.data.reg = {false, r};
         //         print(first ? "" : " ");
-        //         print_param({}, p, _stdout, "");
+        //         print_param(function.ctx, p, _stdout, "");
         //         first = false;
         //     }
         //     print("} => {");
@@ -1209,12 +1269,11 @@ namespace jasmine {
         //         p.kind = PK_REG;
         //         p.data.reg = {false, r};
         //         print(first ? "" : " ");
-        //         print_param({}, p, _stdout, "");
+        //         print_param(function.ctx, p, _stdout, "");
         //         first = false;
         //     }
         //     print("}\t");
-        //     Context ctx;
-        //     print_insn(ctx, _stdout, insns[i]);
+        //     print_insn(function.ctx, _stdout, insns[i]);
         // }
         // println("");
 
@@ -1228,7 +1287,7 @@ namespace jasmine {
         for (u64 i = function.first; i <= function.last; i ++) {
             const auto& live = sets[i - function.first];
             for (auto& [reg, range] : ranges) {
-                if (range && (insns[i].type.kind != range->type.kind
+                if (range && range->type.kind != K_STRUCT && (insns[i].type.kind != range->type.kind
                     || (insns[i].type.kind == K_STRUCT && insns[i].type.id != range->type.id))) {
                     fprintf(stderr, "[ERROR] Found inconsistent types for virtual register %%%lu.\n", reg);
                     exit(1);
@@ -1243,7 +1302,10 @@ namespace jasmine {
                     range = none<LiveRange>();
                 }
                 
-                if (range && insns[i].opcode == OP_PARAM) range->param_idx = some<u32>(param_idx ++); // arg
+                if (range && !range->param_idx && insns[i].opcode == OP_PARAM) {
+                    range->param_idx = some<u32>(param_idx), function.n_params ++; // arg
+                    param_idx ++;
+                }
                 
                 if (range && !live.second.contains(reg)) { // range ends this instruction
                     range->last = i;
@@ -1364,13 +1426,14 @@ namespace jasmine {
             for (LiveRange* r : f.starts_by_insn[i - f.first]) {
                 bitset& kregs = *regs[r->type.kind];
                 if (kregs.begin() != kregs.end()) {
-                    auto reg = r->hint ? *r->hint : *kregs.begin();
+                    auto reg = r->hint && r->hint->type == LT_REGISTER ? *r->hint->reg : *kregs.begin();
                     // println("\tallocated %", r->reg.id, " to ", x64::REGISTER_NAMES[reg]);
                     r->loc = loc_reg(reg);
                     kregs.erase(reg);
                     mappings[*r->loc.reg] = r;
                 }
-                else r->loc = loc_stack(-i64(f.stack += 8ul)); // spill
+                else if (!r->param_idx && (!r->hint || r->hint->type == LT_STACK_MEMORY))
+                    r->loc = loc_stack(-i64(f.stack += r->type.size(target, f.ctx))); // spill non-parameters
             }
         }
 
@@ -1381,7 +1444,8 @@ namespace jasmine {
         //     print("register ");
         //     print_param({}, p, _stdout, "");
         //     print(" from ", r.first, " to ", r.last);
-        //     if (r.loc.type == LT_REGISTER) println(" allocated to register %", x64::REGISTER_NAMES[*r.loc.reg]);
+        //     if (r.loc.type == LT_NONE) println(" not yet allocated! (probably a parameter)");
+        //     else if (r.loc.type == LT_REGISTER) println(" allocated to register %", x64::REGISTER_NAMES[*r.loc.reg]);
         //     else println(" spilled to [%rbp - ", -*r.loc.offset, "]");
         // }
         // println("");
@@ -1389,7 +1453,7 @@ namespace jasmine {
 
     // X86_64 Codegen
 
-    optional<x64::Arg> to_x64_arg(const map<u64, LiveRange*>& reg_bindings, const Param& p) {
+    optional<x64::Arg> to_x64_arg(const Target& target, const Function& function, const map<u64, LiveRange*>& reg_bindings, const Param& p) {
         switch (p.kind) {
             case PK_IMM:
                 return some<x64::Arg>(x64::imm(p.data.imm.val));
@@ -1404,18 +1468,49 @@ namespace jasmine {
                 switch (m.kind) {
                     case MK_REG_OFF:
                         if (reg_bindings[m.reg.id]->loc.type == LT_REGISTER) {
-                            return some<x64::Arg>(m64((x64::Register)*reg_bindings[m.reg.id]->loc.reg, m.off));
+                            return some<x64::Arg>(x64::m64((x64::Register)*reg_bindings[m.reg.id]->loc.reg, m.off));
                         }
-                        else {
-                            panic("can't efficiently handle memory parameter");
+                        else if (reg_bindings[m.reg.id]->loc.type == LT_STACK_MEMORY) {
+                            return some<x64::Arg>(x64::m64(x64::RBP, *reg_bindings[m.reg.id]->loc.offset + m.off));
                         }
-                    case MK_REG_TYPE:
-
+                        else if (reg_bindings[m.reg.id]->loc.type == LT_PUSHED_R2L) {
+                            if (function.stack) {
+                                return some<x64::Arg>(x64::m64(x64::RBP, 16 + *reg_bindings[m.reg.id]->loc.offset + m.off));
+                            }
+                            else return some<x64::Arg>(x64::m64(x64::RSP, 8 + *reg_bindings[m.reg.id]->loc.offset + m.off));
+                        }
+                        else return none<x64::Arg>();
+                    case MK_REG_TYPE: {
+                        i64 offset = m.type.offset(target, function.ctx, m.off);
+                        if (reg_bindings[m.reg.id]->loc.type == LT_REGISTER) {
+                            return some<x64::Arg>(m64((x64::Register)*reg_bindings[m.reg.id]->loc.reg, offset));
+                        }
+                        else if (reg_bindings[m.reg.id]->loc.type == LT_STACK_MEMORY) {
+                            return some<x64::Arg>(m64(x64::RBP, *reg_bindings[m.reg.id]->loc.offset + offset));
+                        }
+                        else if (reg_bindings[m.reg.id]->loc.type == LT_PUSHED_R2L) {
+                            if (function.stack) {
+                                return some<x64::Arg>(x64::m64(x64::RBP, 16 + *reg_bindings[m.reg.id]->loc.offset + offset));
+                            }
+                            else return some<x64::Arg>(x64::m64(x64::RSP, 8 + *reg_bindings[m.reg.id]->loc.offset + offset));
+                        }
+                        else return none<x64::Arg>();
+                    }
                     case MK_LABEL_OFF:
+                        // if (reg_bindings[m.reg.id]->loc.type == LT_REGISTER) {
+                        //     return some<x64::Arg>(m64((x64::Register)*reg_bindings[m.reg.id]->loc.reg, m.off));
+                        // }
+                        // else 
+                        return none<x64::Arg>();
                     case MK_LABEL_TYPE:
-                        break;
+                        // if (reg_bindings[m.reg.id]->loc.type == LT_REGISTER) {
+                        //     return some<x64::Arg>(m64((x64::Register)*reg_bindings[m.reg.id]->loc.reg, m.off));
+                        // }
+                        // else 
+                        return none<x64::Arg>();
+                    default:
+                        return none<x64::Arg>();
                 }
-                return some<x64::Arg>(x64::imm(0));
             }
             case PK_LABEL:
                 return some<x64::Arg>(x64::label32(p.data.label));
@@ -1708,6 +1803,24 @@ namespace jasmine {
         using namespace x64;
         writeto(obj);        
 
+        // place parameters
+        vector<Kind> param_kinds;
+        vector<LiveRange*> param_ranges;
+        for (u32 i = 0; i < f.n_params; i ++) param_ranges.push(nullptr), param_kinds.push(K_I64);
+        for (LiveRange& r : f.ranges) if (r.param_idx) {
+            param_ranges[*r.param_idx] = &r;
+            param_kinds[*r.param_idx] = r.type.kind;
+        }
+        vector<Location> param_locs = obj.get_target().place_parameters(param_kinds);
+        i64 push_offset = 0;
+        for (LiveRange* r : param_ranges) {
+            r->loc = param_locs[*r->param_idx];
+            if (r->loc.type == LT_PUSHED_R2L) {
+                r->loc.offset = some<i64>(push_offset);
+                push_offset += r->type.size(obj.get_target(), f.ctx);
+            }
+        }
+
         static vector<x64::Arg> args;
         map<u64, LiveRange*> reg_bindings;
         for (u32 i = f.first; i <= f.last; i ++) {
@@ -1725,7 +1838,7 @@ namespace jasmine {
             bool useless = false; // useless instructions can happen when 
                                   // the destination of this instruction is unused
             for (const Param& p : insn.params) {
-                auto arg = to_x64_arg(reg_bindings, p);
+                auto arg = to_x64_arg(obj.get_target(), f, reg_bindings, p);
                 if (!arg) useless = true;
                 else args.push(*arg);
             }
@@ -1735,17 +1848,18 @@ namespace jasmine {
         }
     }
     
-    Object compile_jasmine(const vector<Insn>& insns_in, const Target& target) {
+    Object compile_jasmine(const Context& ctx, const vector<Insn>& insns_in, const Target& target) {
         vector<Insn> insns = insns_in;
 
         // platform-independent analysis
-        vector<Function> functions = find_functions(insns);
+        vector<Function> functions = find_functions(ctx, insns);
         for (Function& f : functions) compute_ranges(f, insns);
 
         // associate virtual registers with native ones
         for (Function& f : functions) allocate_registers(f, insns, target);
 
         Object obj(target); // create our destination object
+        obj.set_context(ctx);
 
         // generate native instructions
         switch (target.arch) {

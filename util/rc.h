@@ -12,6 +12,7 @@
 
 #include "defs.h"
 #include "io.h"
+#include "panic.h"
 
 template<typename T>
 class rc final {
@@ -117,6 +118,10 @@ public:
 
   u64 count() const {
     return _data ? *(u64*)_data : 0;
+  }
+
+  void manual_inc() {
+    if (_data) ++ *(u64*)_data;
   }
 
   void manual_dec() {

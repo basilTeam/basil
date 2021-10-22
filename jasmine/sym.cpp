@@ -52,5 +52,5 @@ namespace jasmine {
 
 template<>
 u64 hash(const jasmine::Symbol& symbol) {
-    return raw_hash(symbol);
+    return hash<u64>((u64)symbol.id | (u64)symbol.type << 32);
 }

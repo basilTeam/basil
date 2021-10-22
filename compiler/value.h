@@ -48,6 +48,8 @@ namespace basil {
     struct Dict;
     struct Intersect;
     struct Function;
+    struct FormFn;
+    struct FormIsect;
     struct Alias;
     struct Macro;
     struct Module;
@@ -92,6 +94,8 @@ namespace basil {
 
             Symbol undefined_sym; // Not used in operations. Stores the variable name associated
                                   // with an undefined value.
+            rc<FormFn> fl_fn;
+            rc<FormIsect> fl_isect;
 
             Data(Kind kind);
             Data(Kind kind, const Data& other);
@@ -134,6 +138,8 @@ namespace basil {
         friend Value v_void(Source::Pos);
         friend Value v_error(Source::Pos);
         friend Value v_undefined(Source::Pos, Symbol, rc<Form>);
+        friend Value v_form_fn(Source::Pos, Type, rc<Env>, rc<Form>, const vector<Symbol>&, const Value&);
+        friend Value v_form_isect(Source::Pos, Type, rc<Form>, map<rc<Form>, Value>&&);
         friend Value v_string(Source::Pos, const ustring&);
         friend Value v_cons(Source::Pos, Type, const Value&, const Value&);
         friend Value v_list(Source::Pos, Type, vector<Value>&&);
@@ -143,14 +149,14 @@ namespace basil {
         friend Value v_named(Source::Pos, Type, const Value&);
         friend Value v_struct(Source::Pos, Type, map<Symbol, Value>&&);
         friend Value v_dict(Source::Pos, Type, map<Value, Value>&&);
-        friend Value v_tail(const Value& list);
-        friend Value v_intersect(Source::Pos, Type, map<Type, Value>&& values);
+        friend Value v_tail(const Value&);
+        friend Value v_intersect(Source::Pos, Type, map<Type, Value>&&);
         friend Value v_module(Source::Pos, rc<Env>);
-        friend Value v_func(const Builtin& builtin);
+        friend Value v_func(const Builtin&);
         friend Value v_func(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_func(Source::Pos, Symbol, Type, rc<Env>, const vector<Symbol>&, const Value&);
-        friend Value v_alias(Source::Pos pos, const Value& term);
-        friend Value v_macro(const Builtin& builtin);
+        friend Value v_alias(Source::Pos, const Value&);
+        friend Value v_macro(const Builtin&);
         friend Value v_macro(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_runtime(Source::Pos, Type, rc<AST>);
     };
@@ -227,7 +233,7 @@ namespace basil {
     };
 
     struct FormTuple {
-        u64 hash;
+        u64 hash = 0;
         vector<rc<Form>> forms;
 
         void compute_hash();
@@ -255,6 +261,7 @@ namespace basil {
         rc<Value> base;
         map<Type, rc<FnInst>> insts;
         map<Type, u32> is_inst;
+        u32 resolving = 0;
 
         InstTable(rc<Env> local, rc<Value> base_in);
 
@@ -264,21 +271,40 @@ namespace basil {
         // function stub instead.
         bool is_instantiating(Type args_type) const;
 
+        // Returns whether or not this function is currently resolving its body form.
+        bool is_resolving() const;
+
         rc<FnInst> inst(const Function& fn, Type args_type);
     };
 
-    // Represents the associated data for a function.
-    struct Function {
-        optional<const Builtin&> builtin; // builtin behavior, if necessary
-
-        optional<Symbol> name; // the name of the function, if we can figure it out
+    struct AbstractFunction {
         rc<Env> env; // the local environment of the function
         vector<Symbol> args; // names of the non-keyword arguments of the function
         Value body; // body expression of the base function (as declared, prior to form resolution)
         map<FormTuple, rc<InstTable>> resolutions; // stores instantiations by form
 
+        AbstractFunction(rc<Env> env, const vector<Symbol>& args, const Value& body);  
+    };
+
+    // Represents the associated data for a function.
+    struct Function : public AbstractFunction {
+        optional<const Builtin&> builtin; // builtin behavior, if necessary
+        optional<Symbol> name; // the name of the function, if we can figure it out
+
         Function(optional<Symbol> name, optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
         rc<FnInst> inst(Type args_type, const Value& args);
+    };
+
+    // Represents the associated data for an undefined (form-level) function.
+    struct FormFn : public AbstractFunction {
+        FormFn(rc<Env> env, const vector<Symbol>& args, const Value& body);
+    };
+
+    // Represents the associated data for an overloaded value (form-level intersection).
+    struct FormIsect {
+        map<rc<Form>, Value> overloads;
+
+        FormIsect(const map<rc<Form>, Value>& overloads);
     };
 
     // Represents the associated data for an alias.
@@ -345,6 +371,17 @@ namespace basil {
     // Undefined values are used to represent variables that aren't known to have real
     // initial values yet, but have known forms during the form resolution phase.
     Value v_undefined(Source::Pos pos, Symbol name, rc<Form> form);
+
+    // Constructs a form-level function value with the provided attributes.
+    Value v_form_fn(Source::Pos pos, Type type, rc<Env> env, rc<Form> form, 
+        const vector<Symbol>& args, const Value& body);
+
+    // Constructs an form-level intersection value with the provided attributes.
+    Value v_form_isect(Source::Pos pos, Type type, rc<Form> form, map<rc<Form>, Value>&& overloads);
+    template<typename ...Args>
+    Value v_form_isect(Source::Pos pos, Type type, rc<Form> form, const Args&... args) {
+        return basil::v_form_isect(pos, type, form, map_of<rc<Form>, Value>(args...));
+    }
 
     // Constructs a string value.
     Value v_string(Source::Pos pos, const ustring& str);
@@ -667,8 +704,8 @@ namespace basil {
     // Returns the most appropriate body term for the function, given the provided
     // arguments. Specifically, this handles things like avoiding duplicate form
     // resolution.
-    rc<InstTable> v_resolve_body(Function& fn, const Value& args);
-    rc<InstTable> v_resolve_body(Function& fn, const vector<rc<Form>>& args);
+    rc<InstTable> v_resolve_body(AbstractFunction& fn, const Value& args);
+    rc<InstTable> v_resolve_body(AbstractFunction& fn, const vector<rc<Form>>& args);
 }
 
 void write(stream& io, const basil::Value& value);

@@ -15,7 +15,7 @@
 
 namespace basil {
     Builtin
-        DEF, DEF_TYPED, LAMBDA, DO, EVAL, QUOTE, INFIX_DEF, // special forms, core behavior
+        DEF, DEF_TYPED, LAMBDA, DO, META, EVAL, QUOTE, INFIX_DEF, // special forms, core behavior
         IMPORT, MODULE, USE, USE_AS, // modules
         AT_MODULE, AT_TUPLE, AT_ARRAY, DOT, // accessors
         IF, IF_ELSE, WHILE, ARROW, MATCHES, MATCH, // conditionals
@@ -48,6 +48,11 @@ namespace basil {
         PREC_STRUCTURE = -500, // program structure stuff like def, macro, and use
         PREC_QUOTE = -600; // quote and splice and similar constructs
 
+    // Helper to keep the correct type when ORing builtin flags together.
+    BuiltinFlags operator|(BuiltinFlags lhs, BuiltinFlags rhs) {
+        return BuiltinFlags(u64(lhs) | u64(rhs));
+    }
+
     // Represents a single parameter in a definition parameter list.
     struct ParamEntry {
         Symbol name;
@@ -56,10 +61,121 @@ namespace basil {
         list_iterator next;
     };
 
+    // Adds non-intersect value as an overload to an existing value. THe two values must
+    // have distinct types and have the same form.
+    Value add_type_overload(Source::Pos pos, const Value& existing, const Value& fresh) {
+        // println("adding type overload to ", existing, ": ", fresh);
+        if (existing.type == fresh.type) panic("Tried to add type overload with identical type!");
+        if (existing.form != fresh.form) panic("Tried to add type overload with different form!");
+        vector<Type> types;
+        map<Type, Value> values;
+        if (existing.type.of(K_INTERSECT)) {
+            types = t_intersect_members(existing.type);
+            values = existing.data.isect->values;
+            types.push(fresh.type);
+            values[fresh.type] = fresh;
+            return v_intersect(pos, t_intersect(types), move(values));
+        }
+        else {
+            types = vector_of<Type>(existing.type, fresh.type);
+            values = map_of<Type, Value>(existing.type, existing, fresh.type, fresh);
+            return v_intersect(pos, t_intersect(types), move(values));
+        }
+    }
+
+    // Adds non-form-intersect value fresh as an overload to an existing value. The two values
+    // must have distinct forms.
+    Value add_form_overload(Source::Pos pos, const Value& existing, const Value& fresh) {
+        // println("adding form overload to ", existing, ": ", fresh);
+        if (existing.form == fresh.form) panic("Tried to add form overload with identical form!");
+        i64 prec = existing.form->precedence;
+        Associativity assoc = existing.form->assoc;
+        rc<Form> new_form = f_overloaded(prec, assoc, existing.form, fresh.form);
+        map<rc<Form>, Type> types;
+        map<rc<Form>, Value> values;
+        if (existing.type.of(K_FORM_ISECT)) {
+            types = t_form_isect_members(existing.type);
+            values = existing.data.fl_isect->overloads;
+            types[fresh.form] = fresh.type;
+            values[fresh.form] = fresh;
+            return v_form_isect(pos, t_form_isect(types), new_form, move(values));
+        }
+        else {
+            types[existing.form] = existing.type;
+            values[existing.form] = existing;
+            types[fresh.form] = fresh.type;
+            values[fresh.form] = fresh;
+            return v_form_isect(pos, t_form_isect(types), new_form, move(values));
+        }
+    }
+
+    // Unifies two values representing functions, which may or may not be fully-defined.
+    // In general, this function intends to:
+    //  - Replace undefined/form-level versions of functions with their concrete values.
+    //  - Merge values with different forms into form-level intersections.
+    //  - Merge values with different types into type-level intersections.
+    //  - Return an error value if an incompatibility is observed.
+    Value merge_defs(Source::Pos pos, rc<Env> env, optional<const Value&> existing, const Value& fresh) {
+        if (!existing) return fresh;
+        else if (fresh.type.of(K_UNDEFINED)) return *existing; // skip undefined values
+        else if (existing->type.of(K_UNDEFINED)) return fresh; // replace undefined values with fresh ones
+        else if (existing->type.of(K_FORM_FN)) {
+            if (fresh.form == existing->form) {
+                // reuse properties if possible
+                if (fresh.type.of(K_FUNCTION)) 
+                    *(rc<AbstractFunction>)fresh.data.fn = *(rc<AbstractFunction>)existing->data.fl_fn;
+                if (fresh.type.of(K_FORM_FN)) 
+                    *(rc<AbstractFunction>)fresh.data.fl_fn = *(rc<AbstractFunction>)existing->data.fl_fn;
+                return fresh; // replace undefined functions if the forms are the same
+            }
+            else return add_form_overload(pos, *existing, fresh); // add new overload
+        }
+        else if (existing->type.of(K_FORM_ISECT)) {
+            auto found = t_overload_for(existing->type, fresh.form);
+            if (found) {
+                auto types = t_form_isect_members(existing->type);
+                auto cases = existing->data.fl_isect->overloads;
+                // recursively match against existing case
+                Value merged = merge_defs(pos, env, some<const Value&>(cases[fresh.form]), fresh);
+                if (merged.type == T_ERROR) return merged;
+                else {
+                    types[fresh.form] = merged.type;
+                    cases[fresh.form] = merged;
+                    return v_form_isect(pos, t_form_isect(types), existing->form, move(cases));
+                }
+            }
+            else {
+                return add_form_overload(pos, *existing, fresh);
+            }
+        }
+        else if (existing->type.of(K_FUNCTION)) {
+            if (existing->form != fresh.form) {
+                return add_form_overload(pos, *existing, fresh); // add form overload
+            }
+            else if (fresh.type.of(K_FORM_FN) || fresh.type.of(K_UNDEFINED)) 
+                return *existing; // ignore form fn if we already have a concrete function
+            else {
+                return add_type_overload(pos, *existing, fresh); // do type-level overload
+            }
+        }
+        else if (existing->type.of(K_INTERSECT)) {
+            if (existing->form != fresh.form) {
+                return add_form_overload(pos, *existing, fresh); // add form overload
+            }
+            else if (fresh.type.of(K_UNDEFINED) || fresh.type.of(K_FORM_FN)) 
+                return *existing; // ignore form fn if we already have a concrete intersect
+            else {
+                return add_type_overload(pos, *existing, fresh); // do type-level overload
+            }
+        }
+        else panic("Couldn't merge defs!");
+        return v_error({});
+    }
+
     // Helper for parse_params, parses a single parameter and adds it to the appropriate lists, returning
     // the iterator just after the parameter. If an error is occurred, returns an entry with type T_ERROR.
     ParamEntry parse_param(rc<Env> env, list_iterator it, list_iterator end, 
-        bool& has_self, Value& self, bool is_lambda, bool do_types) {
+        bool& has_self, Value& self, bool do_types) {
         ParamEntry ERROR = { S_NONE, T_ERROR, P_SELF, it };
         Value v = *it ++;
         if (v.type == T_SYMBOL) {
@@ -79,18 +195,12 @@ namespace basil {
                 }
                 return { v.data.sym, t_list(T_ANY), p_variadic(v.data.sym), ++ it };
             }
-            else if (!is_lambda) { // keyword
-                if (!has_self) {
-                    self = v; // treat first keyword as self
-                    has_self = true;
-                    return { v.data.sym, T_ANY, P_SELF, it };
-                }
-                else return { v.data.sym, T_ANY, p_keyword(v.data.sym), it }; 
+            else if (!has_self) {
+                self = v; // treat first keyword as self
+                has_self = true;
+                return { v.data.sym, T_ANY, P_SELF, it };
             }
-            else {
-                err(it->pos, "Keywords are not permitted in lambda parameter list.");
-                return ERROR;
-            }
+            else return { v.data.sym, T_ANY, p_keyword(v.data.sym), it }; // keyword
         }
         else if (v.type.of(K_LIST)) { // non-empty list
             const Value& vh = v_head(v);
@@ -110,56 +220,57 @@ namespace basil {
                     return ERROR;
                 }
                 bool variadic = false;
-                if (it->type == T_SYMBOL && it->data.sym == S_ELLIPSIS) 
+                if (it != end && it->type == T_SYMBOL && it->data.sym == S_ELLIPSIS) 
                     variadic = true, it ++; // consume ellipsis
-                if (it->type != T_SYMBOL || it->data.sym != S_QUESTION) {
+                if (it == end || it->type != T_SYMBOL || it->data.sym != S_QUESTION) {
                     err(v.pos, "Expected '?' symbol after quoted parameter name, but '", *it, "' was provided.");
                     return ERROR;
                 }
                 Symbol name = v_head(vt).data.sym;
                 return { 
                     name, variadic ? t_list(T_ANY) : T_ANY, 
-                    variadic ? p_quoted_variadic(name) : p_quoted(name), ++ it 
+                    variadic ? p_quoted_variadic(name) : p_quoted(name), ++ it // consume question mark 
                 };
             }
-            else if (vh.type == T_SYMBOL && vh.data.sym == S_QUESTION) { // quoted argument
-                Value questioned = v_list(v.pos, t_list(T_ANY), vh);
-                auto sub_iter = iter_list(v_tail(v));
-                for (const auto& v : sub_iter) questioned = v_cons(v.pos, questioned.type, v, questioned);
-                sub_iter = iter_list(questioned);
-                auto sub_it = sub_iter.begin(), sub_end = sub_iter.end();
-                return parse_param(env, sub_it, sub_end, has_self, self, is_lambda, do_types);
-            }
             else {
-                resolve_form(env, v);
-                const Value& vh = v_head(v);
-                if (vh.type == T_SYMBOL) {
-                    if (vh.data.sym == S_COLON) { // annotation
-                        auto sub_iter = iter_list(v);
-                        auto sub_it = sub_iter.begin(), sub_end = sub_iter.end();
-                        ++ sub_it;
-                        ParamEntry entry = parse_param(env, sub_it, sub_end, has_self, self, is_lambda, do_types);
-                        if (entry.param.kind == PK_KEYWORD || entry.param.kind == PK_SELF) {
-                            err(vh.pos, "Expected some kind of variable parameter in annotation, found keyword '", 
-                                entry.name, "' instead.");
-                            return ERROR;
-                        }
-                        if (sub_it == sub_end) {
-                            err(v.pos, "No type expression was provided in annotated parameter.");
-                            return ERROR;
-                        }
-                        if (do_types) {
-                            Value ann_type = eval(env, *sub_it);
-                            if (!ann_type.type.coerces_to(T_TYPE)) {
-                                err(sub_it->pos, "Expected type expression in annotated parameter, found value '", 
-                                    ann_type, "' of type '", ann_type.type, "' instead.");
-                                return ERROR;
-                            }
-                            entry.type = coerce(env, ann_type, T_TYPE).data.type;
-                        }
-                        entry.next = it;
-                        return entry;
+                auto sub_iter = iter_list(v);
+                auto sub_it = sub_iter.begin(), sub_end = sub_iter.end();
+                // parse first param
+                ParamEntry entry = parse_param(env, sub_it, sub_end, has_self, self, do_types);
+                sub_it = entry.next;
+
+                if (entry.type == T_ERROR) return ERROR;
+                if (entry.param.kind == PK_KEYWORD || entry.param.kind == PK_SELF) {
+                    err(vh.pos, "Expected variable pattern in parameter list, found keyword '", 
+                        entry.name, "' instead.");
+                    return ERROR;
+                }
+
+                entry.next = it;
+                if (sub_it == sub_end) {
+                    return entry; // no annotation or anything
+                }
+                if (sub_it->type == T_SYMBOL && sub_it->data.sym == S_COLON) { // annotation
+                    ++ sub_it;
+                    if (sub_it == sub_end) {
+                        err(v.pos, "Expected type expression in annotated parameter.");
+                        return ERROR;
                     }
+                    if (do_types) {
+                        vector<Value> expr_parts;
+                        while (sub_it != sub_end) expr_parts.push(*sub_it ++);
+                        Value term = v_list(span(expr_parts.front().pos, expr_parts.back().pos), 
+                            t_list(T_ANY), move(expr_parts));
+                        Value ann_type = eval(env, term);
+                        if (ann_type.type == T_ERROR) return ERROR;
+                        if (!ann_type.type.coerces_to(T_TYPE)) {
+                            err(sub_it->pos, "Expected type expression in annotated parameter, found value '", 
+                                ann_type, "' of type '", ann_type.type, "' instead.");
+                            return ERROR;
+                        }
+                        entry.type = coerce(env, ann_type, T_TYPE).data.type;
+                    }
+                    return entry;
                 }
                 err(v.pos, "Unexpected list term in parameter list: expected quotation, variadic, or annotation; ",
                     "found '", v, "' instead.");
@@ -181,13 +292,13 @@ namespace basil {
     Value parse_params(rc<Env> env, list_iterator begin, list_iterator end, vector<Symbol>& args, 
         vector<Type>& arg_types, vector<Param>& params, bool is_lambda, bool do_types) {
         auto it = begin;
-        bool has_self = false;
+        bool has_self = is_lambda;
         Value self;
         Source::Pos last_pos;
 
         while (it != end) {
             last_pos = it->pos;
-            ParamEntry entry = parse_param(env, it, end, has_self, self, is_lambda, do_types);
+            ParamEntry entry = parse_param(env, it, end, has_self, self, do_types);
             if (entry.type == T_ERROR) return v_error({});
             if (entry.param.kind != PK_KEYWORD && entry.param.kind != PK_SELF) {
                 args.push(entry.name);
@@ -213,12 +324,18 @@ namespace basil {
     // Handles form-level predefinition.
     template<bool HAS_TYPE>
     rc<Form> define_form(rc<Env> env, const Value& term) {
-        Value params = v_head(v_tail(term)), next = v_head(v_tail(v_tail(term))), body = HAS_TYPE ? 
-            v_head(v_tail(v_tail(v_tail(v_tail(term))))) : v_head(v_tail(v_tail(term)));
+        Value params = v_head(v_tail(term)), next = v_head(v_tail(v_tail(term)));
+        auto iterable = iter_list(term);
+        list_iterator a = iterable.begin(), b = iterable.begin();
+        ++ a;
+        while (a != iterable.end()) ++ a, ++ b;
+        Value body = *b; // body is last term
+        body = v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body);
         if (next.type == T_SYMBOL && (next.data.sym == S_ASSIGN || next.data.sym == S_OF || next.data.sym == S_COLON)) { // defining var
             if (params.type != T_SYMBOL) {
                 return F_TERM;
             }
+            resolve_form(env, body);
             Symbol name = params.data.sym;
             if (!env->find(name)) env->def(name, v_undefined(term.pos, name, body.form)); // define a placeholder variable
         }
@@ -239,46 +356,16 @@ namespace basil {
 
             auto location = locate(env, result.data.sym); // try and find existing definitions
 
+            rc<Env> fn_env = extend(env); // extend parent environment
+            Value fn_val = v_form_fn(term.pos, t_form_fn(arg_types.size()), fn_env, form, arg_names, body);
+
             if (!location) { // fresh definition
-                env->def(result.data.sym, v_undefined(term.pos, result.data.sym, form)); // define a placeholder function
+                env->def(result.data.sym, fn_val); // define a placeholder function
                 return F_TERM;
             }
 
-            if (!location->is(env)) { // redefining further removed definition
-                env->def(result.data.sym, *((*location)->find(result.data.sym))); // define symbol locally
-            }
-
-            auto existing = *env->find(result.data.sym);
-
-            rc<Form> existing_form = existing.form;
-            if (form->assoc != existing_form->assoc) {
-                form->assoc = existing_form->assoc;
-                // err(term.pos, "Tried to define overload of function '", result.data.sym, "' with different ",
-                //     "associativity: existing form is ", existing_form->assoc == ASSOC_LEFT ? "left" : "right", 
-                //     " associative, while new form is ", form->assoc == ASSOC_LEFT ? "left" : "right", " associative.");
-                // return F_TERM;
-            }
-            if (form->precedence != existing_form->precedence) {
-                form->precedence = existing_form->precedence;
-                // err(term.pos, "Tried to define overload of function '", result.data.sym, "' with different ",
-                //     "precedence: existing form has precedence ", existing_form->precedence, " while new form has ", 
-                //     "precedence ", form->precedence, ".");
-                // return F_TERM;
-            }
-
-            rc<Form> overloaded;
-            if (existing_form->kind == FK_CALLABLE) {
-                overloaded = f_overloaded(form->precedence, form->assoc, form, existing_form);
-                env->def(result.data.sym, v_intersect(existing.pos, t_intersect(existing.type, T_UNDEFINED),
-                    existing.type, existing, T_UNDEFINED, v_undefined(term.pos, result.data.sym, form)).with(overloaded));
-            }
-            else if (existing_form->kind == FK_OVERLOADED) {
-                overloaded = f_overloaded(form->precedence, form->assoc, existing_form, form);
-                auto values = existing.data.isect->values;
-                values.put(T_UNDEFINED, v_undefined(term.pos, result.data.sym, form));
-                env->def(result.data.sym, v_intersect(existing.pos, t_intersect_with(existing.type, T_UNDEFINED),
-                    move(values)).with(overloaded));
-            }
+            Value merged = merge_defs(term.pos, env, env->find(result.data.sym), fn_val);
+            if (merged.type != T_ERROR) env->def(result.data.sym, merged);
         }
         return F_TERM; // def forms are not further applicable
     }
@@ -286,6 +373,7 @@ namespace basil {
     // Handles a value-level definition.
     Value define(rc<Env> env, const Value& args, optional<Value> type_expr) {
         Value params = v_at(args, 0), body = v_at(args, type_expr ? 2 : 1);
+        body = v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body);
         if (params.type != T_VOID && v_tail(params).type == T_VOID) { // defining var
             params = v_head(params);
             if (params.type != T_SYMBOL) {
@@ -347,72 +435,10 @@ namespace basil {
             Value func = v_func(args.pos, result.data.sym, fntype, fn_env, arg_names, 
                 v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body)).with(form);
 
-            auto it = env->find(result.data.sym); // look for existing definition
-            if (!it || it->type == T_UNDEFINED) { // fresh definition
-                // even if we previously defined the value with an overloaded form during form resolution,
-                // we don't know that those same definitions will occur during evaluation (due to control
-                // flow, loops, etc). so, we start out with just a callable form again, and overload it
-                // as we find new definitions.
-                env->def(result.data.sym, func);
-            }
-            else {
-                Value existing = *it;      
-                rc<Form> existing_form = existing.form;      
-                if (form->assoc != existing_form->assoc) {
-                    form->assoc = existing_form->assoc;
-                    // err(term.pos, "Tried to define overload of function '", result.data.sym, "' with different ",
-                    //     "associativity: existing form is ", existing_form->assoc == ASSOC_LEFT ? "left" : "right", 
-                    //     " associative, while new form is ", form->assoc == ASSOC_LEFT ? "left" : "right", " associative.");
-                    // return F_TERM;
-                }
-                if (form->precedence != existing_form->precedence) {
-                    form->precedence = existing_form->precedence;
-                    // err(term.pos, "Tried to define overload of function '", result.data.sym, "' with different ",
-                    //     "precedence: existing form has precedence ", existing_form->precedence, " while new form has ", 
-                    //     "precedence ", form->precedence, ".");
-                    // return F_TERM;
-                }
-                if (existing.type.of(K_FUNCTION)) {
-                    // if (existing.type == fntype && *existing_form == *form) {
-                    //     err(params.pos, "Tried to define overload with type '", fntype, "' for function '",
-                    //         result.data.sym, "', but an overload with that type already exists.");
-                    //     return v_error({});
-                    // }
-                    auto overloaded = f_overloaded(
-                        existing.form->precedence, existing.form->assoc, 
-                        form, existing.form
-                    );
-                    // println("existing form = ", existing.form, ", func form = ", form);
-                    // println("unified ", existing.form, " and ", form, " to ", overloaded);
-                    // we aren't checking that the overloaded is present here because we assume
-                    // we would have caught such errors in the broader form resolution phase.
-                    Value isect = v_intersect(existing.pos, t_intersect(existing.type, fntype), 
-                        existing.type, existing, fntype, func).with(overloaded);
-                    env->def(result.data.sym, isect); // redefine as intersect
-                }
-                else if (existing.type.of(K_INTERSECT)) {
-                    // if (t_intersect_has(existing.type, fntype)) {
-                    //     println("existing = ", existing);
-                    //     err(params.pos, "Tried to define overload with type '", fntype, "' for function '",
-                    //         result.data.sym, "', but an overload with that type already exists.");
-                    //     return v_error({});
-                    // }
-                    auto overloaded = f_overloaded(form->precedence, form->assoc, existing.form, form);
-                    // println("existing form = ", existing.form, ", func form = ", form);
-                    // println("unified ", existing.form, " and ", form, " to ", overloaded);
-                    auto existing_values = existing.data.isect->values;
-                    existing_values.erase(T_UNDEFINED);
-                    existing_values.put(fntype, func);
-                    env->def(result.data.sym, v_intersect(existing.pos, 
-                        t_intersect_with(t_intersect_without(existing.type, T_UNDEFINED), fntype),
-                        move(existing_values)).with(overloaded));
-                }
-                else {
-                    err(params.pos, "Could not define function '", result.data.sym, "': name is already ",
-                        "defined as non-function type '", existing.type, "'.");
-                    return v_error({});
-                }
-            }
+            Value merged = merge_defs(params.pos, env, env->find(result.data.sym), func);
+            // println("merged new def ", func, " to get ", merged);
+            if (merged.type == T_ERROR) return merged;
+            else env->def(result.data.sym, merged);
 
             return v_void(args.pos); // define doesn't return a value
         }
@@ -677,6 +703,31 @@ namespace basil {
         return at_form(env, mod, v_at(v, 0));
     }
 
+    rc<Form> do_form(rc<Env> env, const Value& term) {                
+        auto iterable = iter_list(term);
+        auto a = iterable.begin(), b = a;
+        ++ b;
+        while (b != iterable.end()) ++ a, ++ b; // loop until the end
+        if (a == iterable.begin()) return F_TERM; // empty do is term
+        return a->form;
+    }
+
+    rc<Form> if_form(rc<Env> env, const Value& term) {
+        rc<Form> form = v_head(v_tail(v_tail(v_tail(term)))).form;
+        if (!form) form = F_TERM;
+        return form;
+    }
+
+    rc<Form> if_else_form(rc<Env> env, const Value& term) {
+        Value if_true = v_tail(v_tail(v_tail(term)));
+        Value if_false = v_tail(v_tail(if_true));
+
+        rc<Form> true_form = if_true.form ? if_true.form : F_TERM;
+        rc<Form> false_form = if_false.form ? if_false.form : F_TERM;
+        return f_overloaded(true_form->precedence, true_form->assoc, 
+            true_form, false_form);
+    }
+
     // this function parses quoted terms in the lhs of mutating expressions (e.g. assignment)
     // and produces a correct AST. we need this because ordinarily, lvalues would simply evaluate
     // to their associated values, which are not always assignable (say the destination variable
@@ -695,12 +746,31 @@ namespace basil {
             err(lval.pos, "Assignment target '", lval, "' has unknown pattern.");
             return none<rc<AST>>();
         }
+    }    
+    
+    // this function behaves similarly to lower_lval, but performs the assignment at
+    // compile-time instead of compiling to typed AST.
+    Value bind_lval(rc<Env> env, const Value& lval, const Value& rhs) {
+        if (lval.type == T_SYMBOL) {
+            auto var = env->find(lval.data.sym);
+            if (!env->find(lval.data.sym)) {
+                err(lval.pos, "Undefined variable '", lval, "'.");
+                return v_error({});
+            }
+            *var = rhs;
+            return v_void({});
+        }
+        else {
+            err(lval.pos, "Assignment target '", lval, "' has unknown pattern.");
+            return v_void({});
+        }
     }
 
     void init_builtins() {
         DEF = {
             t_func(t_tuple(t_list(T_ANY), T_ANY), T_VOID), // type
             f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<false>, P_SELF, p_term_variadic("params"), p_keyword("="), p_term("body")), // form
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
                 return define(env, args, none<Value>());
             },
@@ -709,29 +779,24 @@ namespace basil {
         DEF_TYPED = {
             t_func(t_tuple(t_list(T_ANY), T_ANY, T_ANY), T_VOID), // type
             f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<true>, P_SELF, p_term_variadic("params"), 
-                p_keyword(":"), p_quoted("type"), p_keyword("="), p_term("body")), // form
+                p_keyword(":"), p_term_variadic("type"), p_keyword("="), p_term("body")), // form
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
                 return define(env, args, some<Value>(v_at(args, 1)));
             },
             nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
         };
-        INFIX_DEF = {
-            t_func(t_tuple(T_SYMBOL, T_ANY), T_VOID), // type
-            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<false>, p_quoted("name"), P_SELF, p_quoted("init")),
-            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
-                return define(env, args, none<Value>());
-            },
-            nullptr
-        };
         LAMBDA = {
             t_func(t_tuple(T_ANY, T_ANY), T_VOID), // type
             f_callable(PREC_STRUCTURE, ASSOC_RIGHT, lambda_form, P_SELF, p_term_variadic("params"), p_keyword("="), p_term("body")), // form
+            BF_COMPTIME,
             lambda, // comptime
             nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
         };
         DO = {
             t_func(t_list(T_ANY), T_ANY), // type
-            f_callable(PREC_QUOTE - 1, ASSOC_RIGHT, P_SELF, p_variadic("exprs")), // form
+            f_callable(PREC_QUOTE - 1, ASSOC_RIGHT, do_form, P_SELF, p_variadic("exprs")), // form
+            BF_COMPTIME | BF_RUNTIME | BF_AST_ANYLIST,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 auto iterable = iter_list(args);
                 auto a = iterable.begin(), b = a;
@@ -759,13 +824,13 @@ namespace basil {
                 auto iterable = iter_list(args);
                 vector<rc<AST>> subexprs;
                 for (const Value& v : iterable) subexprs.push(v.data.rt->ast);
-                println("args = ", args);
                 return ast_do(args.pos, subexprs); 
             }
         };
         EVAL = {
             t_func(T_ANY, T_ANY), // type
             f_callable(PREC_DEFAULT, ASSOC_LEFT, P_SELF, p_var("expr")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 Value temp = arg;
                 return eval(env, temp);
@@ -775,8 +840,23 @@ namespace basil {
         QUOTE = {
             t_func(T_ANY, T_ANY), // type
             f_callable(PREC_QUOTE, ASSOC_LEFT, P_SELF, p_quoted("expr")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return arg;
+            },
+            nullptr
+        };
+        META = {
+            t_func(T_ANY, T_ANY), // type
+            f_callable(PREC_QUOTE, ASSOC_LEFT, P_SELF, p_quoted("expr")),
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
+                get_perf_info().begin_call(call_term, nullptr, 0);
+                get_perf_info().make_meta();
+                Value local_arg = arg;
+                Value result = eval(env, local_arg);
+                get_perf_info().end_call_without_add();
+                return result;
             },
             nullptr
         };
@@ -797,6 +877,7 @@ namespace basil {
                     rc<Form> compound = f_compound(forms);
                     return compound;
                 }, P_SELF, p_var("path")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 optional<rc<Env>> mod_env = load(arg.data.string->data.raw());
                 return mod_env ? v_module({}, *mod_env) : v_error({});
@@ -816,6 +897,7 @@ namespace basil {
                     }
                     return f_compound(forms);
                 }, P_SELF, p_term_variadic("contents")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 rc<Env> mod_env = extend(env);
                 Value body = v_cons(arg.pos, t_list(T_ANY), v_symbol(arg.pos, S_DO), arg);
@@ -841,6 +923,7 @@ namespace basil {
                     }
                     return F_TERM;
                 }, P_SELF, p_var("path")), // form,
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 optional<rc<Env>> mod_env = load(arg.data.string->data.raw());
                 if (!mod_env) return v_error({});
@@ -855,6 +938,7 @@ namespace basil {
         AT_MODULE = {
             t_func(t_tuple(T_MODULE, t_array(T_SYMBOL)), T_ANY), // type
             f_callable(PREC_ANNOTATED, ASSOC_LEFT, at_form, p_var("module"), P_SELF, p_var("key")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 vector<Value> elts;
                 for (const auto& i : v_at(args, 1).data.array->elements) {
@@ -873,6 +957,7 @@ namespace basil {
         AT_TUPLE = {
             t_func(t_tuple(t_incomplete_tuple(), t_array(T_INT)), T_ANY),
             f_callable(PREC_ANNOTATED, ASSOC_LEFT, at_form, p_var("tuple"), P_SELF, p_var("index")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 vector<Value> elts;
                 elts.clear();
@@ -894,6 +979,7 @@ namespace basil {
         AT_ARRAY = {
             t_func(t_tuple(t_array(T_ANY), t_array(T_INT)), T_ANY),
             f_callable(PREC_ANNOTATED, ASSOC_LEFT, at_form, p_var("array"), P_SELF, p_var("index")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 vector<Value> elts;
                 elts.clear();
@@ -915,6 +1001,7 @@ namespace basil {
         DOT = {
             t_func(t_tuple(T_ANY, T_ANY), T_ANY), // type
             f_callable(PREC_ANNOTATED, ASSOC_LEFT, dot_form, p_quoted("compound"), P_SELF, p_quoted("key")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 // foo.bar => eval (foo at (array (quote bar)))
                 Value term = v_list(call_term.pos, t_list(T_ANY), 
@@ -948,7 +1035,8 @@ namespace basil {
         // },
         IF = {
             t_func(t_tuple(T_BOOL, T_ANY), T_VOID), // type
-            f_callable(PREC_CONTROL, ASSOC_RIGHT, P_SELF, p_var("cond"), p_keyword("then"), p_quoted("if-true")),
+            f_callable(PREC_CONTROL, ASSOC_RIGHT, if_form, P_SELF, p_var("cond"), p_keyword("then"), p_quoted("if-true")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 Value if_true = v_at(args, 1);
                 if (v_at(args, 0).data.b) eval(env, if_true);
@@ -960,8 +1048,9 @@ namespace basil {
         };
         IF_ELSE = {
             t_func(t_tuple(T_BOOL, T_ANY, T_ANY), T_ANY), // type
-            f_callable(PREC_CONTROL, ASSOC_RIGHT, P_SELF, p_var("cond"), p_keyword("then"), p_quoted("if-true"), 
+            f_callable(PREC_CONTROL, ASSOC_RIGHT, if_else_form, P_SELF, p_var("cond"), p_keyword("then"), p_quoted("if-true"), 
                 p_keyword("else"), p_quoted("if-false")),
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 Value if_true = v_at(args, 1), if_false = v_at(args, 2);
                 if (v_at(args, 0).data.b) return eval(env, if_true);
@@ -974,6 +1063,7 @@ namespace basil {
         WHILE = {
             t_func(t_tuple(T_ANY, T_ANY), T_VOID), // type
             f_callable(PREC_CONTROL, ASSOC_RIGHT, P_SELF, p_quoted("cond"), p_quoted("body")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 rc<Env> before = env->clone(); // we track the initial state before entering the loop
 
@@ -1022,6 +1112,7 @@ namespace basil {
         ARROW = {
             t_func(t_tuple(T_ANY, T_ANY), T_BOOL),
             f_callable(PREC_CONTROL - 20, ASSOC_RIGHT, p_quoted("pattern"), P_SELF, p_quoted("body")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_void({}); // should not be executed, but maybe we can repurpose this for arrow functions?
             },
@@ -1030,6 +1121,7 @@ namespace basil {
         MATCHES = {
             t_func(t_tuple(T_ANY, T_ANY), T_BOOL),
             f_callable(PREC_COMPARE - 20, ASSOC_LEFT, p_var("value"), P_SELF, p_quoted("case")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return match_case(env, v_at(args, 1), v_at(args, 0));
             },
@@ -1038,6 +1130,7 @@ namespace basil {
         MATCH = {
             t_func(t_tuple(T_ANY, t_list(T_ANY)), T_ANY),
             f_callable(PREC_CONTROL - 40, ASSOC_RIGHT, P_SELF, p_var("value"), p_quoted("cases")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 if (v_at(args, 1).type == T_VOID) { // third argument is just flat out empty
                     err(v_at(args, 1).pos, "No cases provided in 'match' expression.");
@@ -1083,6 +1176,7 @@ namespace basil {
         ADD_INT = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_ADD, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_int({}, v_tuple_at(args, 0).data.i + v_tuple_at(args, 1).data.i);
             },
@@ -1093,6 +1187,7 @@ namespace basil {
         ADD_FLOAT = {
             t_func(t_tuple(T_FLOAT, T_FLOAT), T_FLOAT), // type
             f_callable(PREC_ADD, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_float({}, v_tuple_at(args, 0).data.f32 + v_tuple_at(args, 1).data.f32);
             },
@@ -1103,6 +1198,7 @@ namespace basil {
         ADD_DOUBLE = {
             t_func(t_tuple(T_DOUBLE, T_DOUBLE), T_DOUBLE), // type
             f_callable(PREC_ADD, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_double({}, v_tuple_at(args, 0).data.f64 + v_tuple_at(args, 1).data.f64);
             },
@@ -1113,6 +1209,7 @@ namespace basil {
         SUB = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_ADD, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_int({}, v_tuple_at(args, 0).data.i - v_tuple_at(args, 1).data.i);
             },
@@ -1123,6 +1220,7 @@ namespace basil {
         MUL = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_int({}, v_tuple_at(args, 0).data.i * v_tuple_at(args, 1).data.i);
             },
@@ -1133,6 +1231,7 @@ namespace basil {
         DIV = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_int({}, v_tuple_at(args, 0).data.i / v_tuple_at(args, 1).data.i);
             },
@@ -1143,6 +1242,7 @@ namespace basil {
         REM = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_int({}, v_tuple_at(args, 0).data.i % v_tuple_at(args, 1).data.i);
             },
@@ -1150,25 +1250,27 @@ namespace basil {
                 return ast_rem(args.pos, REM.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
             }
         };
-        INCR = {
-            t_func(T_INT, T_INT), // type
-            f_callable(PREC_PREFIX, ASSOC_RIGHT, P_SELF, p_var("operand")), // form
-            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
-                return v_int({}, args.data.i + 1);
-            },
-            nullptr
-        };
-        DECR = {
-            t_func(T_INT, T_INT), // type
-            f_callable(PREC_PREFIX, ASSOC_RIGHT, P_SELF, p_var("operand")), // form
-            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
-                return v_int({}, args.data.i - 1);
-            },
-            nullptr
-        };
+        // TODO: replace these with mutating ones
+        // INCR = {
+        //     t_func(T_INT, T_INT), // type
+        //     f_callable(PREC_PREFIX, ASSOC_RIGHT, P_SELF, p_var("operand")), // form
+        //     [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+        //         return v_int({}, args.data.i + 1);
+        //     },
+        //     nullptr
+        // };
+        // DECR = {
+        //     t_func(T_INT, T_INT), // type
+        //     f_callable(PREC_PREFIX, ASSOC_RIGHT, P_SELF, p_var("operand")), // form
+        //     [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+        //         return v_int({}, args.data.i - 1);
+        //     },
+        //     nullptr
+        // };
         LESS = {
             t_func(t_tuple(T_INT, T_INT), T_BOOL),
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_bool({}, v_tuple_at(args, 0).data.i < v_tuple_at(args, 1).data.i);
             },
@@ -1179,6 +1281,7 @@ namespace basil {
         LESS_EQUAL = {
             t_func(t_tuple(T_INT, T_INT), T_BOOL),
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_bool({}, v_tuple_at(args, 0).data.i <= v_tuple_at(args, 1).data.i);
             },
@@ -1189,6 +1292,7 @@ namespace basil {
         GREATER = {
             t_func(t_tuple(T_INT, T_INT), T_BOOL),
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_bool({}, v_tuple_at(args, 0).data.i > v_tuple_at(args, 1).data.i);
             },
@@ -1199,6 +1303,7 @@ namespace basil {
         GREATER_EQUAL = {
             t_func(t_tuple(T_INT, T_INT), T_BOOL),
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_bool({}, v_tuple_at(args, 0).data.i >= v_tuple_at(args, 1).data.i);
             },
@@ -1209,6 +1314,7 @@ namespace basil {
         EQUAL = {
             t_func(t_tuple(T_ANY, T_ANY), T_BOOL), // type
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_bool({}, v_tuple_at(args, 0) == v_tuple_at(args, 1));
             },
@@ -1219,6 +1325,7 @@ namespace basil {
         NOT_EQUAL = {
             t_func(t_tuple(T_ANY, T_ANY), T_BOOL), // type
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_bool({}, v_tuple_at(args, 0) != v_tuple_at(args, 1));
             },
@@ -1229,6 +1336,7 @@ namespace basil {
         AND = {
             t_func(t_tuple(T_BOOL, T_ANY), T_BOOL), // type
             f_callable(PREC_LOGIC, ASSOC_LEFT, p_var("lhs"), P_SELF, p_quoted("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 if (!v_at(args, 0).data.b) return v_at(args, 0); // short circuit false
                 else {
@@ -1243,6 +1351,7 @@ namespace basil {
         XOR = {
             t_func(t_tuple(T_BOOL, T_BOOL), T_BOOL), // type
             f_callable(PREC_LOGIC - 33, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return v_bool({}, v_at(args, 0).data.b ^ v_at(args, 1).data.b);
             },
@@ -1253,6 +1362,7 @@ namespace basil {
         OR = {
             t_func(t_tuple(T_BOOL, T_ANY), T_BOOL), // type
             f_callable(PREC_LOGIC - 66, ASSOC_LEFT, p_var("lhs"), P_SELF, p_quoted("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 if (v_at(args, 0).data.b) return v_at(args, 0); // short circuit true
                 else {
@@ -1267,6 +1377,7 @@ namespace basil {
         NOT = {
             t_func(T_BOOL, T_BOOL), // type
             f_callable(PREC_PREFIX, ASSOC_RIGHT, P_SELF, p_var("operand")), // form
+            BF_COMPTIME | BF_RUNTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return v_bool({}, !arg.data.b);
             },
@@ -1277,6 +1388,7 @@ namespace basil {
         HEAD = {
             t_func(t_list(T_ANY), T_ANY), // type
             f_callable(PREC_PREFIX, ASSOC_LEFT, p_var("list"), P_SELF), // form
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return v_head(arg);
             },
@@ -1285,6 +1397,7 @@ namespace basil {
         TAIL = {
             t_func(t_list(T_ANY), t_list(T_ANY)), // type
             f_callable(PREC_PREFIX, ASSOC_LEFT, p_var("list"), P_SELF), // form
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return v_tail(arg);
             },
@@ -1293,6 +1406,7 @@ namespace basil {
         CONS = {
             t_func(t_tuple(T_ANY, t_list(T_ANY)), T_ANY), // type
             f_callable(PREC_DEFAULT - 50, ASSOC_RIGHT, p_var("head"), P_SELF, p_var("tail")), // form
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 Type ht = v_at(args, 0).type, tt = v_at(args, 1).type;
                 Type lt = (tt.of(K_LIST) && ht.coerces_to(t_list_element(tt))) ? tt : t_list(ht);
@@ -1304,6 +1418,7 @@ namespace basil {
         LENGTH_STRING = {
             t_func(T_STRING, T_INT),
             f_callable(PREC_DEFAULT, ASSOC_LEFT, p_var("string"), P_SELF),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return v_int({}, arg.data.string.raw()->data.size());
             },
@@ -1312,6 +1427,7 @@ namespace basil {
         LENGTH_TUPLE = {
             t_func(t_incomplete_tuple(), T_INT),
             f_callable(PREC_DEFAULT, ASSOC_LEFT, p_var("tuple"), P_SELF),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return v_int({}, v_len(arg));
             },
@@ -1320,6 +1436,7 @@ namespace basil {
         LENGTH_ARRAY = {
             t_func(t_array(T_ANY), T_INT),
             f_callable(PREC_DEFAULT, ASSOC_LEFT, p_var("array"), P_SELF),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return v_int({}, v_len(arg));
             },
@@ -1328,6 +1445,7 @@ namespace basil {
         FIND = {
             t_func(t_tuple(T_CHAR, T_STRING), T_INT),
             f_callable(PREC_DEFAULT, ASSOC_LEFT, P_SELF, p_var("char"), p_var("str")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 auto start = v_tuple_at(args, 1).data.string->data.begin(),
                     end = v_tuple_at(args, 1).data.string->data.end();
@@ -1341,6 +1459,7 @@ namespace basil {
         LIST = {
             t_func(t_list(T_ANY), T_ANY),
             f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_variadic("items")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 return args;
             },
@@ -1349,6 +1468,7 @@ namespace basil {
         ARRAY = {
             t_func(t_list(T_ANY), T_ANY),
             f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_variadic("items")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 vector<Value> elements;
                 for (const Value& v : iter_list(args)) elements.push(v);
@@ -1359,6 +1479,7 @@ namespace basil {
         TUPLE = {
             t_func(t_tuple(T_ANY, t_list(T_ANY)), T_ANY),
             f_callable(PREC_STRUCTURE, ASSOC_LEFT, p_var("first"), P_SELF, p_quoted_variadic("rest")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 vector<Value> elements;
                 elements.push(v_at(args, 0)); // lhs is always an element
@@ -1394,6 +1515,7 @@ namespace basil {
         UNION_TYPE = {
             t_func(t_tuple(T_TYPE, t_list(T_ANY)), T_TYPE),
             f_callable(PREC_TYPE - 20, ASSOC_LEFT, p_var("first"), P_SELF, p_quoted_variadic("rest")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 set<Type> elements;
                 elements.insert(v_at(args, 0).data.type); // lhs is always an element
@@ -1440,6 +1562,7 @@ namespace basil {
         NAMED_TYPE = {
             t_func(t_tuple(T_SYMBOL, T_ANY), T_ANY),
             f_callable(PREC_TYPE, ASSOC_RIGHT, p_quoted("name"), P_SELF, p_var("base")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 Symbol name = v_at(args, 0).data.sym;
                 const Value& base = v_at(args, 1);
@@ -1450,6 +1573,7 @@ namespace basil {
         FN_TYPE = {
             t_func(t_tuple(T_TYPE, T_TYPE), T_TYPE),
             f_callable(PREC_TYPE - 40, ASSOC_LEFT, p_var("arg"), P_SELF, p_var("ret")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 Type arg = v_at(args, 0).data.type, ret = v_at(args, 1).data.type;
                 return v_type({}, t_func(arg, ret));
@@ -1459,6 +1583,7 @@ namespace basil {
         TYPE_VAR = {
             t_func(T_SYMBOL, T_TYPE),
             f_callable(PREC_ANNOTATED + 20, ASSOC_LEFT, p_quoted("name"), P_SELF),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 Value tvar = v_type({}, t_var(arg.data.sym));
                 env->def(arg.data.sym, tvar);
@@ -1469,6 +1594,7 @@ namespace basil {
         JUST = {
             t_func(T_SYMBOL, T_TYPE),
             f_callable(PREC_PREFIX, ASSOC_RIGHT, P_SELF, p_quoted("name")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return v_type({}, t_named(arg.data.sym));
             },
@@ -1477,6 +1603,7 @@ namespace basil {
         TYPEOF = {
             t_func(T_ANY, T_TYPE),
             f_callable(PREC_COMPARE + 1, ASSOC_RIGHT, P_SELF, p_var("value")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 Type t = arg.type;
                 if (t.is_tvar()) t = t_tvar_concrete(t);
@@ -1487,6 +1614,7 @@ namespace basil {
         IS = {
             t_func(t_tuple(T_ANY, T_TYPE), T_BOOL),
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("value"), P_SELF, p_var("type")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 Type arg = v_at(args, 0).type, compare = v_at(args, 1).data.type;
                 if (arg == compare) return v_bool({}, true);
@@ -1499,6 +1627,7 @@ namespace basil {
         ANNOTATE = {
             t_func(t_tuple(T_ANY, T_TYPE), T_ANY),
             f_callable(PREC_ANNOTATED, ASSOC_LEFT, p_var("value"), P_SELF, p_var("type")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 if (v_at(args, 0).type.coerces_to(v_at(args, 1).data.type)) {
                     return coerce(env, v_at(args, 0), v_at(args, 1).data.type);
@@ -1514,6 +1643,7 @@ namespace basil {
         IS_SUBTYPE = {
             t_func(t_tuple(T_TYPE, T_TYPE), T_BOOL),
             f_callable(PREC_COMPARE, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 Type arg = v_at(args, 0).data.type, compare = v_at(args, 1).data.type;
                 return v_bool({}, compare.coerces_to(arg));
@@ -1523,18 +1653,21 @@ namespace basil {
         ASSIGN = {
             t_func(t_tuple(T_SYMBOL, T_ANY), T_VOID),
             f_callable(PREC_COMPOUND - 20, ASSOC_RIGHT, p_quoted("dest"), P_SELF, p_var("src")),
-            nullptr,
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL | BF_PRESERVING, // preserve quoted dest,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return bind_lval(env, v_at(args, 0), v_at(args, 1));
+            },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
                 Value lhs = v_at(args, 0);
                 auto lhs_ast = lower_lval(env, lhs, v_at(args, 1));
                 if (!lhs_ast) return nullptr;
                 return ast_assign(args.pos, ASSIGN.type, *lhs_ast, v_at(args, 1).data.rt->ast);
-            },
-            true // preserve quoted dest
+            }
         };
         DEBUG = {
             t_func(T_ANY, T_VOID),
             f_callable(PREC_ANNOTATED, ASSOC_RIGHT, P_SELF, p_var("value")),
+            BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 println("DEBUG: ", arg, " # ", arg.form, " prec=", arg.form->precedence, " assoc=", 
                     arg.form->assoc == ASSOC_LEFT ? "left" : "right", " : ", arg.type);
@@ -1548,10 +1681,10 @@ namespace basil {
         if (!builtins_inited) builtins_inited = true, init_builtins();
 
         env->def(symbol_from("def"), v_intersect(&DEF, &DEF_TYPED));
-        env->def(symbol_from(":="), v_func(INFIX_DEF));
         env->def(symbol_from("lambda"), v_func(LAMBDA));
         env->def(symbol_from("λ"), v_func(LAMBDA));
         env->def(symbol_from("do"), v_func(DO));
+        env->def(symbol_from("meta"), v_func(META));
         env->def(symbol_from("eval"), v_func(EVAL));
         env->def(symbol_from("quote"), v_func(QUOTE));
         env->def(symbol_from("if"), v_intersect(&IF, &IF_ELSE));
@@ -1568,8 +1701,8 @@ namespace basil {
         env->def(symbol_from("*"), v_func(MUL));
         env->def(symbol_from("/"), v_func(DIV));
         env->def(symbol_from("%"), v_func(REM));
-        env->def(symbol_from("++"), v_func(INCR));
-        env->def(symbol_from("--"), v_func(DECR));
+        // env->def(symbol_from("++"), v_func(INCR));
+        // env->def(symbol_from("--"), v_func(DECR));
         env->def(symbol_from("<"), v_func(LESS));
         env->def(symbol_from("<="), v_func(LESS_EQUAL));
         env->def(symbol_from(">"), v_func(GREATER));
@@ -1612,6 +1745,7 @@ namespace basil {
         env->def(symbol_from("Type"), v_type({}, T_TYPE));
         env->def(symbol_from("Void"), v_type({}, T_VOID));
         env->def(symbol_from("Symbol"), v_type({}, T_SYMBOL));
+        env->def(symbol_from("Module"), v_type({}, T_MODULE));
         env->def(symbol_from("Any"), v_type({}, T_ANY));
 
         // constants

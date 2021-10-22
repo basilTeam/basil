@@ -30,6 +30,7 @@ struct test_node {
     test_node* next;
 };
 
+extern exc_message* error;
 extern test_node* test_list;
 extern void (*setup_fn)();
 
@@ -41,15 +42,15 @@ int main(int argc, char** argv);
 
 #define LET1(a) auto _a = (a);
 #define LET2(a, b) auto _a = (a); auto _b = (b);
-#define ASSERT_EQUAL(a, b) {LET2(a, b); if (_a != _b) throw exc_message{format<ustring>("line ", __LINE__, ": ", _a, " != ", _b)};}
-#define ASSERT_NOT_EQUAL(a, b) {LET2(a, b); if (_a == _b) throw exc_message{format<ustring>("line ", __LINE__, ": ", _a, " == ", _b)};}
-#define ASSERT_LESS(a, b) {LET2(a, b); if (_a >= _b) throw exc_message{format<ustring>("line ", __LINE__, ": ", _a, " >= ", _b)};}
-#define ASSERT_GREATER(a, b) {LET2(a, b); if (_a <= _b) throw exc_message{format<ustring>("line ", __LINE__, ": ", _a, " <= ", _b)};}
-#define ASSERT_LESS_OR_EQUAL(a, b) {LET2(a, b); if (_a > _b) throw exc_message{format<ustring>("line ", __LINE__, ": ", _a, " > ", _b)};}
-#define ASSERT_GREATER_OR_EQUAL(a, b) {LET2(a, b); if (_a < _b) throw exc_message{format<ustring>("line ", __LINE__, ": ", _a, " < ", _b)};}
-#define ASSERT_TRUE(a) {LET1(a); if (!_a) throw exc_message{format<ustring>("line ", __LINE__, ": ", (bool)_a, " was not true")};}
-#define ASSERT_FALSE(a) {LET1(a); if (_a) throw exc_message{format<ustring>("line ", __LINE__, ": ", (bool)_a, " was not false")};}
-#define ASSERT_NO_ERRORS(src) { if (error_count()) { buffer b; print_errors(b, (src)); discard_errors(); throw exc_message{format<ustring>("line ", __LINE__, ": errors were reported:\n", b)}; } }
+#define ASSERT_EQUAL(a, b) {LET2(a, b); if (_a != _b) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", _a, " != ", _b)}, void();}
+#define ASSERT_NOT_EQUAL(a, b) {LET2(a, b); if (_a == _b) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", _a, " == ", _b)}, void();}
+#define ASSERT_LESS(a, b) {LET2(a, b); if (_a >= _b) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", _a, " >= ", _b)}, void();}
+#define ASSERT_GREATER(a, b) {LET2(a, b); if (_a <= _b) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", _a, " <= ", _b)}, void();}
+#define ASSERT_LESS_OR_EQUAL(a, b) {LET2(a, b); if (_a > _b) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", _a, " > ", _b)}, void();}
+#define ASSERT_GREATER_OR_EQUAL(a, b) {LET2(a, b); if (_a < _b) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", _a, " < ", _b)}, void();}
+#define ASSERT_TRUE(a) {LET1(a); if (!_a) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", (bool)_a, " was not true")}, void();}
+#define ASSERT_FALSE(a) {LET1(a); if (_a) return error = new exc_message{format<ustring>("line ", __LINE__, ": ", (bool)_a, " was not false")}, void();}
+#define ASSERT_NO_ERRORS(src) { if (error_count()) { buffer b; print_errors(b, (src)); discard_errors(); return error = new exc_message{format<ustring>("line ", __LINE__, ": errors were reported:\n", b)}, void(); } }
 
 #define SETUP void __setup_fn(); auto __setup_dummy = (setup_fn = __setup_fn); void __setup_fn() 
 

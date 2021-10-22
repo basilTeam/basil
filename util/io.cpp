@@ -9,6 +9,7 @@
 
 #include "io.h"
 #include "str.h"
+#include "panic.h"
 
 bool exists(const char* path) {
     FILE* f = fopen(path, "r");
@@ -36,7 +37,10 @@ void file::write(u8 c) {
 u8 file::read() {
     if (done) return '\0';
     int i = fgetc(f);
-    if (i == EOF) done = true;
+    if (i == EOF) {
+        done = true;
+        return '\0';
+    }
     return i;
 }
 
@@ -52,10 +56,12 @@ void file::unget(u8 c) {
     ungetc(c, f);
 }
 
-file::operator bool() const {
+file::operator bool() {
 	if (!f) return false;
+    if (done) return false;
     int i = fgetc(f);
     ungetc(i, f);
+    if (i == EOF) done = true;
     return i != EOF;
 }
 
@@ -139,7 +145,7 @@ u32 buffer::capacity() const {
     return _capacity;
 }
 
-buffer::operator bool() const {
+buffer::operator bool() {
     return _start != _end;
 }
 
@@ -201,6 +207,8 @@ static void print_rational(stream& io, double d) {
     }
     if (isZero) io.write('0');
 }
+
+void write(stream& io) {}
 
 void write(stream& io, u8 c) {
     io.write(c);

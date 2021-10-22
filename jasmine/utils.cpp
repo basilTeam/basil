@@ -24,4 +24,19 @@
     void free_exec(void* exec, u64 size) {
         munmap(exec, size);
     }
+#elif defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
+    #include "windows.h"
+
+    void* alloc_exec(u64 size) {
+        return VirtualAlloc(nullptr, size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+    }
+
+    void protect_exec(void* exec, u64 size) {
+        DWORD old = PAGE_EXECUTE_READWRITE;
+        VirtualProtect(exec, size, PAGE_EXECUTE_READ, &old);
+    }
+
+    void free_exec(void* exec, u64 size) {
+        VirtualFree(exec, 0, MEM_RELEASE);
+    }
 #endif

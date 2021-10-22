@@ -7,8 +7,8 @@
  * of this project.
  */
 
-#ifndef FAST_IO_H
-#define FAST_IO_H
+#ifndef BASIL_SYS_H
+#define BASIL_SYS_H
 
 #include "util/defs.h"
 
@@ -17,7 +17,7 @@ struct stream;
 extern stream &_stdout, &_stdin;
 
 void exit(u64 code);
-extern "C" void* memcpy(void* dst, const void* src, unsigned long size);
+extern "C" void* memcpy(void* dst, const void* src, size_t size);
 
 void write(stream& io, const char* str, u32 n);
 void write(stream& io, const char& c);

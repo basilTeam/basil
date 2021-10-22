@@ -28,6 +28,8 @@ namespace basil {
             case K_VOID: break;
             case K_ERROR: break;
             case K_UNDEFINED: undefined_sym = S_NONE; break;
+            case K_FORM_FN: new (&fl_fn) rc<FormFn>(); break;
+            case K_FORM_ISECT: new (&fl_isect) rc<FormIsect>(); break;
             case K_STRING: new (&string) rc<String>(); break;
             case K_LIST: new (&list) rc<List>(); break;
             case K_NAMED: new (&named) rc<Named>(); break;
@@ -58,6 +60,8 @@ namespace basil {
             case K_VOID: break;
             case K_ERROR: break;
             case K_UNDEFINED: undefined_sym = other.undefined_sym; break;
+            case K_FORM_FN: new (&fl_fn) rc<FormFn>(other.fl_fn); break;
+            case K_FORM_ISECT: new (&fl_isect) rc<FormIsect>(other.fl_isect); break;
             case K_STRING: new (&string) rc<String>(other.string); break;
             case K_LIST: new (&list) rc<List>(other.list); break;
             case K_NAMED: new (&named) rc<Named>(other.named); break;
@@ -98,6 +102,8 @@ namespace basil {
 
     Value::~Value() {
         switch (type.kind()) {
+            case K_FORM_FN: data.fl_fn.~rc(); break;
+            case K_FORM_ISECT: data.fl_isect.~rc(); break;
             case K_STRING: data.string.~rc(); break;
             case K_LIST: destruct_list(data.list); break;
             case K_NAMED: data.named.~rc(); break;
@@ -127,6 +133,8 @@ namespace basil {
     Value& Value::operator=(const Value& other) {
         if (this != &other) {
             switch (type.kind()) {
+                case K_FORM_FN: data.fl_fn.~rc(); break;
+                case K_FORM_ISECT: data.fl_isect.~rc(); break;
                 case K_STRING: data.string.~rc(); break;
                 case K_LIST: destruct_list(data.list); break;
                 case K_NAMED: data.named.~rc(); break;
@@ -152,6 +160,8 @@ namespace basil {
     Value& Value::operator=(Value&& other) {
         if (this != &other) {
             switch (type.kind()) {
+                case K_FORM_FN: data.fl_fn.~rc(); break;
+                case K_FORM_ISECT: data.fl_isect.~rc(); break;
                 case K_STRING: data.string.~rc(); break;
                 case K_LIST: destruct_list(data.list); break;
                 case K_NAMED: data.named.~rc(); break;
@@ -239,7 +249,7 @@ namespace basil {
                 return kh;
             }
             default:
-                panic("Unsupported value kind!"); 
+                panic("Unsupported value kind ", type.kind(), "!"); 
                 return kh;
         }
     }
@@ -256,6 +266,8 @@ namespace basil {
             case K_VOID: write(io, "()"); break;
             case K_ERROR: write(io, "#error"); break;
             case K_UNDEFINED: write(io, "#undefined(", data.undefined_sym, ")"); break; // #undefined(x)
+            case K_FORM_FN: write(io, "#form-level-function"); break;
+            case K_FORM_ISECT: write(io, "#form-level-intersect"); break;
             case K_STRING: write(io, '"', data.string->data, '"'); break;
             case K_NAMED: write(io, t_get_name(type), " of ", data.named->value); break; // Name of value
             case K_UNION: write(io, data.u->value, " in ", type); break; // value in (type | type)
@@ -352,6 +364,19 @@ namespace basil {
                 return data.mod->env.is(other.data.mod->env); // must be same environment
             case K_FUNCTION: 
                 return data.fn.is(other.data.fn); // only consider reference equality
+            case K_FORM_FN: 
+                return data.fl_fn.is(other.data.fl_fn); // only consider reference equality
+            case K_FORM_ISECT: {
+                if (data.fl_isect->overloads.size() != other.data.fl_isect->overloads.size()) return false;
+                auto copy_values = data.fl_isect->overloads;
+                for (const auto& [t, v] : other.data.fl_isect->overloads) {
+                    auto it = copy_values.find(t);
+                    if (it == copy_values.end()) return false; // fail if the other intersect has a type we don't have
+                    if (it->second != v) return false;         // fail if the other intersect's type has a different value than ours
+                    copy_values.erase(t);                    // otherwise, make sure we don't consider this type again
+                }
+                return copy_values.size() == 0; // our intersect had a matching type for every type in the other intersect
+            }
             case K_RUNTIME:
                 return data.rt.is(other.data.rt);
             default:
@@ -373,6 +398,7 @@ namespace basil {
             case K_ERROR:
             case K_UNDEFINED:
             case K_FUNCTION:
+            case K_FORM_FN:
             case K_MODULE:
                 return *this; // shallow copy is sufficient for these kinds
             case K_STRING: return v_string(pos, data.string->data).with(form);
@@ -408,6 +434,11 @@ namespace basil {
                 map<Type, Value> values;
                 for (const auto& [t, v] : data.isect->values) values[t] = v.clone();
                 return v_intersect(pos, type, move(values)).with(form);    
+            }
+            case K_FORM_ISECT: {
+                map<rc<Form>, Value> overloads;
+                for (const auto& [t, v] : data.fl_isect->overloads) overloads[t] = v.clone();
+                return v_form_isect(pos, type, form, move(overloads)).with(form);    
             }
             case K_RUNTIME: {
                 return v_runtime(pos, type, data.rt->ast->clone());
@@ -520,6 +551,10 @@ namespace basil {
         return is_inst.contains(args_type) && is_inst[args_type] > 0;
     }
 
+    bool InstTable::is_resolving() const {
+        return resolving;
+    }
+
     rc<FnInst> InstTable::inst(const Function& fn, Type args_type) {
         auto it = insts.find(args_type);
         if (it != insts.end()) {
@@ -543,18 +578,28 @@ namespace basil {
             return insts.find(args_type)->second;
         }
     }
+
+    AbstractFunction::AbstractFunction(rc<Env> env_in, const vector<Symbol>& args_in, const Value& body_in):
+        env(env_in), args(args_in), body(body_in) {}
     
     Function::Function(optional<Symbol> name_in, optional<const Builtin&> builtin_in, rc<Env> env_in, 
         const vector<Symbol>& args_in, const Value& body_in):
-        builtin(builtin_in), name(name_in), env(env_in), args(args_in), body(body_in) {}
+        AbstractFunction(env_in, args_in, body_in), builtin(builtin_in), name(name_in) {}
 
-    rc<InstTable> v_resolve_body(Function& fn, FormTuple tup) {
+    rc<InstTable> v_resolve_body(AbstractFunction& fn, FormTuple tup) {
         tup.compute_hash();
 
         auto& table = fn.resolutions;
         auto it = table.find(tup);
         if (it == table.end()) {
-            table.put(tup, ref<InstTable>(fn.env->clone(), fn.body.clone()));
+            rc<InstTable> inst = ref<InstTable>(fn.env->clone(), fn.body.clone());
+            for (u32 i = 0; i < tup.forms.size(); i ++) {
+                inst->env->def(fn.args[i], v_undefined({}, fn.args[i], tup.forms[i]));
+            }
+            table.put(tup, inst);
+            inst->resolving ++;
+            resolve_form(inst->env, *inst->base);
+            inst->resolving --;
             return table.find(tup)->second;
         }
         else {
@@ -572,6 +617,12 @@ namespace basil {
     Macro::Macro(optional<const Builtin&> builtin_in, rc<Env> env_in, 
         const vector<Symbol>& args_in, const Value& body_in):
         builtin(builtin_in), env(env_in), args(args_in), body(body_in) {}
+    
+    FormFn::FormFn(rc<Env> env_in, const vector<Symbol>& args_in, const Value& body_in):
+        AbstractFunction(env_in, args_in, body_in) {}
+    
+    FormIsect::FormIsect(const map<rc<Form>, Value>& overloads_in):
+        overloads(overloads_in) {}
 
     Value v_int(Source::Pos pos, i64 i) {
         Value v(pos, T_INT, nullptr);
@@ -629,6 +680,26 @@ namespace basil {
         return v;
     }
 
+    Value v_form_fn(Source::Pos pos, Type type, rc<Env> env, rc<Form> form, 
+        const vector<Symbol>& args, const Value& body) {
+        if (!type.of(K_FORM_FN)) 
+            panic("Attempted to construct form-level function with incompatible type '", type, "'!");
+        if (t_form_fn_arity(type) != args.size()) 
+            panic("Attempted to construct form-level function with incorrect number of arguments; ",
+                "provided ", args.size(), " arguments, but provided type has arity ", t_form_fn_arity(type));
+        Value v(pos, type, form);
+        v.data.fl_fn = ref<FormFn>(env, args, body);
+        return v;
+    }
+
+    Value v_form_isect(Source::Pos pos, Type type, rc<Form> form, map<rc<Form>, Value>&& overloads) {
+        if (!type.of(K_FORM_ISECT)) 
+            panic("Attempted to construct form-level intersect with incompatible type '", type, "'!");
+        Value v(pos, type, form);
+        v.data.fl_isect = ref<FormIsect>(overloads);
+        return v;
+    }
+
     Value v_string(Source::Pos pos, const ustring& str) {
         Value v(pos, T_STRING, nullptr);
         v.data.str = ref<String>(str);
@@ -638,7 +709,7 @@ namespace basil {
     Value v_cons(Source::Pos pos, Type type, const Value& head, const Value& tail) {
         Value v(pos, type, nullptr);
         if (!type.of(K_LIST)) 
-            panic("Attempted to construct list with non-list type'", type, "'!");
+            panic("Attempted to construct list with non-list type '", type, "'!");
         if (!head.type.coerces_to(t_list_element(type)))
             panic("Cannot construct list - provided head '", head.type, 
                 "' incompatible with list type '", type, "'!");
@@ -756,19 +827,32 @@ namespace basil {
     }
 
     Value v_intersect(vector<Builtin*>&& builtins) {
-        vector<rc<Form>> value_forms;
-        set<Type> value_types;
-        map<Type, Value> values;
-        for (Builtin* b : builtins) {
-            if (value_types.contains(b->type)) panic("Tried to overload builtins with duplicate types!");
-            value_forms.push(b->form);
-            value_types.insert(b->type);
-            values.put(b->type, v_func(*b));
+        if (builtins.size() == 1) return v_func(*builtins[0]);
+        map<rc<Form>, map<Type, Builtin*>> values;
+        for (Builtin* b : builtins) values[b->form][b->type] = b;
+       
+        map<rc<Form>, Value> type_level;
+        for (const auto& [k, v] : values) {
+            if (v.size() == 1) type_level[k] = v_func(*v.begin()->second).with(v.begin()->second->form);
+            else {
+                vector<Type> types;
+                map<Type, Value> values;
+                rc<Form> form;
+                for (auto& [_, b] : v) 
+                    types.push(b->type), values[b->type] = v_func(*b), form = b->form;
+                type_level[k] = v_intersect({}, t_intersect(types), move(values)).with(form);
+            }
         }
-        vector<Type> value_type_vec;
-        for (Type t : value_types) value_type_vec.push(t);
-        return v_intersect({}, t_intersect(value_type_vec), move(values))
-            .with(f_overloaded(value_forms[0]->precedence, value_forms[0]->assoc, value_forms));
+
+        if (type_level.size() == 1) return type_level.begin()->second;
+        else {
+            map<rc<Form>, Type> types;
+            vector<rc<Form>> forms;
+            for (const auto& [k, v] : type_level) types[k] = v.type, forms.push(v.form);
+            i64 prec = forms[0]->precedence;
+            Associativity assoc = forms[0]->assoc;
+            return v_form_isect({}, t_form_isect(types), f_overloaded(prec, assoc, forms), move(type_level));
+        }
     }
 
     Value v_module(Source::Pos pos, rc<Env> env) {
@@ -1311,7 +1395,7 @@ namespace basil {
         return v_error({});
     }
 
-    rc<InstTable> v_resolve_body(Function& fn, const vector<rc<Form>>& args) {
+    rc<InstTable> v_resolve_body(AbstractFunction& fn, const vector<rc<Form>>& args) {
         u32 num_args = fn.args.size();
         FormTuple tup;
         tup.forms = args;
@@ -1319,7 +1403,7 @@ namespace basil {
         return v_resolve_body(fn, tup);
     }
 
-    rc<InstTable> v_resolve_body(Function& fn, const Value& args) {
+    rc<InstTable> v_resolve_body(AbstractFunction& fn, const Value& args) {
         u32 num_args = fn.args.size();
         auto& table = fn.resolutions;
         FormTuple tup;

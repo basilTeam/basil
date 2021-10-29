@@ -1717,8 +1717,8 @@ namespace basil {
             }
         };
         PRINT = {
-            t_func(t_list(T_ANY), T_VOID),
-            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_variadic("values")),
+            t_func(T_ANY, T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("value")),
             BF_COMPTIME | BF_RUNTIME | BF_STATEFUL | BF_PRESERVING,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 for (const Value& v : iter_list(args))
@@ -1727,18 +1727,17 @@ namespace basil {
                 return v_void({});
             },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
-                vector<rc<AST>> nodes;
-                for (const Value& v : iter_list(args)) {
-                    nodes.push(ast_call(call_term.pos, 
-                        ast_func_stub(call_term.pos, t_func(t_runtime_base(v.type), T_VOID), symbol_from("print"), true),
-                        vector_of<rc<AST>>(v.data.rt->ast)));
-                }
+                auto nodes = vector_of<rc<AST>>(
+                    ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), symbol_from("print"), true),
+                        vector_of<rc<AST>>(args.data.rt->ast))
+                );
                 return ast_do(call_term.pos, nodes);
             }
         };
         PRINTLN = {
-            t_func(t_list(T_ANY), T_VOID),
-            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_variadic("values")),
+            t_func(T_ANY, T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("value")),
             BF_COMPTIME | BF_RUNTIME | BF_STATEFUL | BF_PRESERVING,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
                 for (const Value& v : iter_list(args))
@@ -1747,7 +1746,14 @@ namespace basil {
                 println("");
                 return v_void({});
             },
-            nullptr // TODO
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                auto nodes = vector_of<rc<AST>>(
+                    ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), symbol_from("println"), true),
+                        vector_of<rc<AST>>(args.data.rt->ast))
+                );
+                return ast_do(call_term.pos, nodes);
+            }
         };
         DEBUG = {
             t_func(T_ANY, T_VOID),

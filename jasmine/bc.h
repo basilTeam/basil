@@ -142,6 +142,7 @@ namespace jasmine {
         u64 first, last;
         Location loc;
         bitset illegal; // a set of registers this live range is forbidden from binding to
+        LiveRange* link; // a linked range that should mirror this one
         optional<u32> param_idx = none<u32>(); // which parameter this is
         optional<Location> hint = none<Location>();
 

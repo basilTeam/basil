@@ -1686,32 +1686,32 @@ namespace jasmine {
             }
         }
 
-        // println("");
-        // for (u64 i = function.first; i <= function.last; i ++) {
-        //     print("{");
-        //     bool first = true;
-        //     for (u32 r : sets[i - function.first].first) {
-        //         Param p;
-        //         p.kind = PK_REG;
-        //         p.data.reg = {false, r};
-        //         print(first ? "" : " ");
-        //         print_param(function.ctx, p, _stdout, "");
-        //         first = false;
-        //     }
-        //     print("} => {");
-        //     first = true;
-        //     for (u32 r : sets[i - function.first].second) {
-        //         Param p;
-        //         p.kind = PK_REG;
-        //         p.data.reg = {false, r};
-        //         print(first ? "" : " ");
-        //         print_param(function.ctx, p, _stdout, "");
-        //         first = false;
-        //     }
-        //     print("}\t");
-        //     print_insn(function.ctx, _stdout, insns[i]);
-        // }
-        // println("");
+        println("");
+        for (u64 i = function.first; i <= function.last; i ++) {
+            print("{");
+            bool first = true;
+            for (u32 r : sets[i - function.first].first) {
+                Param p;
+                p.kind = PK_REG;
+                p.data.reg = {false, r};
+                print(first ? "" : " ");
+                print_param(function.ctx, p, _stdout, "");
+                first = false;
+            }
+            print("} => {");
+            first = true;
+            for (u32 r : sets[i - function.first].second) {
+                Param p;
+                p.kind = PK_REG;
+                p.data.reg = {false, r};
+                print(first ? "" : " ");
+                print_param(function.ctx, p, _stdout, "");
+                first = false;
+            }
+            print("}\t");
+            print_insn(function.ctx, _stdout, insns[i]);
+        }
+        println("");
 
         map<u64, optional<LiveRange>> ranges;
         for (u64 i = function.first; i <= function.last; i ++) {
@@ -1761,11 +1761,11 @@ namespace jasmine {
             Param p;
             p.kind = PK_REG;
             p.data.reg = r.reg;
-            // print("register ");
-            // print_param({}, p, _stdout, "");
-            // println(" live from ", r.first, " to ", r.last);
+            print("register ");
+            print_param({}, p, _stdout, "");
+            println(" live from ", r.first, " to ", r.last);
         }
-        // println("");
+        println("");
     }
 
     void clobber(Function& f, const Insn& insn, u32 insn_idx, const_slice<bitset*> regs, 

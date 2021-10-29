@@ -177,8 +177,8 @@ namespace basil {
             return none<rc<Section>>();
         }
 
-        // vector<jasmine::Insn> insns = jasmine::disassemble_all_insns(object->get_context(), *object);
-        // for (auto& insn : insns) jasmine::print_insn(object->get_context(), _stdout, insn);
+        vector<jasmine::Insn> insns = jasmine::disassemble_all_insns(object->get_context(), *object);
+        for (auto& insn : insns) jasmine::print_insn(object->get_context(), _stdout, insn);
 
         return some<rc<Section>>(jasmine_section(section->name, object));
     }
@@ -511,7 +511,7 @@ namespace basil {
                 native->writeELF(obj.raw());
                 ustring cmd = format<ustring>("gcc -nostdlib ", obj, " -Wl,-e.basil_main -o ", compute_object_name(obj.raw(), ""));
                 for (const char* arg : args) cmd += " ", cmd += arg; // add linker args
-                println(cmd);
+                // println(cmd);
                 system(cmd.raw());
                 cmd = format<ustring>("rm ", obj);
                 system(cmd.raw());

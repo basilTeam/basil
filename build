@@ -1,0 +1,184 @@
+#!/usr/bin/env python
+
+#######################################################################
+#                       - Platform Detection -                        #
+#                                                                     #
+# Populate a list of supported tools and figure out which one to use. #
+#######################################################################
+
+def cmd_exists(cmd): # see if a given command is available on the system PATH
+    from distutils.spawn import find_executable
+    return find_executable(cmd) is not None
+
+# First, we'll find out what OS we're on.
+
+import platform
+OS = platform.system().strip()
+if OS.startswith("MINGW"): OS = "MinGW"
+if OS.startswith("MSYS"): OS = "MSYS"
+
+# Next, we'll assemble a list of supported compilers across all platforms, and choose
+# the first one that's available.
+
+SUPPORTED_COMPILERS = []
+SUPPORTED_COMPILERS.append("clang++") # default to clang
+for i in range(13, 4, -1): SUPPORTED_COMPILERS.append("clang++-" + str(i)) # clang++ 5 and higher support C++17
+
+SUPPORTED_COMPILERS.append("g++")
+for i in range(11, 6, -1): SUPPORTED_COMPILERS.append("g++-" + str(i))  # g++ 7 and higher support C++17 to the degree we need
+
+SUPPORTED_COMPILERS.append("msvc++")
+
+CXX = None
+for cxx in SUPPORTED_COMPILERS:
+    if cmd_exists(cxx):
+        CXX = cxx
+        break
+
+# We'll do likewise for linkers.
+
+SUPPORTED_LINKERS = ["ld", "link"]
+LD = None
+for ld in SUPPORTED_LINKERS:
+    if cmd_exists(ld):
+        LD = ld
+        break
+
+# ...and static library tools.
+
+SUPPORTED_ARCHIVERS = ["ar", "lib"]
+AR = None
+for ar in SUPPORTED_ARCHIVERS:
+    if cmd_exists(ar):
+        AR = ar
+        break;
+
+# Finally, we'll parse the program arguments, overriding our defaults if specified.
+
+PRODUCTS = ["basil-release", "basil-debug", "rt-static", "rt-dynamic", "jasmine-release", "jasmine-debug", "test"]
+
+import sys
+import argparse
+parser = argparse.ArgumentParser(description="Build an artifact from the Basil or Jasmine projects.")
+parser.add_argument("-v", "--verbose", action='store_true', help="Enable additional output from the build script.")
+parser.add_argument("--cxx", default=CXX, help="Override the default C++ compiler.")
+parser.add_argument("--ld", default=LD, help="Override the default linker.")
+parser.add_argument("--clean", action='store_true', help="Scrub all compiler artifacts from the current directory before building.")
+parser.add_argument("--cxxflags", default="", help="Define additional C++ compiler flags to use.")
+parser.add_argument("--ldflags", default="", help="Define additional C++ linker flags to use.")
+parser.add_argument("target", choices=PRODUCTS, default="basil-release", metavar="target", nargs='?', help="Specifies the desired product you'd like to build.")
+args = parser.parse_args(sys.argv[1:])
+
+CXX = args.cxx
+LD = args.ld
+VERBOSE = args.verbose
+TARGET = args.target
+CLEAN = args.clean
+
+if not CXX:
+    print("No valid C++ compiler could be automatically detected! Consider explicitly specifying one using '--cxx'.")
+    sys.exit(1)
+if not cmd_exists(CXX):
+    print("Could not resolve C++ compiler '" + CXX + "'.")
+    sys.exit(1)
+
+if not LD:
+    print("No valid linker could be automatically detected! Consider explicitly specifying one using '--ld'.")
+    sys.exit(1)
+if not cmd_exists(LD):
+    print("Could not resolve linker '" + LD + "'.")
+    sys.exit(1)
+
+if VERBOSE: print("Detected OS '" + OS + "'.")
+if VERBOSE: print("Using C++ compiler '" + CXX + "'.")
+if VERBOSE: print("Using linker '" + LD + "'.")
+
+####################################################################################
+#                                - Select Process -                                #
+#                                                                                  #
+# Choose compiler flags, linker flags, and commands to run based on the toolchain. #
+####################################################################################
+
+##########################################################################
+#                        - Detect Changed Files -                        #
+#                                                                        #
+# Compose a list of project sources and detect which need to be updated. #
+##########################################################################
+
+import glob
+
+# First, we find all sources in all source directories.
+
+COMPILER_SRCS = glob.glob("compiler/*.cpp")
+JASMINE_SRCS = glob.glob("jasmine/*.cpp")
+UTIL_SRCS = glob.glob("util/*.cpp")
+RUNTIME_SRCS = glob.glob("runtime/*.cpp")
+
+import os
+
+# We compute object file names for each C++ source.
+
+COMPILER_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in COMPILER_SRCS}
+JASMINE_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in JASMINE_SRCS}
+UTIL_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in UTIL_SRCS}
+RUNTIME_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in RUNTIME_SRCS}
+
+# This table defines our desired target pattern based on the selected target and our
+# current operating system.
+
+PRODUCTS_BY_TARGET = {
+    "librt-static": {
+        "Windows": "bin/librt.lib", 
+        "Linux": "bin/librt.a", 
+        "Darwin": "bin/librt.a", 
+        "MSYS": "bin/librt.a",
+        "MinGW": "bin/librt.a"
+    }[OS],
+    "librt-dynamic": {
+        "Windows": "bin/librt.dll",
+        "Linux": "bin/librt.so",
+        "Darwin": "bin/librt.dylib",
+        "MSYS": "bin/librt.dll",
+        "MinGW": "bin/librt.dll"
+    }[OS],
+    "jasmine-debug": "bin/jasmine",
+    "jasmine-release": "bin/jasmine",
+    "basil-debug": "bin/basil",
+    "basil-release": "bin/basil"
+}
+
+# Now that we've computed all the object and target names, let's clean up any existing ones
+# if specified in the arguments.
+
+if CLEAN:
+    for src in OBJS: os.remove(OBJS[src])
+    os.rmdir("bin/")
+
+# This table defines which objects we need to build our desired target.
+
+OBJS_BY_TARGET = {
+    "librt-static": [RUNTIME_OBJS],
+    "librt-dynamic": [RUNTIME_OBJS],
+    "jasmine-debug": [JASMINE_OBJS, UTIL_OBJS],
+    "jasmine-release": [JASMINE_SRCS, UTIL_OBJS],
+    "basil-debug": [COMPILER_OBJS, JASMINE_OBJS, UTIL_OBJS, RUNTIME_OBJS],
+    "basil-release": [COMPILER_OBJS, JASMINE_OBJS, UTIL_OBJS, RUNTIME_OBJS]
+}
+
+# We determine which objects are needed by our target...
+
+OBJS = {}
+for srcpack in OBJS_BY_TARGET[TARGET]: 
+    OBJS.update(srcpack)
+
+# ...and of those, which need to be recompiled, either due to a newer source file or missing
+# object file.
+
+RECOMPILED_OBJS = { src: OBJS[src] for src in OBJS if not os.path.exists(OBJS[src]) or os.path.getmtime(src) > os.path.getmtime(OBJS[src]) }
+if VERBOSE:
+    for src in RECOMPILED_OBJS:
+        if not os.path.exists(OBJS[src]):
+            reason = "artifact '" + OBJS[src] + "' does not exist."
+        else:
+            reason = "source file is newer than object file."
+        print("Recompiling '" + src + "': " + reason)

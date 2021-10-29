@@ -1,3 +1,4 @@
+<br>
 <p align=center><img src="logo.png" width=100vw></p>
 
 # The Basil Programming Language

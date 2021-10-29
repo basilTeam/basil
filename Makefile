@@ -60,39 +60,39 @@ CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -fno-threadsafe-statics
 TESTFLAGS = $(SHAREDFLAGS)
 
 build:
-	mkdir -p build
+	mkdir -p bin
 
 clean:
-	rm -rf $(OBJS) $(TEST_OBJS) *.o.tmp basil librt.a runtime/*.o build/
+	rm -rf $(OBJS) $(TEST_OBJS) *.o.tmp basil librt.a runtime/*.o bin/
 
 jasmine: $(JASMINE_OBJS) jasmine/main.o build
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(JASMINE_OBJS) jasmine/main.o -o build/$@ $(LDLIBS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(JASMINE_OBJS) jasmine/main.o -o bin/$@ $(LDLIBS)
 
 jasmine-release: $(JASMINE_SRCS) build
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(JASMINE_SRCS) -o build/jasmine $(LDLIBS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(JASMINE_SRCS) -o bin/jasmine $(LDLIBS)
 	strip -g -R .gnu.version \
 			 -R .gnu.hash \
 			 -R .note \
 			 -R .note.ABI-tag \
 			 -R .note.gnu.build-id \
 			 -R .comment \
-			 --strip-unneeded build/jasmine
+			 --strip-unneeded bin/jasmine
 
 basil: $(OBJS) compiler/main.o librt.a build
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o build/$@ $(LDLIBS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OBJS) compiler/main.o -o bin/$@ $(LDLIBS)
 
 release: $(SRCS) librt.a build
-	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(SRCS) -o build/basil $(LDLIBS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(SRCS) -o bin/basil $(LDLIBS)
 	strip -g -R .gnu.version \
 			 -R .gnu.hash \
 			 -R .note \
 			 -R .note.ABI-tag \
 			 -R .note.gnu.build-id \
 			 -R .comment \
-			 --strip-unneeded build/basil
+			 --strip-unneeded bin/basil
 
 librt.a: build runtime/core.o runtime/sys.o
-	ar r build/$@ $(filter-out build,$^)
+	ar r bin/$@ $(filter-out build,$^)
 
 runtime/%.o: runtime/%.cpp
 	$(CXX) -I. -Iutil -std=c++11 -fPIC -ffast-math -fno-rtti -fno-exceptions -Os -nodefaultlibs -c $< -o $@

@@ -1026,8 +1026,8 @@ namespace basil {
     }
 
     void linearize_postorder(vector<rc<IRBlock>>& ordering, bitset& visited, const rc<IRBlock>& block) {
-        for (const auto& other : block->out) if (!visited.contains(other->id))
-            linearize_postorder(ordering, visited, other);
+        for (i64 i = i64(block->out.size()) - 1; i >= 0; i --) if (!visited.contains(block->out[i]->id))
+            linearize_postorder(ordering, visited, block->out[i]);
         visited.insert(block->id);
         ordering.push(block);
     }

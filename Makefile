@@ -53,7 +53,7 @@ test: SHAREDFLAGS += -g3
 
 basil: SHAREDFLAGS += -g3 -O0
 release: SHAREDFLAGS += -Os -DBASIL_RELEASE -fno-unwind-tables -fno-asynchronous-unwind-tables
-jasmine: SHAREDFLAGS += -g3 -O3
+jasmine: SHAREDFLAGS += -g3 -O0
 jasmine-release: SHAREDFLAGS += -Os -DBASIL_RELEASE -fno-unwind-tables -fno-asynchronous-unwind-tables
 
 CXXFLAGS = $(SHAREDFLAGS) -fno-exceptions -fno-threadsafe-statics 

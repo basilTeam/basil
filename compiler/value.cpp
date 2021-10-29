@@ -273,7 +273,7 @@ namespace basil {
             case K_UNION: write(io, data.u->value, " in ", type); break; // value in (type | type)
             case K_LIST: write_seq(io, iter_list(*this), "(", " ", ")"); break; // (1 2 3)
             case K_TUPLE: write_seq(io, data.tuple->members, "(", ", ", ")"); break; // (1, 2, 3)
-            case K_ARRAY: write_seq(io, data.array->elements, "[", " ", "]"); break; // [1 2 3]
+            case K_ARRAY: write_seq(io, data.array->elements, "{", " ", "}"); break; // [1 2 3]
             case K_STRUCT: write_pairs(io, data.str->fields, "{", " : ", "; ", "}"); break; // {x : 1; y : 2}
             case K_DICT: {
                 if (t_dict_value(type) == T_VOID) write_keys(io, data.dict->elements, "{", " ", "}"); // {1 2 3}
@@ -516,7 +516,7 @@ namespace basil {
 
         Type stub_type = t_func(args_type, t_var());
         if (fn.name) {
-            Value stub = v_runtime(base->pos, t_runtime(stub_type), ast_func_stub(base->pos, stub_type, *fn.name));
+            Value stub = v_runtime(base->pos, t_runtime(stub_type), ast_func_stub(base->pos, stub_type, *fn.name, true));
             local->def(*fn.name, stub);
             // we want to make this available for mutually recursive calls, so we add it to the table
             // (it'll be replaced later, upon successful compilation of this function)
@@ -1347,11 +1347,12 @@ namespace basil {
         }
 
         if (target.of(K_TYPE)) switch (src.type.kind()) { // coercing to type
-            case K_ARRAY:
-                if (v_array_len(src) != 1) panic("Array '", src, "' being coerced to type has more than one element!");
-                if (!v_array_at(src, 0).type.coerces_to(T_TYPE)) 
-                    panic("Array being coerced to type has non-type element '", v_array_at(src, 0), "'!");
-                return v_type(src.pos, t_list(coerce(env, v_array_at(src, 0), T_TYPE).data.type));
+            case K_LIST:
+                if (v_tail(src).type != T_VOID) 
+                    panic("List '", src, "' being coerced to type has more than one element!");
+                if (!v_head(src).type.coerces_to(T_TYPE)) 
+                    panic("List being coerced to type has non-type element '", v_head(src), "'!");
+                return v_type(src.pos, t_list(coerce(env, v_head(src), T_TYPE).data.type));
             case K_TUPLE: {
                 vector<Type> elts;
                 for (const Value& v : v_tuple_elements(src)) {

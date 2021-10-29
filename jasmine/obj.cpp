@@ -25,6 +25,23 @@ namespace jasmine {
         read(path);
     }
 
+    Object::Object(const Object& other):
+        target(other.target), buf(other.buf), defs(other.defs), def_positions(other.def_positions),
+        refs(other.refs), loaded_code(other.loaded_code) {}
+        
+    Object& Object::operator=(const Object& other) {
+        if (&other != this) {
+            if (loaded_code) free_exec(loaded_code, buf.size());
+            target = other.target;
+            buf = other.buf;
+            defs = other.defs;
+            def_positions = other.def_positions;
+            refs = other.refs;
+            loaded_code = other.loaded_code;
+        }
+        return *this;
+    }
+
     Object::Object(Object&& other):
         target(other.target), buf(other.buf), defs(other.defs), def_positions(other.def_positions),
         refs(other.refs), loaded_code(other.loaded_code) {}
@@ -74,6 +91,11 @@ namespace jasmine {
     void Object::define(Symbol symbol) {
         defs.put(symbol, buf.size());
         def_positions.put(buf.size(), symbol);
+    }
+    
+    void Object::define_native(Symbol symbol, void* address) {
+        defs.put(symbol, u64(address));
+        def_positions.put(u64(address), symbol);
     }
 
     void Object::reference(Symbol symbol, RefType type, i8 field_offset) {
@@ -326,6 +348,14 @@ namespace jasmine {
         }
     }
 
+    Context& Object::get_context() {
+        return ctx;
+    }
+
+    const Context& Object::get_context() const {
+        return ctx;
+    }
+
     void Object::set_context(const Context& ctx_in) {
         ctx = ctx_in;
     }
@@ -526,12 +556,12 @@ namespace jasmine {
             symtab.write<u32>(ind); // name
             u8 info = 0;
             info |= (entry.first.type == LOCAL_SYMBOL ? 0 : 1) << 4; // binding
-            info |= 2; // function value assumed...for now
+            info |= (entry.first.type == LOCAL_SYMBOL ? 0 : 2); // function value assumed...for now
             symtab.write(info);
             symtab.write('\0'); // padding
             symtab.write<u16>(entry.second == -1ul ? 0 : 4); // .text section index
             symtab.write<u64>(entry.second == -1ul ? 0 : entry.second); // address
-            symtab.write<u64>(8); // symbol size = word size?
+            symtab.write<u64>(0); // symbol size = word size?
         }
 
         resolve_ELF_addends();

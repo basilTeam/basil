@@ -12,6 +12,18 @@
 #include "eval.h"
 
 namespace basil {
+    Symbol mangle(Symbol name, Type type) {
+        ustring s = string_from(name);
+        s += "_";
+        buffer b;
+        Type t = t_arg(type);
+        if (t.of(K_TUPLE)) for (u32 i = 0; i < t_tuple_len(t); i ++)
+            t_tuple_at(t, i).write_mangled(b);
+        else t.write_mangled(b);
+        s += ustring(b);
+        return symbol_from(s);
+    }
+
     AST::AST(Source::Pos pos_in, ASTKind kind_in, Type type_in): 
         pos(pos_in), t(t_runtime_base(type_in)), k(kind_in) {}
 
@@ -384,6 +396,12 @@ namespace basil {
         }
 
         IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
+            auto val = env->find(name);
+            if (val) {
+                auto ast = val->data.rt->ast;
+                if (ast->kind() == AST_FUNCTION || ast->kind() == AST_FUNCTION_STUB) 
+                    return ast->gen_ssa(env, func);
+            }
             return ir_var(func, name);
         }
     };
@@ -1092,25 +1110,27 @@ namespace basil {
 
     struct ASTFunctionStub : public ASTLeaf {
         Symbol name;
+        bool do_mangle, mangled = false;
         
-        ASTFunctionStub(Source::Pos pos, Type type, Symbol name_in):
-            ASTLeaf(pos, AST_FUNCTION_STUB, type), name(name_in) {}
+        ASTFunctionStub(Source::Pos pos, Type type, Symbol name_in, bool do_mangle_in):
+            ASTLeaf(pos, AST_FUNCTION_STUB, type), name(name_in), do_mangle(do_mangle_in) {}
 
         void format(stream& io) const override {
             write(io, name);
         }
 
         rc<AST> clone() const override {
-            return ref<ASTFunctionStub>(pos, t, name);
+            return ref<ASTFunctionStub>(pos, t, name, do_mangle);
         }
 
         IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
-            return ir_none(); // stubs don't have any code
+            if (do_mangle && !mangled) mangled = true, name = mangle(name, type(env));
+            return ir_label(name); // name only
         }
     };
 
-    rc<AST> ast_func_stub(Source::Pos pos, Type type, Symbol name) {
-        return ref<ASTFunctionStub>(pos, type, name);
+    rc<AST> ast_func_stub(Source::Pos pos, Type type, Symbol name, bool do_mangle) {
+        return ref<ASTFunctionStub>(pos, type, name, do_mangle);
     }
 
     static u32 anon_id = 0;
@@ -1150,6 +1170,7 @@ namespace basil {
 
         IRParam gen_ssa(rc<Env> outer_env, rc<IRFunction> func) override {
             if (!ir_func) {
+                name = mangle(name, type(env));
                 ir_func = ref<IRFunction>(name, type(outer_env));
                 for (u32 i = 0; i < args.size(); i ++) ir_func->add_insn(
                     ir_arg(ir_func, env->find(args[i])->data.rt->ast->type(outer_env), ir_var(func, args[i]), i)
@@ -1157,7 +1178,7 @@ namespace basil {
                 IRParam returned = operand()->gen_ssa(env, ir_func);
                 ir_func->finish(operand()->type(env), returned);
             }
-            return ir_var(func, name);
+            return ir_label(name);
         }
     };
 

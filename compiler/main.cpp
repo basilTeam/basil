@@ -37,17 +37,20 @@ void help(int argc, const char** argv) {
     println(" • Start the interactive tutorial:         ", BOLD, argv[0], " intro [", ITALIC, "chapter", BOLD, "]", RESET);
     println(" • Show this help message:                 ", BOLD, argv[0], " help", RESET);
     println(" • Run a file:                             ", BOLD, argv[0], " run <", ITALIC, "filename", BOLD, ">", RESET);
-    println(" • Compile a file to a Basil object:       ", BOLD, argv[0], " compile <", ITALIC, "filename", BOLD, ">", RESET);
-    println("    ○ ...as a raw source file:             ", GRAY, argv[0], " compile ", BOLDWHITE, "-s, --source ", GRAY, "<", ITALIC, "filename", BOLD, ">", RESET);
-    println("    ○ ...as a parsed source file:          ", GRAY, argv[0], " compile ", BOLDWHITE, "-p, --parse ", GRAY, "<", ITALIC, "filename", BOLD, ">", RESET);
-    println("    ○ ...as a compile-time module:         ", GRAY, argv[0], " compile ", BOLDWHITE, "-e, --eval ", GRAY, "<", ITALIC, "filename", BOLD, ">", RESET);
-    println("    ○ ...as a typed AST:                   ", GRAY, argv[0], " compile ", BOLDWHITE, "-a, --ast ", GRAY, "<", ITALIC, "filename", BOLD, ">", RESET);
-    println("    ○ ...as a low-level SSA form:          ", GRAY, argv[0], " compile ", BOLDWHITE, "-i, --ir ", GRAY, "<", ITALIC, "filename", BOLD, ">", RESET);
-    println("    ○ ...as a portable bytecode object:    ", GRAY, argv[0], " compile ", BOLDWHITE, "-j, --jasmine ", GRAY, "<", ITALIC, "filename", BOLD, ">", RESET);
-    println("    ○ ...as a native binary:               ", GRAY, argv[0], " compile ", BOLDWHITE, "-n, --native ", GRAY, "<", ITALIC, "filename", BOLD, ">", RESET);
+    println(" • Build a Basil object from source:       ", BOLD, argv[0], " build <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a raw source file:             ", GRAY, argv[0], " build ", BOLDWHITE, "source", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a parsed source file:          ", GRAY, argv[0], " build ", BOLDWHITE, "parsed", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a compile-time module:         ", GRAY, argv[0], " build ", BOLDWHITE, "module", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a typed AST:                   ", GRAY, argv[0], " build ", BOLDWHITE, "ast", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a low-level SSA form:          ", GRAY, argv[0], " build ", BOLDWHITE, "ir", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a portable bytecode object:    ", GRAY, argv[0], " build ", BOLDWHITE, "jasmine", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a native binary:               ", GRAY, argv[0], " build ", BOLDWHITE, "native", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
     println(" • Link several Basil objects together:    ", BOLD, 
         argv[0], " link <", ITALIC, "inputs...", RESET,    "> <", ITALIC, "output", BOLD, ">", RESET);
-    println(" • Build a native executable:              ", BOLD, argv[0], " build <", ITALIC, "filename", BOLD, ">", RESET);
+    println(" • Compile a native artifact:              ", BOLD, argv[0], " compile <", ITALIC, "filename", BOLD, ">", RESET);
+    println("    ○ ...as a shared object:               ", GRAY, argv[0], " compile ", BOLDWHITE, "library", GRAY, " <", ITALIC, "filename", BOLD, "> [", ITALIC, "objects...", BOLD, "]", RESET);
+    println("    ○ ...as an executable:                 ", GRAY, argv[0], " compile ", BOLDWHITE, "executable", GRAY, " <", ITALIC, "filename", BOLD, "> [", ITALIC, "objects...", BOLD, "]", RESET);
+    println("    ○ ...as a relocatable object:          ", GRAY, argv[0], " compile ", BOLDWHITE, "object", GRAY, " <", ITALIC, "filename", BOLD, ">", RESET);
     println(" • Display a Basil object's contents:      ", BOLD, argv[0], " show <", ITALIC, "filename", BOLD, ">", RESET);
     println("");
 }
@@ -92,10 +95,10 @@ void run(int argc, const char** argv) {
     return basil::run(argv[2]);
 }
 
-// Compiles a file.
-void compile(int argc, const char** argv) {
+// Builds a Basil object.
+void build(int argc, const char** argv) {
     if (argc != 3 && argc != 4) {
-        println("Usage: ", BOLD, argv[0], " compile <", ITALIC, "filename", BOLD, ">", RESET);
+        println("Usage: ", BOLD, argv[0], " build <", ITALIC, "filename", BOLD, ">", RESET);
         println("");
         help(argc, argv);
         return;
@@ -111,24 +114,67 @@ void compile(int argc, const char** argv) {
     }
 
     map<ustring, basil::SectionType> typemap;
-    typemap["-s"] = typemap["--source"] = basil::ST_SOURCE;
-    typemap["-p"] = typemap["--parse"] = basil::ST_PARSED;
-    typemap["-e"] = typemap["--eval"] = basil::ST_EVAL;
-    typemap["-a"] = typemap["--ast"] = basil::ST_AST;
-    typemap["-i"] = typemap["--ir"] = basil::ST_IR;
-    typemap["-j"] = typemap["--jasmine"] = basil::ST_JASMINE;
-    typemap["-n"] = typemap["--native"] = basil::ST_NATIVE;
+    typemap["source"] = basil::ST_SOURCE;
+    typemap["parsed"] = basil::ST_PARSED;
+    typemap["module"] = basil::ST_EVAL;
+    typemap["ast"] = basil::ST_AST;
+    typemap["ir"] = basil::ST_IR;
+    typemap["jasmine"] = basil::ST_JASMINE;
+    typemap["native"] = basil::ST_NATIVE;
     basil::SectionType target;
     if (argc == 3) target = basil::ST_NATIVE; // take it as far as it can go
     else if (typemap.contains(argv[2]))
         target = typemap[argv[2]];
     else {
         println("Unknown compilation phase '", argv[2], "' - valid options are 'source', ",
-            "'parse', 'eval', 'ast', 'ir', 'jasmine', and 'native'.");
+            "'parsed', 'module', 'ast', 'ir', 'jasmine', and 'native'.");
         return;
     }
 
-    basil::compile(argv[argc - 1], target);
+    basil::build(argv[argc - 1], target);
+}
+
+// Compiles a file.
+void compile(int argc, const char** argv) {
+    if (argc < 3) {
+        println("Usage: ", BOLD, argv[0], " compile <", ITALIC, "filename", BOLD, ">", RESET);
+        println("");
+        help(argc, argv);
+        return;
+    }
+
+    map<ustring, basil::NativeType> typemap;
+    typemap["object"] = basil::NT_OBJECT;
+    typemap["library"] = basil::NT_LIBRARY;
+    typemap["executable"] = basil::NT_EXECUTABLE;
+    basil::NativeType target;
+    const char** src;
+    if (typemap.contains(argv[2])) {
+        target = typemap[argv[2]];
+        if (argc < 4) {
+            println("Usage: ", BOLD, argv[0], " compile <", ITALIC, "filename", BOLD, ">", RESET);
+            println("");
+            help(argc, argv);
+            return;
+        }
+        src = argv + 3;
+    }
+    else {
+        target = basil::NT_EXECUTABLE;
+        src = argv + 2;
+    }
+
+    {
+        file f(*src, "r");
+        if (!f) {
+            println("Couldn't find source file '", *src, "'.");
+            println("");
+            help(argc, argv);
+            return;
+        }
+    }
+
+    basil::compile(*src, target, const_slice<const char*>((argv + argc - 1) - src, src + 1));
 }
 
 int main(int argc, const char** argv) {
@@ -137,6 +183,7 @@ int main(int argc, const char** argv) {
     map<ustring, void(*)(int, const char**)> drivers;
     drivers["help"] = help;
     drivers["run"] = run;
+    drivers["build"] = build;
     drivers["compile"] = compile;
 
     if (argc == 1) {

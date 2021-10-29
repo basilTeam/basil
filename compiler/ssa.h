@@ -17,6 +17,7 @@
 #include "util/hash.h"
 #include "util/sets.h"
 #include "type.h"
+#include "jasmine/bc.h"
 
 namespace basil {
     struct IRInsn;
@@ -34,7 +35,19 @@ namespace basil {
         IK_SYMBOL,
         IK_TYPE,
         IK_CHAR,
+        IK_LABEL,
         IK_BLOCK
+    };
+
+    enum IROp {
+        IR_ADD, IR_SUB, IR_MUL, IR_DIV, IR_REM,
+        IR_AND, IR_XOR, IR_OR, IR_NOT,
+        IR_LT, IR_LE, IR_GT, IR_GE, IR_EQ, IR_NE,
+        IR_GOTO, IR_IF, IR_IFGOTO,
+        IR_CALL, IR_ARG, IR_RETURN,
+        IR_HEAD, IR_TAIL, IR_CONS,
+        IR_ASSIGN,
+        IR_PHI
     };
 
     struct IRParam {
@@ -48,6 +61,7 @@ namespace basil {
             ustring string;
             Symbol sym;
             Type type;
+            Symbol label;
             u32 block;
             Data();
             ~Data();
@@ -63,13 +77,17 @@ namespace basil {
         IRParam(const IRParam& other);
         IRParam& operator=(const IRParam& other);
 
+        // Convert this parameter to a low-level Jasmine representation.
+        jasmine::Param emit(Context& ctx) const;
+
         // Writes a textual representation of this parameter to the provided
         // output stream.
         void format(stream& io) const;
     };
     
     struct IRBlock {
-        u32 id;
+        u32 id, uid; // id is the index of the block within a function, uid is unique for the block across the program
+        optional<jasmine::Symbol> lbl;
         vector<rc<IRInsn>> insns;
         vector<rc<IRBlock>> in, out;
 
@@ -82,13 +100,33 @@ namespace basil {
         // Tracks the SSA register numbers going in and out of this block.
         map<Symbol, u32> vars_in, vars_out;
         map<Symbol, bitset> phis;
+        
+        // The index of this basic block after scheduling
+        u32 ord = 0;
 
         void add_exit(rc<IRBlock> dest);
         void add_entry(rc<IRBlock> dest);
 
+        // Removes all instructions from this block that pass the given predicate.
+        template<typename Func>
+        void remove_if(const Func& pred) {
+            auto* write = &insns.front();
+            for (const rc<IRInsn>& insn : insns) {
+                *write = insn;
+                if (!pred(*insn)) write ++;
+            }
+            while (&insns.back() >= write) insns.pop();
+        }
+
         // Writes a textual representation of this basic block to the provided
         // output stream.
         void format(stream& io) const;
+
+        // Emits a label and all internal instructions to Jasmine bytecode.
+        void emit(IRFunction& func, Context& ctx);
+
+        // Returns the low-level Jasmine label corresponding to this basic block.
+        jasmine::Symbol label();
     };
 
     struct VarInfo {
@@ -112,6 +150,7 @@ namespace basil {
 
         u32 block_idx = 0;
         vector<rc<IRBlock>> blocks;
+        vector<rc<IRBlock>> block_layout;
         rc<IRBlock> entry, exit, active_block;
 
         // Tracks which passes have been done over this function.
@@ -147,15 +186,19 @@ namespace basil {
         // Writes a textual representation of this function to the provided
         // output stream.
         void format(stream& io) const;
+
+        // Writes this function to a Jasmine bytecode instruction stream.
+        void emit(Context& ctx);
     };
 
     struct IRInsn {
+        IROp op;
         Type type;
         optional<IRParam> dest;
         vector<IRParam> src; 
         bitset in, out;
 
-        IRInsn(Type type_in, const optional<IRParam>& dest_in);
+        IRInsn(IROp op_in, Type type_in, const optional<IRParam>& dest_in);
 
         virtual ~IRInsn();
 
@@ -166,6 +209,9 @@ namespace basil {
         // Writes a textual representation of this instruction to the provided
         // output stream.
         virtual void format(stream& io) const = 0;
+
+        // Emits Jasmine instruction(s) implementing this IR instruction.
+        virtual void emit(IRFunction& func, Context& ctx) const = 0;
 
         // Writes liveness information about this instruction to the provided output
         // stream.
@@ -181,6 +227,7 @@ namespace basil {
     IRParam ir_sym(Symbol s);
     IRParam ir_type(Type t);
     IRParam ir_char(rune ch);
+    IRParam ir_label(Symbol l);
     IRParam ir_none();
     // Creates a fresh temporary variable, unique within the provided function.
     IRParam ir_temp(rc<IRFunction> func);
@@ -230,7 +277,14 @@ namespace basil {
         GLOBAL_VALUE_NUMBERING,
         CONSTANT_FOLDING,
         OPTIMIZE_ARITHMETIC,
+        LINEARIZE_CFG,
+        PHI_ELIMINATION,
+        CLEANUP_NOPS,
         NUM_PASS_TYPES
+    };
+    
+    enum OptLevel {
+        OPT_FAST
     };
 
     extern Pass PASS_TABLE[NUM_PASS_TYPES];
@@ -245,6 +299,9 @@ namespace basil {
     // by recent changes. Invalidating a pass does not eagerly force it to be recomputed,
     // but future calls to require() for that pass will.
     void invalidate(rc<IRFunction> func, PassType pass);
+
+    // Applies a default selection of passes based on an optimization level.
+    void optimize(rc<IRFunction> func, OptLevel level);
 
     // Enforces SSA over the instructions of the provided function. This means
     // detecting duplicate assignments of the same variable and numbering accordingly,
@@ -280,6 +337,17 @@ namespace basil {
     // avoided, but smaller optimizations like code size reduction are left to
     // a lower-level code generation pass.
     void optimize_arithmetic_ssa(rc<IRFunction> func);
+
+    // Computes a linear scheduling of basic blocks within the function.
+    void linearize_cfg(rc<IRFunction> func);
+
+    // Eliminates phi nodes, replacing them with moves as necessary.
+    void phi_elim(rc<IRFunction> func);
+
+    // Remove any no-op instructions from the provided function. This includes:
+    //  - Gotos that jump to the subsequent instruction.
+    // This is typically the final phase before bytecode generation.
+    void cleanup_nops(rc<IRFunction> func);
 }
 
 template<>

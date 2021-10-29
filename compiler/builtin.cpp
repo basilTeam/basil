@@ -15,8 +15,8 @@
 
 namespace basil {
     Builtin
-        DEF, DEF_TYPED, LAMBDA, DO, META, EVAL, QUOTE, INFIX_DEF, // special forms, core behavior
-        IMPORT, MODULE, USE, USE_AS, // modules
+        DEF, DEF_TYPED, DEF_EXTERN, LAMBDA, DO, META, EVAL, QUOTE, // special forms, core behavior
+        IMPORT, MODULE, USE_STRING, USE_MODULE, // modules
         AT_MODULE, AT_TUPLE, AT_ARRAY, DOT, // accessors
         IF, IF_ELSE, WHILE, ARROW, MATCHES, MATCH, // conditionals
         ADD_INT, ADD_FLOAT, ADD_DOUBLE, SUB, MUL, DIV, REM, // arithmetic
@@ -29,6 +29,7 @@ namespace basil {
         UNION_TYPE, NAMED_TYPE, FN_TYPE, REF_TYPE, JUST, TYPE_VAR, // type operators
         TYPEOF, IS, ANNOTATE, IS_SUBTYPE,
         ASSIGN, // mutation
+        PRINT, PRINTLN, WRITE, WRITELN, // IO
         DEBUG; // debug
 
     bool builtins_inited = false;
@@ -116,7 +117,7 @@ namespace basil {
     //  - Merge values with different types into type-level intersections.
     //  - Return an error value if an incompatibility is observed.
     Value merge_defs(Source::Pos pos, rc<Env> env, optional<const Value&> existing, const Value& fresh) {
-        if (!existing) return fresh;
+        if (!existing || existing->type.of(K_UNDEFINED)) return fresh;
         else if (fresh.type.of(K_UNDEFINED)) return *existing; // skip undefined values
         else if (existing->type.of(K_UNDEFINED)) return fresh; // replace undefined values with fresh ones
         else if (existing->type.of(K_FORM_FN)) {
@@ -168,7 +169,7 @@ namespace basil {
                 return add_type_overload(pos, *existing, fresh); // do type-level overload
             }
         }
-        else panic("Couldn't merge defs!");
+        else return fresh; // replace old def
         return v_error({});
     }
 
@@ -322,14 +323,14 @@ namespace basil {
     }
 
     // Handles form-level predefinition.
-    template<bool HAS_TYPE>
+    template<bool HAS_TYPE, bool IS_EXTERN>
     rc<Form> define_form(rc<Env> env, const Value& term) {
         Value params = v_head(v_tail(term)), next = v_head(v_tail(v_tail(term)));
         auto iterable = iter_list(term);
         list_iterator a = iterable.begin(), b = iterable.begin();
         ++ a;
         while (a != iterable.end()) ++ a, ++ b;
-        Value body = *b; // body is last term
+        Value body = IS_EXTERN ? v_void({}) : *b; // body is last term
         body = v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body);
         if (next.type == T_SYMBOL && (next.data.sym == S_ASSIGN || next.data.sym == S_OF || next.data.sym == S_COLON)) { // defining var
             if (params.type != T_SYMBOL) {
@@ -371,8 +372,8 @@ namespace basil {
     }
 
     // Handles a value-level definition.
-    Value define(rc<Env> env, const Value& args, optional<Value> type_expr) {
-        Value params = v_at(args, 0), body = v_at(args, type_expr ? 2 : 1);
+    Value define(rc<Env> env, const Value& args, optional<Value> type_expr, bool is_extern) {
+        Value params = v_at(args, 0), body = is_extern ? v_void({}) : v_at(args, type_expr ? 2 : 1);
         body = v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body);
         if (params.type != T_VOID && v_tail(params).type == T_VOID) { // defining var
             params = v_head(params);
@@ -382,7 +383,7 @@ namespace basil {
                 return v_error({});
             }
             Symbol name = params.data.sym;
-            Value init = eval(env, body); // get the initial value
+            Value init = is_extern ? v_void({}) : eval(env, body); // get the initial value
             init.form = body.form;
             if (init.type == T_ERROR) return init; // propagate errors
 
@@ -395,12 +396,13 @@ namespace basil {
                 }
                 type_value = coerce(env, type_value, T_TYPE);
                 Type type = type_value.data.type;
-                if (!init.type.coerces_to(type)) {
+                if (!is_extern && !init.type.coerces_to(type)) {
                     err(init.pos, "Inferred variable type '", init.type, 
                         "' is incompatible with declared type '", type, "'.");
                     return v_error({});
                 }
-                init = coerce(env, init, type);
+                init = is_extern ? v_runtime(params.pos, t_runtime(type), ast_unknown(params.pos, type))
+                     : coerce(env, init, type);
             }
 
             env->def(name, init);
@@ -432,7 +434,15 @@ namespace basil {
             }
 
             Type fntype = t_func(args_type, ret_type);
-            Value func = v_func(args.pos, result.data.sym, fntype, fn_env, arg_names, 
+            if (is_extern && !t_is_concrete(fntype)) {
+                err(type_expr->pos, "Found generic type annotation '", fntype, "' for extern function '",
+                    result.data.sym, "'.");
+                return v_error({});
+            }
+            Value func = is_extern
+                ? v_runtime(args.pos, t_runtime(fntype), ast_func_stub(args.pos, fntype, result.data.sym, false))
+                    .with(form)
+                : v_func(args.pos, result.data.sym, fntype, fn_env, arg_names, 
                 v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body)).with(form);
 
             Value merged = merge_defs(params.pos, env, env->find(result.data.sym), func);
@@ -769,20 +779,30 @@ namespace basil {
     void init_builtins() {
         DEF = {
             t_func(t_tuple(t_list(T_ANY), T_ANY), T_VOID), // type
-            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<false>, P_SELF, p_term_variadic("params"), p_keyword("="), p_term("body")), // form
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<false, false>, P_SELF, p_term_variadic("params"), p_keyword("="), p_term("body")), // form
             BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
-                return define(env, args, none<Value>());
+                return define(env, args, none<Value>(), false);
             },
             nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
         };
         DEF_TYPED = {
             t_func(t_tuple(t_list(T_ANY), T_ANY, T_ANY), T_VOID), // type
-            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<true>, P_SELF, p_term_variadic("params"), 
-                p_keyword(":"), p_term_variadic("type"), p_keyword("="), p_term("body")), // form
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<true, false>, P_SELF, p_term_variadic("params"), 
+                p_keyword(":"), p_quoted("type"), p_keyword("="), p_term("body")), // form
             BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
-                return define(env, args, some<Value>(v_at(args, 1)));
+                return define(env, args, some<Value>(v_at(args, 1)), false);
+            },
+            nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
+        };
+        DEF_EXTERN = {
+            t_func(t_tuple(t_list(T_ANY), T_ANY), T_VOID), // type
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<true, true>, P_SELF, p_term_variadic("params"), 
+                p_keyword(":"), p_quoted("type")), // form
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
+                return define(env, args, some<Value>(v_at(args, 1)), true);
             },
             nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
         };
@@ -907,7 +927,7 @@ namespace basil {
             },
             nullptr
         };
-        USE = {
+        USE_STRING = {
             t_func(T_STRING, T_VOID), // type
             f_callable(PREC_STRUCTURE, ASSOC_RIGHT,
                 (FormCallback)[](rc<Env> env, const Value& term) -> rc<Form> { // form callback
@@ -916,11 +936,14 @@ namespace basil {
                         return F_TERM; // expecting a string in 2nd position
 
                     optional<rc<Env>> mod_env = load(v_head(v_tail(term)).data.string->data.raw());
-                    if (!mod_env) return F_TERM;
-                    
+                    if (!term.form || term.form->kind != FK_COMPOUND) return F_TERM;
+
                     for (const auto& [k, v] : (*mod_env)->values) {
-                        env->def(k, v);
+                        Value fresh = v_undefined(term.pos, S_QUESTION, v.form);
+                        Value result = merge_defs(term.pos, env, env->find(k), fresh);
+                        env->def(k, result); // define abstract functions
                     }
+
                     return F_TERM;
                 }, P_SELF, p_var("path")), // form,
             BF_COMPTIME,
@@ -928,10 +951,39 @@ namespace basil {
                 optional<rc<Env>> mod_env = load(arg.data.string->data.raw());
                 if (!mod_env) return v_error({});
                 else {
-                    for (const auto& [k, v] : (*mod_env)->values)
-                        env->def(k, v); // copy definitions from module
+                    for (const auto& [k, v] : (*mod_env)->values) {
+                        Value result = merge_defs(call_term.pos, env, env->find(k), v);
+                        if (result.type == T_ERROR) return v_error({});
+                        env->def(k, result); // copy definitions from module
+                    }
                     return v_void({});
                 }
+            },
+            nullptr
+        };
+        USE_MODULE = {
+            t_func(T_MODULE, T_VOID), // type
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT,
+                (FormCallback)[](rc<Env> env, const Value& term) -> rc<Form> { // form callback
+                    if (!term.form || term.form->kind != FK_COMPOUND) return F_TERM;
+
+                    for (const auto& [k, f] : term.form->compound->members) {
+                        if (k.type != T_SYMBOL) continue;
+                        Value v = v_undefined(term.pos, S_QUESTION, f);
+                        Value result = merge_defs(term.pos, env, env->find(k.data.sym), v);
+                        env->def(k.data.sym, result); // define abstract functions
+                    }
+
+                    return F_TERM;
+                }, P_SELF, p_var("path")), // form,
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
+                for (const auto& [k, v] : arg.data.mod->env->values) {
+                    Value result = merge_defs(call_term.pos, env, env->find(k), v);
+                    if (result.type == T_ERROR) return v_error({});
+                    env->def(k, result); // copy definitions from module
+                }
+                return v_void({});
             },
             nullptr
         };
@@ -1664,6 +1716,39 @@ namespace basil {
                 return ast_assign(args.pos, ASSIGN.type, *lhs_ast, v_at(args, 1).data.rt->ast);
             }
         };
+        PRINT = {
+            t_func(t_list(T_ANY), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_variadic("values")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL | BF_PRESERVING,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                for (const Value& v : iter_list(args))
+                    if (v.type == T_STRING) print(v.data.string->data);
+                    else print(v);
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                vector<rc<AST>> nodes;
+                for (const Value& v : iter_list(args)) {
+                    nodes.push(ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(v.type), T_VOID), symbol_from("print"), true),
+                        vector_of<rc<AST>>(v.data.rt->ast)));
+                }
+                return ast_do(call_term.pos, nodes);
+            }
+        };
+        PRINTLN = {
+            t_func(t_list(T_ANY), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_variadic("values")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL | BF_PRESERVING,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                for (const Value& v : iter_list(args))
+                    if (v.type == T_STRING) print(v.data.string->data);
+                    else print(v);
+                println("");
+                return v_void({});
+            },
+            nullptr // TODO
+        };
         DEBUG = {
             t_func(T_ANY, T_VOID),
             f_callable(PREC_ANNOTATED, ASSOC_RIGHT, P_SELF, p_var("value")),
@@ -1681,6 +1766,7 @@ namespace basil {
         if (!builtins_inited) builtins_inited = true, init_builtins();
 
         env->def(symbol_from("def"), v_intersect(&DEF, &DEF_TYPED));
+        env->def(symbol_from("extern"), v_func(DEF_EXTERN));
         env->def(symbol_from("lambda"), v_func(LAMBDA));
         env->def(symbol_from("λ"), v_func(LAMBDA));
         env->def(symbol_from("do"), v_func(DO));
@@ -1694,7 +1780,7 @@ namespace basil {
         env->def(symbol_from("match"), v_func(MATCH));
         env->def(symbol_from("import"), v_func(IMPORT));
         env->def(symbol_from("module"), v_func(MODULE));
-        env->def(symbol_from("use"), v_func(USE));
+        env->def(symbol_from("use"), v_intersect(&USE_STRING, &USE_MODULE));
 
         env->def(symbol_from("+"), v_intersect(&ADD_INT, &ADD_FLOAT, &ADD_DOUBLE));
         env->def(symbol_from("-"), v_func(SUB));
@@ -1734,6 +1820,8 @@ namespace basil {
         env->def(symbol_from("."), v_func(DOT));
         env->def(symbol_from(":>"), v_func(IS_SUBTYPE));
         env->def(symbol_from("="), v_func(ASSIGN));
+        env->def(symbol_from("print"), v_func(PRINT));
+        env->def(symbol_from("println"), v_func(PRINTLN));
 
         // type primitives
         env->def(symbol_from("Int"), v_type({}, T_INT));

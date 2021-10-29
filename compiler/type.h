@@ -15,10 +15,14 @@
 #include "util/option.h"
 #include "util/hash.h"
 #include "util/vec.h"
+#include "jasmine/bc.h"
 
 namespace basil {
     struct Symbol;
     struct Type;
+
+    using Context = jasmine::Context;
+    using Repr = jasmine::Type;
 
     // A Kind represents a "type of types" - the broader class in which a
     // family of types is classified. More fine-grained primitive types like
@@ -165,6 +169,12 @@ namespace basil {
         // type concrete first.
         bool operator==(Type other) const;
         bool operator!=(Type other) const;
+
+        // Writes this type's mangled form to the provided stream.
+        void write_mangled(stream& io) const;
+
+        // Returns this type's native representation in the Jasmine IR.
+        Repr repr(Context& ctx) const;
     private:
         // Similar to symbols, we have a private constructor to directly
         // assemble a type from an id. This is only used internally in

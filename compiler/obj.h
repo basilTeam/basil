@@ -14,6 +14,8 @@
 #include "util/rc.h"
 #include "util/bytebuf.h"
 #include "type.h"
+#include "ssa.h"
+#include "jasmine/obj.h"
 
 namespace basil {
     struct Form;
@@ -102,13 +104,23 @@ namespace basil {
 
     rc<Source> source_from_section(rc<Section> section);
     Value parsed_from_section(rc<Section> section);
-    // rc<Env> module_from_section(rc<Section> section);
-    // rc<AST> ast_from_section(rc<Section> section);
+    rc<Env> module_from_section(rc<Section> section);
+    Value module_main(rc<Section> section);
+    const map<Symbol, rc<AST>>& ast_from_section(rc<Section> section);
+    rc<AST> ast_main(rc<Section> section);
+    rc<Env> ast_env(rc<Section> section);
+    const map<Symbol, rc<IRFunction>>& ir_from_section(rc<Section> section);
+    rc<IRFunction> ir_main(rc<Section> section);
+    const jasmine::Object& jasmine_from_section(rc<Section> section);
+    const jasmine::Object& native_from_section(rc<Section> section);
 
     rc<Section> source_section(const ustring& name, rc<Source> source);
     rc<Section> parsed_section(const ustring& name, const Value& term);
-    // rc<Section> module_section(const Value& module);
-    // rc<Section> ast_section(rc<AST> ast);
+    rc<Section> module_section(const ustring& name, const Value& main, rc<Env> module);
+    rc<Section> ast_section(const ustring& name, rc<AST> main, const map<Symbol, rc<AST>>& functions, rc<Env> env);
+    rc<Section> ir_section(const ustring& name, rc<IRFunction> main, const map<Symbol, rc<IRFunction>>& functions);
+    rc<Section> jasmine_section(const ustring& name, rc<jasmine::Object> object);
+    rc<Section> native_section(const ustring& name, rc<jasmine::Object> object);
 }
 
 #endif

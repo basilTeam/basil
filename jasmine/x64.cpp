@@ -802,7 +802,7 @@ namespace jasmine::x64 {
 
             u8 opcode = 0x80;
             if (actual_size != BYTE) opcode ++; // set bottom bit for non-8-bit mode
-            if (src_size == BYTE) opcode += 2; // set next lowest bit for 8-bit immediate
+            if (actual_size != BYTE && src_size == BYTE) opcode += 2; // set next lowest bit for 8-bit immediate
             target->code().write(opcode);
 
             emitargs(dest, imm_src, actual_size, op);

@@ -76,6 +76,11 @@ u64 hash(const ustring& s) {
 }
 
 template<>
+u64 hash(const u32& u) {
+	return u;
+}
+
+template<>
 u64 hash(const u64& u) {
 	// return raw_hash(u);
 	return u;

@@ -32,7 +32,7 @@ $ cp -r jasmine/ util/ <your-project>
 $ ... # add jasmine/*.cpp and util/*.cpp to your build sources
 ```
 
-To build Jasmine's command-line driver from source, make sure you have a C++17-conforming C++ compiler.
+To build Jasmine's command-line driver from source, make sure you have a **C++17-conformant** C++ compiler.
 
 ```sh
 $ git clone https://github.com/basilTeam/basil
@@ -44,12 +44,12 @@ We'll be adding a more convenient single header, along with static and dynamic J
 
 ---
 
-## Supported Platforms
+## **Supported Platforms**
 
 Operating Systems:
  - [x] Linux
  - [ ] Windows
- - [ ] MacOS
+ - [x] MacOS
 
 Planned Architectures:
  - [x] x86_64

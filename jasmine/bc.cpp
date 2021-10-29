@@ -939,8 +939,6 @@ namespace jasmine {
         label_binary_op(OP_JLE),
         label_binary_op(OP_JG),
         label_binary_op(OP_JGE),
-        label_nullary_op(OP_JO),
-        label_nullary_op(OP_JNO),
         label_nullary_op(OP_JUMP),
         nullary_op(OP_NOP),
         ternary_op(OP_CEQ),
@@ -952,7 +950,10 @@ namespace jasmine {
         binary_op(OP_MOV),
         binary_op(OP_XCHG),
         typedef_op(OP_TYPE),
-        unary_op(OP_GLOBAL)
+        unary_op(OP_GLOBAL), 
+        ternary_op(OP_ROL),      
+        ternary_op(OP_ROR), 
+        call_op(OP_SYSCALL)
     };
 
     map<string, Opcode> OPCODE_TABLE = map_of<string, Opcode>(
@@ -986,8 +987,6 @@ namespace jasmine {
         string("jle"), OP_JLE,
         string("jg"), OP_JG,
         string("jge"), OP_JGE,
-        string("jo"), OP_JO,
-        string("jno"), OP_JNO,
         string("jump"), OP_JUMP,
         string("nop"), OP_NOP,
         string("ceq"), OP_CEQ,
@@ -999,7 +998,10 @@ namespace jasmine {
         string("mov"), OP_MOV,
         string("xchg"), OP_XCHG,
         string("type"), OP_TYPE,
-        string("global"), OP_GLOBAL
+        string("global"), OP_GLOBAL,
+        string("rol"), OP_ROL,
+        string("ror"), OP_ROR,
+        string("syscall"), OP_SYSCALL
     );
 
     string OPCODE_NAMES[] = {
@@ -1010,11 +1012,13 @@ namespace jasmine {
         "local", "param",
         "push", "pop",
         "frame", "ret", "call",
-        "jeq", "jne", "jl", "jle", "jg", "jge", "jo", "jno",
+        "jeq", "jne", "jl", "jle", "jg", "jge",
         "jump", "nop",
         "ceq", "cne", "cl", "cle", "cg", "cge",
         "mov", "xchg",
-        "type", "global"
+        "type", "global",
+        "rol", "ror",
+        "syscall"
     };
 
     Insn parse_insn(Context& context, stream& io) {
@@ -1126,6 +1130,438 @@ namespace jasmine {
         write(io, "\n");
     }
 
+    namespace bc {
+        static Object* obj = nullptr;
+        static Context* ctx = nullptr;
+
+        void verify_buffer() {
+            if (!obj || !ctx) { // requires that a buffer exist to write to
+                fprintf(stderr, "[ERROR] Cannot assemble; no target buffer set.\n");
+                exit(1);
+            }
+        }
+
+        Param r(u64 id) {
+            Param p;
+            p.kind = PK_REG;
+            p.data.reg.global = false;
+            p.data.reg.id = id;
+            return p;
+        }
+
+        Param gr(Symbol symbol) {
+            return gr(name(symbol));
+        }
+
+        Param gr(const char* name) {
+            verify_buffer();
+            Param p;
+            p.kind = PK_REG;
+            p.data.reg.global = true;
+            auto decl = ctx->global_decls.find(name);
+            if (decl == ctx->global_decls.end()) {
+                fprintf(stderr, "[ERROR] Undefined global register '%s'.\n", name);
+                exit(1);
+            }
+            p.data.reg = decl->second;
+            return p;
+        }
+
+        Param imm(i64 i) {
+            Param p;
+            p.kind = PK_IMM;
+            p.data.imm = Imm{i};
+            return p;
+        }
+
+        Param m(u64 reg) {
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_REG_OFF;
+            p.data.mem.reg = { false, reg };
+            p.data.mem.off = 0;
+            return p;
+        }
+
+        Param m(u64 reg, i64 off) {
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_REG_OFF;
+            p.data.mem.reg = { false, reg };
+            p.data.mem.off = off;
+            return p;
+        }
+        
+        Param m(Symbol label) {
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_LABEL_OFF;
+            p.data.mem.label = label;
+            p.data.mem.off = 0;
+            return p;
+        }
+        
+        Param m(Symbol label, i64 off) {
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_LABEL_OFF;
+            p.data.mem.label = label;
+            p.data.mem.off = off;
+            return p;
+        }
+
+        Param m(u64 reg, Type type) {
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_REG_TYPE;
+            p.data.mem.reg = { false, reg };
+            p.data.mem.type = type;
+            return p;
+        }
+
+        Param m(u64 reg, Type type, Symbol field) {
+            verify_buffer();
+            if (type.kind != K_STRUCT) {
+                fprintf(stderr, "[ERROR] Tried to get field of non-struct type.\n");
+                exit(1);
+            }
+
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_REG_TYPE;
+            p.data.mem.reg = { false, reg };
+            p.data.mem.type = type;
+            const auto& info = ctx->type_info[type.id];
+            for (u32 i = 0; i < info.members.size(); i ++) {
+                if (info.members[i].name == name(field)) p.data.mem.off = i;
+            }
+
+            return p;
+        }
+
+        Param m(Symbol label, Type type) {
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_LABEL_TYPE;
+            p.data.mem.label = label;
+            p.data.mem.type = type;
+            return p;
+        }
+
+        Param m(Symbol label, Type type, Symbol field) {
+            verify_buffer();
+            if (type.kind != K_STRUCT) {
+                fprintf(stderr, "[ERROR] Tried to get field of non-struct type.\n");
+                exit(1);
+            }
+
+            Param p;
+            p.kind = PK_MEM;
+            p.data.mem.kind = MK_LABEL_TYPE;
+            p.data.mem.label = label;
+            p.data.mem.type = type;
+            const auto& info = ctx->type_info[type.id];
+            for (u32 i = 0; i < info.members.size(); i ++) {
+                if (info.members[i].name == name(field)) p.data.mem.off = i;
+            }
+
+            return p;
+        }
+
+        Param l(Symbol symbol) {
+            Param p;
+            p.kind = PK_LABEL;
+            p.data.label = symbol;
+            return p;
+        }
+
+        Param l(const char* name) {
+            Param p;
+            p.kind = PK_LABEL;
+            p.data.label = jasmine::local(name);
+            return p;
+        }
+
+        void writeto(Object& obj_in) {
+            obj = &obj_in;
+            ctx = &obj_in.get_context();
+        }
+
+        void nullary(Opcode op) {
+            verify_buffer();
+            Insn insn;
+            insn.type = I64;
+            insn.opcode = op;
+            assemble_insn(*ctx, *obj, insn);
+        }
+
+        void unary(Opcode op, Type type, const Param& dest) {
+            verify_buffer();
+            Insn insn;
+            insn.opcode = op;
+            insn.type = type;
+            insn.params.push(dest);
+            assemble_insn(*ctx, *obj, insn);
+        }
+
+        void binary(Opcode op, Type type, const Param& dest, const Param& src) {
+            verify_buffer();
+            Insn insn;
+            insn.opcode = op;
+            insn.type = type;
+            insn.params.push(dest);
+            insn.params.push(src);
+            assemble_insn(*ctx, *obj, insn);
+        }
+
+        void ternary(Opcode op, Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            verify_buffer();
+            Insn insn;
+            insn.opcode = op;
+            insn.type = type;
+            insn.params.push(dest);
+            insn.params.push(lhs);
+            insn.params.push(rhs);
+            assemble_insn(*ctx, *obj, insn);
+        }
+
+        void add(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_ADD, type, dest, lhs, rhs);
+        }
+
+        void sub(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_SUB, type, dest, lhs, rhs);
+        }
+        
+        void mul(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_MUL, type, dest, lhs, rhs);
+        }
+        
+        void div(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_DIV, type, dest, lhs, rhs);
+        }
+        
+        void rem(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_REM, type, dest, lhs, rhs);
+        }
+        
+        void and_(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_AND, type, dest, lhs, rhs);
+        }
+        
+        void or_(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_OR, type, dest, lhs, rhs);
+        }
+        
+        void xor_(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_XOR, type, dest, lhs, rhs);
+        }
+        
+        void not_(Type type, const Param& dest, const Param& operand) {
+            binary(OP_NOT, type, dest, operand);
+        }
+
+        void icast(Type type, const Param& dest, const Param& operand) {
+            binary(OP_ICAST, type, dest, operand);
+        }
+
+        void f32cast(Type type, const Param& dest, const Param& operand) {
+            binary(OP_F32CAST, type, dest, operand);
+        }
+
+        void f64cast(Type type, const Param& dest, const Param& operand) {
+            binary(OP_F64CAST, type, dest, operand);
+        }
+
+        void sxt(Type type, const Param& dest, const Param& operand) {
+            binary(OP_EXT, type, dest, operand);
+        }
+
+        void zxt(Type type, const Param& dest, const Param& operand) {
+            binary(OP_ZXT, type, dest, operand);
+        }
+
+        void sl(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_SL, type, dest, lhs, rhs);
+        }
+
+        void slr(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_SLR, type, dest, lhs, rhs);
+        }
+
+        void sar(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_SAR, type, dest, lhs, rhs);
+        }
+
+        void local(Type type, const Param& dest) {
+            unary(OP_LOCAL, type, dest);
+        }
+
+        void param(Type type, const Param& dest) {
+            unary(OP_PARAM, type, dest);
+        }
+        
+        void push(Type type, const Param& operand) {
+            unary(OP_PUSH, type, operand);
+        }
+        
+        void pop(Type type, const Param& dest) {
+            unary(OP_POP, type, dest);
+        }
+        
+        void frame() {
+            nullary(OP_FRAME);
+        }
+
+        void ret(Type type, const Param& src) {
+            unary(OP_RET, type, src);
+        }
+
+        static Insn call_tmp;
+        static bool building_call = false;
+
+        void begincall(Type type, const Param& dest, const Param& func) {
+            if (building_call) {
+                fprintf(stderr, "[ERROR] Cannot build call instruction; already building call.\n");
+                exit(1);
+            }
+            building_call = true;
+            call_tmp.opcode = OP_CALL;
+            call_tmp.type = type;
+            call_tmp.params.clear();
+            call_tmp.params.push(dest);
+            call_tmp.params.push(func);
+        }
+
+        void arg(Type type, const Param& param) {
+            call_tmp.params.push(param);
+            call_tmp.params.back().annotation = some<Type>(type);
+        }
+
+        void endcall() {
+            if (!building_call) {
+                fprintf(stderr, "[ERROR] Cannot end call instruction; no call instruction is actively "
+                    "being assembled.\n");
+                exit(1);
+            }
+            building_call = false;
+            assemble_insn(*ctx, *obj, call_tmp);
+        }
+
+        void call_recur() {
+            endcall();
+        }
+
+        void jeq(Type type, Symbol symbol, const Param& lhs, const Param& rhs) {
+            ternary(OP_JEQ, type, l(symbol), lhs, rhs);
+        }
+
+        void jne(Type type, Symbol symbol, const Param& lhs, const Param& rhs) {
+            ternary(OP_JNE, type, l(symbol), lhs, rhs);
+        }
+
+        void jl(Type type, Symbol symbol, const Param& lhs, const Param& rhs) {
+            ternary(OP_JL, type, l(symbol), lhs, rhs);
+        }
+
+        void jle(Type type, Symbol symbol, const Param& lhs, const Param& rhs) {
+            ternary(OP_JLE, type, l(symbol), lhs, rhs);
+        }
+
+        void jg(Type type, Symbol symbol, const Param& lhs, const Param& rhs) {
+            ternary(OP_JG, type, l(symbol), lhs, rhs);
+        }
+
+        void jge(Type type, Symbol symbol, const Param& lhs, const Param& rhs) {
+            ternary(OP_JGE, type, l(symbol), lhs, rhs);
+        }
+
+        void jump(Symbol symbol) {
+            unary(OP_JUMP, I64, l(symbol));
+        }
+        
+        void nop() {
+            nullary(OP_NOP);
+        }
+
+        void ceq(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_CEQ, type, dest, lhs, rhs);
+        }
+
+        void cne(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_CNE, type, dest, lhs, rhs);
+        }
+
+        void cl(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_CL, type, dest, lhs, rhs);
+        }
+
+        void cle(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_CLE, type, dest, lhs, rhs);
+        }
+
+        void cg(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_CG, type, dest, lhs, rhs);
+        }
+
+        void cge(Type type, const Param& dest, const Param& lhs, const Param& rhs) {
+            ternary(OP_CGE, type, dest, lhs, rhs);
+        }
+
+        void mov(Type type, const Param& dest, const Param& operand) {
+            binary(OP_MOV, type, dest, operand);
+        }
+
+        static string type_name;
+        static vector<Member> type_members;
+
+        void begintype(const string& name) {
+            type_members.clear();
+            type_name = name;
+        }
+
+        void member(const string& name, u64 size) {
+            type_members.push({ name, size, none<Type>() });
+        }
+
+        void member(const string& name, u64 size, Type type) {
+            type_members.push({ name, size, some<Type>(type) });
+        }
+
+        void endtype() {
+            ctx->type_info.push({ 
+                ctx->type_info.size(), 
+                type_name, 
+                type_members 
+            });
+            ctx->type_decls[type_name] = ctx->type_info.size() - 1;
+            
+            Insn insn;
+            insn.opcode = OP_TYPE;
+            insn.type = { K_STRUCT, ctx->type_info.size() - 1 };
+            assemble_insn(*ctx, *obj, insn);
+        }
+        
+        void type_recur() {
+            endtype();
+        }
+
+        void label(Symbol symbol) {
+            verify_buffer();
+            obj->define(symbol);
+        }
+
+        void label(const char* symbol) {
+            verify_buffer();
+            obj->define(jasmine::local(symbol));
+        }
+
+        void global(Type type, Symbol symbol) {
+            verify_buffer();
+            // TODO: implement global registers
+        }
+    }
+
     LiveRange::LiveRange(Reg reg_in, Type type_in, u64 f, u64 l):
         reg(reg_in), type(type_in), first(f), last(l) {}
 
@@ -1138,7 +1574,7 @@ namespace jasmine {
         u32 n_params;
         vector<vector<LiveRange*>> starts_by_insn, ends_by_insn, preserved_regs;
 
-        Function(const Context& ctx_in): ctx(ctx_in) {}
+        Function(const Context& ctx_in): ctx(ctx_in), stack(0), n_params(0) {}
 
         void format(const vector<Insn>& insns, stream& io) const {
             for (u64 i = first; i <= last; i ++) {
@@ -1287,11 +1723,11 @@ namespace jasmine {
         for (u64 i = function.first; i <= function.last; i ++) {
             const auto& live = sets[i - function.first];
             for (auto& [reg, range] : ranges) {
-                if (range && range->type.kind != K_STRUCT && (insns[i].type.kind != range->type.kind
-                    || (insns[i].type.kind == K_STRUCT && insns[i].type.id != range->type.id))) {
-                    fprintf(stderr, "[ERROR] Found inconsistent types for virtual register %%%lu.\n", reg);
-                    exit(1);
-                }
+                // if (range && range->type.kind != K_STRUCT && (insns[i].type.kind != range->type.kind
+                //     || (insns[i].type.kind == K_STRUCT && insns[i].type.id != range->type.id))) {
+                //     fprintf(stderr, "[ERROR] Found inconsistent types for virtual register %%%lu.\n", reg);
+                //     exit(1);
+                // }
 
                 if (!range && live.second.contains(reg)) { // new definition
                     range = some<LiveRange>(Reg{false, reg}, insns[i].type, i, i);
@@ -1453,16 +1889,47 @@ namespace jasmine {
 
     // X86_64 Codegen
 
-    optional<x64::Arg> to_x64_arg(const Target& target, const Function& function, const map<u64, LiveRange*>& reg_bindings, const Param& p) {
+    optional<x64::Arg> to_x64_arg(const Target& target, Type type, const Function& function, 
+        const map<u64, LiveRange*>& reg_bindings, const Param& p) {
+        x64::Size size = x64::BYTE;
+        switch (type.kind) {
+            case K_I8:
+            case K_U8:
+                size = x64::BYTE;
+                break;
+            case K_I16:
+            case K_U16:
+                size = x64::WORD;
+                break;
+            case K_I32:
+            case K_U32:
+                size = x64::DWORD;
+                break;
+            case K_I64:
+            case K_U64:
+            default:
+                size = x64::QWORD;
+                break;
+        }
+
         switch (p.kind) {
             case PK_IMM:
                 return some<x64::Arg>(x64::imm(p.data.imm.val));
-            case PK_REG:
+            case PK_REG: {
+                static x64::Arg(*regs[4])(x64::Register) = {
+                    x64::r8, x64::r16, x64::r32, x64::r64
+                };
+                static x64::Arg(*mems[4])(x64::Register, i64) = {
+                    x64::m8, x64::m16, x64::m32, x64::m64
+                };
                 if (reg_bindings.find(p.data.reg.id) == reg_bindings.end()) return none<x64::Arg>();
-                if (reg_bindings[p.data.reg.id]->loc.type == LT_REGISTER) // bound to register
-                    return some<x64::Arg>(x64::r64((x64::Register)*reg_bindings[p.data.reg.id]->loc.reg));
-                else 
-                    return some<x64::Arg>(x64::m64(x64::RBP, -i64(*reg_bindings[p.data.reg.id]->loc.offset)));
+                if (reg_bindings[p.data.reg.id]->loc.type == LT_REGISTER) { // bound to register
+                    return some<x64::Arg>(regs[size]((x64::Register)*reg_bindings[p.data.reg.id]->loc.reg));
+                }
+                else {
+                    return some<x64::Arg>(mems[size](x64::RBP, -i64(*reg_bindings[p.data.reg.id]->loc.offset)));
+                }
+            }
             case PK_MEM: {
                 const auto& m = p.data.mem;
                 switch (m.kind) {
@@ -1750,7 +2217,7 @@ namespace jasmine {
                 call(fn);
 
                 Location ret = obj.get_target().locate_return_value(insn.type.kind);
-                if (ret.type == LT_REGISTER) move_x64(args[0], r64((Register)*ret.reg));
+                if (ret.type == LT_REGISTER) if (args[0].data.reg != RSP) move_x64(args[0], r64((Register)*ret.reg));
 
                 for (i64 i = i64(f.preserved_regs[insn_idx - f.first].size()) - 1; i >= 0; i --) {
                     const auto& r = f.preserved_regs[insn_idx - f.first][i];
@@ -1765,13 +2232,10 @@ namespace jasmine {
             case OP_JLE:
             case OP_JG:
             case OP_JGE:
-            case OP_JO:
-            case OP_JNO:
-                static Condition conds_x64[8] = {
+                static Condition conds_x64[6] = {
                     EQUAL, NOT_EQUAL,
                     LESS, LESS_OR_EQUAL,
-                    GREATER, GREATER_OR_EQUAL,
-                    OVERFLOW, NOT_OVERFLOW
+                    GREATER, GREATER_OR_EQUAL
                 };
                 cmp(args[1], args[2]);
                 jcc(args[0], conds_x64[insn.opcode - OP_JEQ]);
@@ -1838,8 +2302,9 @@ namespace jasmine {
             bool useless = false; // useless instructions can happen when 
                                   // the destination of this instruction is unused
             for (const Param& p : insn.params) {
-                auto arg = to_x64_arg(obj.get_target(), f, reg_bindings, p);
-                if (!arg) useless = true;
+                auto arg = to_x64_arg(obj.get_target(), insn.type, f, reg_bindings, p);
+                if (!arg && insn.opcode != OP_CALL && insn.opcode != OP_SYSCALL) useless = true;
+                else if (!arg) args.push(r64(RSP)); // rsp signifies lack of real parameter
                 else args.push(*arg);
             }
             if (useless) continue;

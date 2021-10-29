@@ -32,6 +32,9 @@ namespace basil {
         AST_ASSIGN, AST_COERCE
     };
 
+    // Mangles a function or variable name based on its type.
+    Symbol mangle(Symbol name, Type type);
+
     // Base class of all AST nodes. AST nodes are statically typed,
     // and represent code intended to be compiled and executed at runtime,
     // instead of evaluated wholly by the compiler.
@@ -85,7 +88,7 @@ namespace basil {
     // AST node constructors.
 
     rc<AST> ast_def(Source::Pos pos, Symbol name, rc<AST> init);
-    rc<AST> ast_func_stub(Source::Pos pos, Type type, Symbol name);
+    rc<AST> ast_func_stub(Source::Pos pos, Type type, Symbol name, bool do_mangle);
     rc<AST> ast_func(Source::Pos pos, Type type, rc<Env> fn_env, optional<Symbol> name, 
         const vector<Symbol>& args, rc<AST> body);
     rc<AST> ast_call(Source::Pos pos, rc<AST> func, const vector<rc<AST>>& args);

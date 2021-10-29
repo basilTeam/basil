@@ -413,12 +413,96 @@ namespace basil {
         }
     };
 
+    struct ModuleSection : public Section {
+        rc<Env> env;
+        Value main;
+        ModuleSection(const ustring& name, const map<Symbol, DefInfo>& defs):
+            Section(ST_EVAL, name, defs) {}
+        
+        void deserialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+
+        void serialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+    };
+
+    struct ASTSection : public Section {
+        map<Symbol, rc<AST>> functions;
+        rc<AST> main;
+        rc<Env> env;
+        ASTSection(const ustring& name, const map<Symbol, DefInfo>& defs):
+            Section(ST_AST, name, defs) {}
+        
+        void deserialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+
+        void serialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+    };
+
+    struct IRSection : public Section {
+        map<Symbol, rc<IRFunction>> functions;
+        rc<IRFunction> main;
+        IRSection(const ustring& name, const map<Symbol, DefInfo>& defs):
+            Section(ST_IR, name, defs) {}
+        
+        void deserialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+
+        void serialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+    };
+
+    struct JasmineSection : public Section {
+        rc<jasmine::Object> object;
+        JasmineSection(const ustring& name, const map<Symbol, DefInfo>& defs):
+            Section(ST_JASMINE, name, defs) {}
+        
+        void deserialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+
+        void serialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+    };
+
+    struct NativeSection : public Section {
+        rc<jasmine::Object> object;
+        NativeSection(const ustring& name, const map<Symbol, DefInfo>& defs):
+            Section(ST_NATIVE, name, defs) {}
+        
+        void deserialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+
+        void serialize(bytebuf& buf) {
+            panic("Unimplemented!");
+        }
+    };
+
     rc<Section> make_section(SectionType type, const ustring& name, const map<Symbol, DefInfo>& defs) {
         switch (type) {
             case ST_SOURCE:
                 return ref<SourceSection>(name);
             case ST_PARSED:
                 return ref<ParsedSection>(name);
+            case ST_EVAL:
+                return ref<ModuleSection>(name, defs);
+            case ST_AST:
+                return ref<ASTSection>(name, defs);
+            case ST_IR:
+                return ref<IRSection>(name, defs);
+            case ST_JASMINE:
+                return ref<JasmineSection>(name, defs);
+            case ST_NATIVE:
+                return ref<NativeSection>(name, defs);
             default:
                 err({}, "Attempted to load unsupported section type '", SECTION_NAMES[type], "'!");
                 return nullptr;
@@ -499,6 +583,52 @@ namespace basil {
         return ((rc<ParsedSection>)section)->term;
     }
 
+    rc<Env> module_from_section(rc<Section> section) {
+        if (section->type != ST_EVAL) panic("Tried to read module from non-module section!");
+        return ((rc<ModuleSection>)section)->env;
+    }
+
+    Value module_main(rc<Section> section) {
+        if (section->type != ST_EVAL) panic("Tried to get module main from non-module section!");
+        return ((rc<ModuleSection>)section)->main;
+    }
+
+    const map<Symbol, rc<AST>>& ast_from_section(rc<Section> section) {
+        if (section->type != ST_AST) panic("Tried to read AST from non-AST section!");
+        return ((rc<ASTSection>)section)->functions;
+    }
+
+    rc<AST> ast_main(rc<Section> section) {
+        if (section->type != ST_AST) panic("Tried to get AST main from non-AST section!");
+        return ((rc<ASTSection>)section)->main;
+    }
+
+    rc<Env> ast_env(rc<Section> section) {
+        if (section->type != ST_AST) panic("Tried to get AST main from non-AST section!");
+        return ((rc<ASTSection>)section)->env;
+    }
+
+    const map<Symbol, rc<IRFunction>>& ir_from_section(rc<Section> section) {
+        if (section->type != ST_IR) panic("Tried to read IR from non-IR section!");
+        return ((rc<IRSection>)section)->functions;
+    }
+
+    rc<IRFunction> ir_main(rc<Section> section) {
+        if (section->type != ST_IR) panic("Tried to get IR main from non-IR section!");
+        return ((rc<IRSection>)section)->main;
+    }
+
+    const jasmine::Object& jasmine_from_section(rc<Section> section) {
+        if (section->type != ST_JASMINE) panic("Tried to read Jasmine object from non-Jasmine section!");
+        return *((rc<JasmineSection>)section)->object;
+    }
+
+    const jasmine::Object& native_from_section(rc<Section> section) {
+        if (section->type != ST_NATIVE) panic("Tried to read native object from non-native section!");
+        return *((rc<NativeSection>)section)->object;
+    }
+
+
     // rc<Env> module_from_section(rc<Section> section) {
 
     // }
@@ -519,11 +649,37 @@ namespace basil {
         return section;
     }
 
-    // rc<Section> module_section(const Value& module) {
+    rc<Section> module_section(const ustring& name, const Value& main, rc<Env> env) {
+        rc<ModuleSection> section = ref<ModuleSection>(name, map<Symbol, DefInfo>());  
+        section->env = env;
+        section->main = main;
+        return section;
+    }
 
-    // }
+    rc<Section> ast_section(const ustring& name, rc<AST> main, const map<Symbol, rc<AST>>& functions, rc<Env> env) {
+        rc<ASTSection> section = ref<ASTSection>(name, map<Symbol, DefInfo>());  
+        section->functions = functions;
+        section->main = main;
+        section->env = env;
+        return section;
+    }
 
-    // rc<Section> ast_section(rc<AST> ast) {
+    rc<Section> ir_section(const ustring& name, rc<IRFunction> main, const map<Symbol, rc<IRFunction>>& functions) {
+        rc<IRSection> section = ref<IRSection>(name, map<Symbol, DefInfo>());  
+        section->functions = functions;
+        section->main = main;
+        return section;
+    }
 
-    // }
+    rc<Section> jasmine_section(const ustring& name, rc<jasmine::Object> object) {
+        rc<JasmineSection> section = ref<JasmineSection>(name, map<Symbol, DefInfo>());  
+        section->object = object;
+        return section;
+    }
+
+    rc<Section> native_section(const ustring& name, rc<jasmine::Object> object) {
+        rc<NativeSection> section = ref<NativeSection>(name, map<Symbol, DefInfo>());  
+        section->object = object;
+        return section;
+    }
 }

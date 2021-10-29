@@ -28,7 +28,7 @@ namespace basil {
         // individual line can be more than four thousand characters long. We use this 
         // to enforce styling, but also to guarantee that all source locations can be 
         // represented by a 64-bit Source::Pos.
-        void check_limits(optional<const char*> filename) const;
+        void check_limits() const;
     public:
         // Constructs an empty Source object.
         Source();
@@ -36,6 +36,7 @@ namespace basil {
         // Loads the entirety of the file at the provided path into the constructed
         // Source object.
         Source(const char* path);
+        Source(const ustring& path);
 
         // Reads all characters from the provided stream into the constructed
         // Source object.

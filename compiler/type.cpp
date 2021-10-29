@@ -176,6 +176,7 @@ namespace basil {
         virtual bool coerces_to_generic(const Class& other) const;
 
         virtual bool operator==(const Class& other) const = 0;
+        virtual void write_mangled(stream& io) const = 0;
 
         u32 id() const {
             return _id;
@@ -230,6 +231,10 @@ namespace basil {
         return TYPE_LIST[id]->coerces_to_generic(*TYPE_LIST[other.id]);
     }
 
+    void Type::write_mangled(stream& io) const {
+        return TYPE_LIST[id]->write_mangled(io);
+    }
+
     static u32 nonbinding = 0;
 
     // to avoid reimplementing coerces_to and coerces_to_generic (there's already
@@ -280,6 +285,10 @@ namespace basil {
         return id != other.id;
     }
 
+    Repr Type::repr(Context& ctx) const {
+        return jasmine::I64;
+    }
+
     Type::Type(u32 id_in): id(id_in) {}
 
     Type t_from(u32 id) {
@@ -313,9 +322,10 @@ namespace basil {
 
     // Represents unitary types that have no members and no special coercion rules.
     struct SingletonClass : public Class {
-        const char* name;
+        const char *name, *mangle;
 
-        SingletonClass(Kind kind, const char* name_in): Class(kind), name(name_in) {}
+        SingletonClass(Kind kind, const char* name_in, const char* mangle_in): 
+            Class(kind), name(name_in), mangle(mangle_in) {}
 
         u64 lazy_hash() const override {
             return raw_hash(kind());
@@ -325,6 +335,10 @@ namespace basil {
             write(io, name);
         }
 
+        void write_mangled(stream& io) const override {
+            write(io, mangle);
+        }
+
         bool operator==(const Class& other) const override {
             return kind() == other.kind();
         }
@@ -332,12 +346,12 @@ namespace basil {
 
     // Encompasses different sizes of int and floating-point types.
     struct NumberClass : public Class {
-        const char* name;
+        const char *name, *mangle;
         bool floating;
         u32 size;
 
-        NumberClass(Kind kind, const char* name_in, bool floating_in, u32 size_in_bytes): 
-            Class(kind), name(name_in), floating(floating_in), size(size_in_bytes) {}
+        NumberClass(Kind kind, const char* name_in, const char* mangle_in, bool floating_in, u32 size_in_bytes): 
+            Class(kind), name(name_in), mangle(mangle_in), floating(floating_in), size(size_in_bytes) {}
 
         u64 lazy_hash() const override {
             return raw_hash(kind()) * 544921574335967683ul ^ raw_hash(size) * 4508536729671157399ul ^ raw_hash(floating);
@@ -345,6 +359,10 @@ namespace basil {
 
         void format(stream& io) const override {
             write(io, name);
+        }
+
+        void write_mangled(stream& io) const override {
+            write(io, mangle);
         }
 
         bool coerces_to(const Class& other) const override {
@@ -367,7 +385,7 @@ namespace basil {
 
     // Represents the void type.
     struct VoidClass : public SingletonClass {
-        VoidClass(Kind kind, const char* name): SingletonClass(kind, name) {}
+        VoidClass(Kind kind, const char* name): SingletonClass(kind, name, "v") {}
 
         bool coerces_to_generic(const Class& other) const override {
             return Class::coerces_to_generic(other) || other.kind() == K_LIST;
@@ -376,7 +394,7 @@ namespace basil {
 
     // Represents the undefined type.
     struct UndefinedClass : public SingletonClass {
-        UndefinedClass(Kind kind, const char* name): SingletonClass(kind, name) {}
+        UndefinedClass(Kind kind, const char* name): SingletonClass(kind, name, "u") {}
 
         bool coerces_to_generic(const Class& other) const override {
             return true; // undefined can coerce to all other types
@@ -397,6 +415,11 @@ namespace basil {
 
         void format(stream& io) const override {
             write(io, name, " of ", base);
+        }
+
+        void write_mangled(stream& io) const override {
+            write(io, 'N', string_from(name).size(), name);
+            base->write_mangled(io);
         }
 
         bool coerces_to_generic(const Class& other) const override {
@@ -450,11 +473,26 @@ namespace basil {
             write(io, "[", element, "]");
         }
 
+        void write_mangled(stream& io) const override {
+            write(io, 'L');
+            element->write_mangled(io);
+        }
+
         bool coerces_to_generic(const Class& other) const override {
             if (Class::coerces_to_generic(other)) return true;
 
             if (other.kind() == K_LIST) {
                 return element->coerces_to_generic(*as<ListClass>(other).element);
+            }
+            
+            return false;
+        }
+
+        bool coerces_to(const Class& other) const override {
+            if (Class::coerces_to(other)) return true;
+            
+            if (other.kind() == K_TYPE) {
+                return element->coerces_to(*TYPE_LIST[T_TYPE.id]); // [type] can convert to type
             }
             
             return false;
@@ -502,6 +540,11 @@ namespace basil {
                 write(io, "...");
             }
             write(io, ")");
+        }
+
+        void write_mangled(stream& io) const override {
+            write(io, 'T', members.size());
+            for (rc<Class> element : members) element->write_mangled(io);
         }
 
         bool coerces_to_generic(const Class& other) const override {
@@ -595,6 +638,13 @@ namespace basil {
             write(io, "]");
         }
 
+        void write_mangled(stream& io) const override {
+            write(io, 'A');
+            if (sized) write(io, size);
+            else write(io, 0);
+            element->write_mangled(io);
+        }
+
         bool coerces_to_generic(const Class& other) const override {
             if (Class::coerces_to_generic(other)) return true;
 
@@ -612,11 +662,6 @@ namespace basil {
             if (other.kind() == K_ARRAY) {
                 if (*element == *as<ArrayClass>(other).element) // Can convert to unsized array with same element type.
                     return !as<ArrayClass>(other).sized;
-            }
-
-            if (other.kind() == K_TYPE) {
-                return element->coerces_to(*TYPE_LIST[T_TYPE.id])
-                    && sized && size == 1; // [type] can convert to type
             }
 
             return false;
@@ -662,6 +707,11 @@ namespace basil {
 
         void format(stream& io) const override {
             write_seq(io, members, "(", " | ", ")");
+        }
+
+        void write_mangled(stream& io) const override {
+            write(io, 'U', members.size());
+            for (rc<Class> element : members) element->write_mangled(io);
         }
 
         bool coerces_to_generic(const Class& other) const override {
@@ -746,6 +796,11 @@ namespace basil {
             write_seq(io, members, "(", " & ", ")");
         }
 
+        void write_mangled(stream& io) const override {
+            write(io, 'I', members.size());
+            for (rc<Class> element : members) element->write_mangled(io);
+        }
+
         bool coerces_to(const Class& other) const override {
             if (Class::coerces_to(other)) return true;
 
@@ -805,6 +860,12 @@ namespace basil {
 
         void format(stream& io) const override {
             write(io, arg, " -> ", ret);
+        }
+
+        void write_mangled(stream& io) const override {
+            write(io, 'F');
+            arg->write_mangled(io);
+            ret->write_mangled(io);
         }
 
         bool coerces_to_generic(const Class& other) const override {
@@ -868,6 +929,14 @@ namespace basil {
             write(io, "}");
         }
 
+        void write_mangled(stream& io) const override {
+            write(io, 'S', fields.size());
+            for (const auto& [k, v] : fields) {
+                write(io, string_from(k).size(), k);
+                v->write_mangled(io);
+            }
+        }
+
         bool coerces_to(const Class& other) const override {
             if (Class::coerces_to(other)) return true;
 
@@ -927,6 +996,12 @@ namespace basil {
             write(io, key, "[", value, "]");
         }
 
+        void write_mangled(stream& io) const override {
+            write(io, 'D');
+            key->write_mangled(io);
+            value->write_mangled(io);
+        }
+
         bool coerces_to_generic(const Class& other) const override {
             if (Class::coerces_to_generic(other)) return true;
 
@@ -982,6 +1057,10 @@ namespace basil {
             write(io, "macro(", arity, ")");
         }
 
+        void write_mangled(stream& io) const override {
+            write(io, 'M', arity);
+        }
+
         bool operator==(const Class& other) const override {
             return other.kind() == K_MACRO 
                 && as<MacroClass>(other).arity == arity;
@@ -999,6 +1078,10 @@ namespace basil {
 
         void format(stream& io) const override {
             write(io, "form-function(", arity, ")");
+        }
+
+        void write_mangled(stream& io) const override {
+            panic("Tried to mangle compile-time-only form-level function type!");
         }
 
         bool operator==(const Class& other) const override {
@@ -1030,6 +1113,10 @@ namespace basil {
 
         void format(stream& io) const override {
             write_pairs(io, members, "overloaded(", ": ", " & ", ")");
+        }
+
+        void write_mangled(stream& io) const override {
+            panic("Tried to mangle compile-time-only form-level overload type!");
         }
 
         bool coerces_to(const Class& other) const override {
@@ -1091,6 +1178,10 @@ namespace basil {
         void format(stream& io) const override {
             write(io, name);
             if (tvar_bindings[id] != T_UNDEFINED) write(io, "(", tvar_bindings[id], ")");
+        }
+
+        void write_mangled(stream& io) const override {
+            concrete()->write_mangled(io);
         }
 
         rc<Class> concrete() const {
@@ -1171,6 +1262,10 @@ namespace basil {
 
         void format(stream& io) const override {
             write(io, "runtime(", base, ")");
+        }
+
+        void write_mangled(stream& io) const override {
+            base->write_mangled(io);
         }
 
         bool coerces_to_generic(const Class& other) const override {
@@ -1611,18 +1706,18 @@ namespace basil {
 
     void init_types() {
         T_VOID = t_create(ref<VoidClass>(K_VOID, "Void"));
-        T_INT = t_create(ref<NumberClass>(K_INT, "Int", false, 8)); // 8-byte integral type
-        T_FLOAT = t_create(ref<NumberClass>(K_FLOAT, "Float", true, 4)); // 4-byte floating-point type
-        T_DOUBLE = t_create(ref<NumberClass>(K_DOUBLE, "Double", true, 8)); // 8-byte floating-point type
-        T_SYMBOL = t_create(ref<SingletonClass>(K_SYMBOL, "Symbol"));
-        T_STRING = t_create(ref<SingletonClass>(K_STRING, "String"));
-        T_CHAR = t_create(ref<SingletonClass>(K_CHAR, "Char"));
-        T_BOOL = t_create(ref<SingletonClass>(K_BOOL, "Bool"));
-        T_TYPE = t_create(ref<SingletonClass>(K_TYPE, "Type"));
-        T_ALIAS = t_create(ref<SingletonClass>(K_ALIAS, "Alias"));
-        T_ERROR = t_create(ref<SingletonClass>(K_ERROR, "Error"));
-        T_MODULE = t_create(ref<SingletonClass>(K_MODULE, "Module"));
-        T_ANY = t_create(ref<SingletonClass>(K_ANY, "Any"));
+        T_INT = t_create(ref<NumberClass>(K_INT, "Int", "i", false, 8)); // 8-byte integral type
+        T_FLOAT = t_create(ref<NumberClass>(K_FLOAT, "Float", "f", true, 4)); // 4-byte floating-point type
+        T_DOUBLE = t_create(ref<NumberClass>(K_DOUBLE, "Double", "d", true, 8)); // 8-byte floating-point type
+        T_SYMBOL = t_create(ref<SingletonClass>(K_SYMBOL, "Symbol", "n"));
+        T_STRING = t_create(ref<SingletonClass>(K_STRING, "String", "s"));
+        T_CHAR = t_create(ref<SingletonClass>(K_CHAR, "Char", "c"));
+        T_BOOL = t_create(ref<SingletonClass>(K_BOOL, "Bool", "b"));
+        T_TYPE = t_create(ref<SingletonClass>(K_TYPE, "Type", "t"));
+        T_ALIAS = t_create(ref<SingletonClass>(K_ALIAS, "Alias", ""));
+        T_ERROR = t_create(ref<SingletonClass>(K_ERROR, "Error", ""));
+        T_MODULE = t_create(ref<SingletonClass>(K_MODULE, "Module", ""));
+        T_ANY = t_create(ref<SingletonClass>(K_ANY, "Any", "w"));
         T_UNDEFINED = t_create(ref<UndefinedClass>(K_UNDEFINED, "Undefined"));
     }
 

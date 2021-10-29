@@ -39,6 +39,7 @@ namespace basil {
             case IK_SYMBOL: data.sym = other.data.sym; break;
             case IK_TYPE: data.type = other.data.type; break;
             case IK_CHAR: data.ch = other.data.ch; break;
+            case IK_LABEL: data.label = other.data.label; break;
             case IK_BLOCK: data.block = other.data.block; break;
         }
     }
@@ -57,6 +58,7 @@ namespace basil {
                 case IK_SYMBOL: data.sym = other.data.sym; break;
                 case IK_TYPE: data.type = other.data.type; break;
                 case IK_CHAR: data.ch = other.data.ch; break;
+                case IK_LABEL: data.label = other.data.label; break;
                 case IK_BLOCK: data.block = other.data.block; break;
             }
         }
@@ -82,7 +84,27 @@ namespace basil {
             case IK_SYMBOL: return write(io, ':', data.sym);
             case IK_TYPE: return write(io, data.type);
             case IK_CHAR: return write(io, "'", data.ch, "'");
+            case IK_LABEL: return write(io, BOLDYELLOW, data.label, RESET);
             case IK_BLOCK: return write(io, BOLDYELLOW, "BB", data.block, RESET);
+        }
+    }
+
+    jasmine::Param IRParam::emit(Context& ctx) const {
+        switch (kind) {
+            case IK_NONE: return jasmine::bc::imm(0);
+            case IK_VAR: return jasmine::bc::r(data.var);
+            case IK_INT: return jasmine::bc::imm(data.i);
+            case IK_BOOL: return jasmine::bc::imm(data.b ? 1 : 0);
+            case IK_SYMBOL: return jasmine::bc::imm(data.sym.id);
+            case IK_TYPE: return jasmine::bc::imm(data.type.id);
+            case IK_CHAR: return jasmine::bc::imm(data.ch.u);
+            case IK_FLOAT: // return write(io, data.f32);
+            case IK_DOUBLE: // return write(io, data.f64);
+            case IK_STRING: // return write(io, '"', data.string, '"');
+            case IK_LABEL: return jasmine::bc::l(jasmine::global(string_from(data.label).raw()));
+            case IK_BLOCK: // return jasmine::bc::label();
+                panic("Unimplemented IR parameter conversion!");
+                return jasmine::bc::imm(0);
         }
     }
 
@@ -116,6 +138,21 @@ namespace basil {
         }
     }
 
+    void IRBlock::emit(IRFunction& func, Context& ctx) {
+        jasmine::bc::label(label());
+        for (const auto& insn : insns) {
+            insn->emit(func, ctx);
+        }
+    }
+
+    jasmine::Symbol IRBlock::label() {
+        if (!lbl) {
+            ustring name = ::format<ustring>(".BB", uid);
+            lbl = some<jasmine::Symbol>(jasmine::local(name.raw()));
+        }
+        return *lbl;
+    }
+
     bool operator==(const VarInfo& a, const VarInfo& b) {
         return a.name == b.name && a.id == b.id;
     }
@@ -124,8 +161,10 @@ namespace basil {
         label(label_in), type(type_in), entry(new_block()), exit(nullptr), active_block(entry) {}
 
     rc<IRBlock> IRFunction::new_block() {
+        static u32 bb_uid = 0;
         rc<IRBlock> block = ref<IRBlock>();
         block->id = blocks.size();
+        block->uid = bb_uid ++;
         blocks.push(block);
         return block;
     }
@@ -166,6 +205,12 @@ namespace basil {
         IRParam::CURRENT_FN = this;
         writeln(io, "---- ", BOLDCYAN, label, RESET, " : ", type, "\t(", blocks.size(), " blocks)");
         for (rc<IRBlock> block : blocks) write(io, block);
+    }
+
+    void IRFunction::emit(Context& ctx) {
+        jasmine::bc::label(jasmine::global(string_from(label).raw()));
+        jasmine::bc::frame();
+        for (rc<IRBlock> block : block_layout) block->emit(*this, ctx);
     }
 
     IRParam find_var(rc<IRFunction> func, VarInfo info) {
@@ -235,6 +280,12 @@ namespace basil {
         p.data.ch = ch;
         return p;
     }
+    
+    IRParam ir_label(Symbol l) {
+        IRParam p(IK_LABEL);
+        p.data.label = l;
+        return p;
+    }
 
     IRParam ir_none() {
         return IRParam(IK_NONE);
@@ -246,8 +297,8 @@ namespace basil {
         return p;
     }
 
-    IRInsn::IRInsn(Type type_in, const optional<IRParam>& dest_in):
-        type(type_in), dest(dest_in) {}
+    IRInsn::IRInsn(IROp op_in, Type type_in, const optional<IRParam>& dest_in):
+        op(op_in), type(type_in), dest(dest_in) {}
     
     IRInsn::~IRInsn() {}
 
@@ -282,8 +333,8 @@ namespace basil {
     }
 
     struct IRUnary : public IRInsn {
-        IRUnary(rc<IRFunction> func, Type type, const IRParam& operand):
-            IRInsn(type, some<IRParam>(ir_temp(func))) {
+        IRUnary(rc<IRFunction> func, IROp op, Type type, const IRParam& operand):
+            IRInsn(op, type, some<IRParam>(ir_temp(func))) {
             src.push(operand);
         }
 
@@ -297,8 +348,8 @@ namespace basil {
     };
 
     struct IRBinary : public IRInsn {
-        IRBinary(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRInsn(type, some<IRParam>(ir_temp(func))) {
+        IRBinary(rc<IRFunction> func, IROp op, Type type, const IRParam& lhs, const IRParam& rhs):
+            IRInsn(op, type, some<IRParam>(ir_temp(func))) {
             src.push(lhs);
             src.push(rhs);
         }
@@ -322,10 +373,14 @@ namespace basil {
 
     struct IRAdd : public IRBinary {
         IRAdd(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_ADD, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " + ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::add(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
 
@@ -335,10 +390,14 @@ namespace basil {
 
     struct IRSub : public IRBinary {
         IRSub(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_SUB, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " - ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::sub(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
 
@@ -348,10 +407,14 @@ namespace basil {
 
     struct IRMul : public IRBinary {
         IRMul(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_MUL, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " * ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::mul(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
 
@@ -361,10 +424,14 @@ namespace basil {
 
     struct IRDiv : public IRBinary {
         IRDiv(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_DIV, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " / ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::div(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
 
@@ -374,10 +441,14 @@ namespace basil {
 
     struct IRRem : public IRBinary {
         IRRem(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_REM, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " % ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::rem(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
     
@@ -387,10 +458,14 @@ namespace basil {
     
     struct IRAnd : public IRBinary {
         IRAnd(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_AND, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " and ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::and_(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
     
@@ -400,10 +475,14 @@ namespace basil {
     
     struct IROr : public IRBinary {
         IROr(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_OR, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " or ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::or_(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
 
@@ -413,10 +492,14 @@ namespace basil {
     
     struct IRXor : public IRBinary {
         IRXor(rc<IRFunction> func, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs) {}
+            IRBinary(func, IR_XOR, type, lhs, rhs) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " xor ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::xor_(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
 
@@ -426,10 +509,14 @@ namespace basil {
     
     struct IRNot : public IRUnary {
         IRNot(rc<IRFunction> func, Type type, const IRParam& operand):
-            IRUnary(func, type, operand) {}
+            IRUnary(func, IR_NOT, type, operand) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = not ", operand());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::not_(type.repr(ctx), dest->emit(ctx), operand().emit(ctx));
         }
     };
 
@@ -454,10 +541,20 @@ namespace basil {
         CompareKind kind;
 
         IRCompare(rc<IRFunction> func, CompareKind kind_in, Type type, const IRParam& lhs, const IRParam& rhs):
-            IRBinary(func, type, lhs, rhs), kind(kind_in) {}
+            IRBinary(func, IROp(IR_LT + kind_in), type, lhs, rhs), kind(kind_in) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = ", left(), " ", compare_ops[kind], " ", right());
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            static void(* const ops[6])(jasmine::Type, const jasmine::Param&, 
+                const jasmine::Param&, const jasmine::Param&) = {
+                jasmine::bc::cl, jasmine::bc::cle,
+                jasmine::bc::cg, jasmine::bc::cge,
+                jasmine::bc::ceq, jasmine::bc::cne
+            };
+            ops[kind](type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
         }
     };
 
@@ -487,12 +584,16 @@ namespace basil {
 
     struct IRGoto : public IRInsn {
         IRGoto(rc<IRBlock> block):
-            IRInsn(T_VOID, none<IRParam>()) {
+            IRInsn(IR_GOTO, T_VOID, none<IRParam>()) {
             src.push(ir_block(block->id));
         }
 
         void format(stream& io) const override {
             write(io, "goto ", src[0]);
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::jump(func.get_block(src[0].data.block)->label());
         }
     };
 
@@ -506,9 +607,34 @@ namespace basil {
         return ir_goto(*func, block);
     }
 
+    struct IRIfGoto : public IRInsn {
+        bool invert;
+        IRIfGoto(const IRParam& cond, bool invert_in, rc<IRBlock> block):
+            IRInsn(IR_IFGOTO, T_VOID, none<IRParam>()), invert(invert_in) {
+            src.push(cond);
+            src.push(ir_block(block->id));
+        }
+
+        void format(stream& io) const override {
+            write(io, "if ", invert ? "not" : "", src[0], " goto ", src[1]);
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            (invert ? jasmine::bc::jeq : jasmine::bc::jne)(
+                jasmine::I8,
+                func.get_block(src[1].data.block)->label(), 
+                src[0].emit(ctx), jasmine::bc::imm(0)
+            );
+        }
+    };
+
+    rc<IRInsn> ir_if_goto(const IRParam& cond, bool invert, rc<IRBlock> ifTrue) {
+        return ref<IRIfGoto>(cond, invert, ifTrue);
+    }
+
     struct IRIf : public IRInsn {
-        IRIf(rc<IRFunction> func, const IRParam& cond, rc<IRBlock> ifTrue, rc<IRBlock> ifFalse):
-            IRInsn(T_VOID, none<IRParam>()) {
+        IRIf(const IRParam& cond, rc<IRBlock> ifTrue, rc<IRBlock> ifFalse):
+            IRInsn(IR_IF, T_VOID, none<IRParam>()) {
             src.push(cond);
             src.push(ir_block(ifTrue->id));
             src.push(ir_block(ifFalse->id));
@@ -517,10 +643,20 @@ namespace basil {
         void format(stream& io) const override {
             write(io, "if ", src[0], " goto ", src[1], " else ", src[2]);
         }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::jne(jasmine::I8, func.get_block(src[1].data.block)->label(), 
+                src[0].emit(ctx), jasmine::bc::imm(0));
+            jasmine::bc::jump(func.get_block(src[2].data.block)->label());
+        }
     };
 
     rc<IRInsn> ir_if(rc<IRFunction> func, const IRParam& cond, rc<IRBlock> ifTrue, rc<IRBlock> ifFalse) {
-        return ref<IRIf>(func, cond, ifTrue, ifFalse);
+        func->active()->add_exit(ifTrue);
+        func->active()->add_exit(ifFalse);
+        ifTrue->add_entry(func->active());
+        ifFalse->add_entry(func->active());
+        return ref<IRIf>(cond, ifTrue, ifFalse);
     }
 
     // rc<IRInsn> ir_head(rc<IRFunction> func, Type list_type, const IRParam& list);
@@ -529,7 +665,7 @@ namespace basil {
 
     struct IRCall : public IRInsn {
         IRCall(rc<IRFunction> func, Type func_type, const IRParam& proc, const vector<IRParam>& args):
-            IRInsn(func_type, some<IRParam>(ir_temp(func))) {
+            IRInsn(IR_CALL, func_type, some<IRParam>(ir_temp(func))) {
             src.push(proc);
             for (const auto& p : args) src.push(p);
         }
@@ -537,6 +673,16 @@ namespace basil {
         void format(stream& io) const override {
             write(io, *dest, " = ", src[0]);
             write_seq(io, src[{1, src.size()}], "(", ", ", ")");
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::begincall(t_ret(type).repr(ctx), dest->emit(ctx), src[0].emit(ctx));
+            Type arg = t_arg(type);
+            if (arg.of(K_TUPLE)) for (u32 i = 1; i < src.size(); i ++) {
+                jasmine::bc::arg(t_tuple_at(arg, i - 1).repr(ctx), src[i].emit(ctx));
+            }
+            else jasmine::bc::arg(arg.repr(ctx), src[1].emit(ctx));
+            jasmine::bc::endcall();
         }
     };
 
@@ -547,10 +693,15 @@ namespace basil {
     struct IRArg : public IRInsn {
         u32 arg;
         IRArg(rc<IRFunction> func, Type type, const IRParam& dest, u32 arg_in):
-            IRInsn(type, some<IRParam>(dest)), arg(arg_in) {}
+            IRInsn(IR_ARG, type, some<IRParam>(dest)), arg(arg_in) {}
 
         void format(stream& io) const override {
             write(io, *dest, " = arg ", arg);
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            // we assume the args are in order
+            jasmine::bc::param(type.repr(ctx), dest->emit(ctx));
         }
     };
 
@@ -560,12 +711,16 @@ namespace basil {
 
     struct IRAssign : public IRInsn {
         IRAssign(rc<IRFunction> func, Type type, const IRParam& dest, const IRParam& src_in):
-            IRInsn(type, some<IRParam>(dest)) {
+            IRInsn(IR_ASSIGN, type, some<IRParam>(dest)) {
             src.push(src_in);
         }
 
         void format(stream& io) const override {
             write(io, *dest, " = ", src[0]);
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::mov(type.repr(ctx), dest->emit(ctx), src[0].emit(ctx));
         }
     }; 
 
@@ -576,13 +731,17 @@ namespace basil {
     struct IRPhi : public IRInsn {
         rc<IRBlock> block;
         IRPhi(rc<IRFunction> func, Type type, const IRParam& dest, const vector<IRParam>& inputs):
-            IRInsn(type, some<IRParam>(dest)), block(func->active()) {
+            IRInsn(IR_PHI, type, some<IRParam>(dest)), block(func->active()) {
             src = inputs;
         }
 
         void format(stream& io) const override {
             write(io, *dest, " = Φ");
             write_seq(io, src, "(", ", ", ")");
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            panic("Phi nodes should be eliminated before lowering to Jasmine bytecode!");
         }
     };
 
@@ -596,12 +755,16 @@ namespace basil {
 
     struct IRReturn : public IRInsn {
         IRReturn(Type type, const IRParam& value):
-            IRInsn(type, none<IRParam>()) {
+            IRInsn(IR_RETURN, type, none<IRParam>()) {
             src.push(value);
         }
 
         void format(stream& io) const override {
             write(io, "return ", src[0]);
+        }
+
+        void emit(IRFunction& func, Context& ctx) const override {
+            jasmine::bc::ret(type.repr(ctx), src[0].emit(ctx));
         }
     };
 
@@ -620,7 +783,10 @@ namespace basil {
         cse_elim_ssa,
         gvn_ssa,
         constant_folding_ssa,
-        optimize_arithmetic_ssa
+        optimize_arithmetic_ssa,
+        linearize_cfg,
+        phi_elim,
+        cleanup_nops
     };
     
     void require(rc<IRFunction> func, PassType pass) {
@@ -857,6 +1023,87 @@ namespace basil {
 
     void optimize_arithmetic_ssa(rc<IRFunction> func) {
         panic("Unimplemented!");
+    }
+
+    void linearize_postorder(vector<rc<IRBlock>>& ordering, bitset& visited, const rc<IRBlock>& block) {
+        for (const auto& other : block->out) if (!visited.contains(other->id))
+            linearize_postorder(ordering, visited, other);
+        visited.insert(block->id);
+        ordering.push(block);
+    }
+
+    void linearize_cfg(rc<IRFunction> func) {
+        vector<rc<IRBlock>> ordering;
+        bitset visited;
+        linearize_postorder(ordering, visited, func->entry);
+        while (ordering.size()) {
+            ordering.back()->ord = func->block_layout.size();
+            func->block_layout.push(ordering.back());
+            ordering.pop();
+        }
+    }
+
+    void phi_elim(rc<IRFunction> func) {
+        for (rc<IRBlock> block : func->blocks) {
+            for (rc<IRInsn> insn : block->insns) if (insn->op == IR_PHI) {
+                for (u32 i = 0; i < insn->src.size(); i ++) {
+                    rc<IRBlock> src = block->in[i];
+                    rc<IRInsn> branch = src->insns.back(); // remove branching instruction from the end
+                    src->insns.pop();
+                    src->insns.push(ir_assign(func, insn->type, *insn->dest, insn->src[i]));
+                    src->insns.push(branch); // restore branching instruction
+                }
+            }
+            block->remove_if([](const IRInsn& insn) -> bool { return insn.op == IR_PHI; });
+        }
+    }
+
+    void cleanup_nops(rc<IRFunction> func) {
+        require(func, LINEARIZE_CFG);
+        for (rc<IRBlock> block : func->blocks) {
+            // the only spot a goto could be is at the end of a block
+            rc<IRInsn>& insn = block->insns.back();
+            if (insn->op == IR_GOTO && func->get_block(insn->src[0].data.block)->ord == block->ord + 1)
+                block->insns.pop();
+            else if (insn->op == IR_IF) {
+                rc<IRBlock> ifTrue = func->get_block(insn->src[1].data.block);
+                rc<IRBlock> ifFalse = func->get_block(insn->src[2].data.block);
+                if (ifTrue->ord == block->ord + 1) insn = ir_if_goto(insn->src[0], true, ifFalse);
+                else if (ifFalse->ord == block->ord + 1) insn = ir_if_goto(insn->src[0], false, ifTrue);
+            }
+        }
+
+        map<u32, u32> fixup;
+        for (u32 i = 0; i < func->block_layout.size(); i ++) if (func->block_layout[i]->insns.size() == 0) {
+                // i + 1 is safe because the exit block is never empty
+            fixup[func->block_layout[i]->id] = func->block_layout[i + 1]->id;
+        }
+
+        // remove all blocks with no instructions
+        rc<IRBlock>* write = &func->block_layout[0];
+        for (rc<IRBlock>& block : func->block_layout) {
+            *write = block;
+            if (block->insns.size() != 0) write ++;
+        }
+        while (&func->block_layout.back() >= write) func->block_layout.pop();
+
+        for (rc<IRBlock>& block : func->block_layout) for (rc<IRInsn>& insn : block->insns) {
+            for (IRParam& p : insn->src) if (p.kind == IK_BLOCK) {
+                auto it = fixup.find(p.data.block);
+                if (it != fixup.end()) p.data.block = it->second;
+            }
+        }
+    }
+    
+    void optimize(rc<IRFunction> func, OptLevel level) {
+        // compute some common properties
+        require(func, DOMINANCE_FRONTIER);
+        require(func, LIVENESS);
+
+        // necessary prep for bytecode generation
+        require(func, LINEARIZE_CFG);
+        require(func, PHI_ELIMINATION);
+        require(func, CLEANUP_NOPS);
     }
 }
 

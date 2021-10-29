@@ -428,12 +428,6 @@ namespace basil {
                 return;
             }
             case K_LIST: { // the spooky one...
-                if (v_tail(term).type == T_VOID) { // single-element list
-                    if (!v_head(term).form) resolve_form(env, v_head(term));
-                    term.form = to_prefix(v_head(term).form); // always treat single-element lists as expressions
-                    return;
-                }
-
                 if (!v_head(term).form) group(env, term); // group all terms within the list first
 
                 if (!term.type.of(K_LIST)) // make sure that it's still some kind of list
@@ -443,7 +437,6 @@ namespace basil {
                     auto callback = ((const rc<Callable>)v_head(term).form->invokable)->callback;
                     if (callback) {
                         term.form = (*callback)(env, term); // apply callback and finish resolving
-                        // println("resolved ", term, " form to ", term.form);
                         return;
                     }
                     else if (v_head(term).type.of(K_SYMBOL)) {
@@ -924,7 +917,7 @@ namespace basil {
         }
         else panic("Tried to call non-callable value!");
 
-        bool is_runtime = is_args_runtime(args.type) || fntype.of(K_RUNTIME) || fntype.of(K_INTERSECT);
+        bool is_runtime = is_args_runtime(args.type) || func.type.of(K_RUNTIME) || fntype.of(K_INTERSECT);
         bool preserve_quotes = false;
 
         if (func.type.of(K_FUNCTION) && func.data.fn->builtin) {
@@ -1123,6 +1116,7 @@ namespace basil {
                     // undefined is a placeholder for values that exist at form
                     // resolution but are not actually defined during evaluation
                     err(term.pos, "Undefined variable '", term.data.sym, "'.");
+                    // println("env = ", env, ", parent = ", env->parent);
                     return v_error(term.pos);
                 }
                 if (var->type == T_TYPE && var->data.type.is_tvar())

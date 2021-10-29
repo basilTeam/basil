@@ -13,13 +13,13 @@
 #include "util/utf8.h"
 
 namespace basil {
-    void Source::check_limits(optional<const char*> filename) const {
+    void Source::check_limits() const {
         if (lines.size() > 1000000) 
-            err(full_span(), "Source file ", filename ? *filename : "", " with ", lines.size(),
+            err(full_span(), "Source file ", filepath ? *filepath : "", " with ", lines.size(),
                 " lines exceeds maximum length of 1000000 lines.");
         else for (u32 i = 0; i < lines.size(); i ++) {
             if (lines[i]->size() > 4000)
-                err(line_span(i), "Line ", i, " of source file ", filename ? *filename : "", 
+                err(line_span(i), "Line ", i, " of source file ", filepath ? *filepath : "", 
                     " with length ", lines[i]->size(), " exceeds maximum line length of 4000 characters.");
         }
     }
@@ -36,9 +36,9 @@ namespace basil {
 
     Source::Source() {}
 
-    Source::Source(const char* filename):
+    Source::Source(const ustring& filename):
         filepath(some<ustring>(filename)) {
-        file f(filename, "r");
+        file f((const char*)filename.raw(), "r");
         if (!f) {
             err({}, "Could not open file '", filename, "'.");
             return;

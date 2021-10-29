@@ -18,6 +18,9 @@
 namespace jasmine {
     const u16 JASMINE_MAJOR_VERSION = 1, JASMINE_MINOR_VERSION = 0, JASMINE_PATCH_VERSION = 0;
 
+    class Object;
+    struct Symbol;
+
     enum Architecture : u16 {
         UNSUPPORTED_ARCH = 0,
         X86_64 = 1,
@@ -110,6 +113,10 @@ namespace jasmine {
 
         // Returns the size of a pointer in bytes for this target.
         u64 pointer_size() const;
+
+        // Writes a small system-specific trampoline to the provided object, forwarding a function
+        // call to the provided symbol to the given absolute address.
+        void trampoline(Object& obj, Symbol label, i64 address) const;
     };
 
     #if defined(BASIL_X86_64)

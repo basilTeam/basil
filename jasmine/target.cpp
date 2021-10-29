@@ -423,4 +423,19 @@ namespace jasmine {
                 return 0;
         }
     }
+    
+    void Target::trampoline(Object& obj, Symbol label, i64 address) const {
+        switch (arch) {
+            case X86_64: {
+                using namespace x64;
+                writeto(obj);
+                obj.define(label);
+                mov(r64(RAX), imm(address));
+                jmp(r64(RAX)); // use jmp instead of call to maintain previous return value
+                break;
+            }
+            default:
+                panic("Unimplemented architecture!");
+        }
+    }
 }

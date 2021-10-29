@@ -32,6 +32,12 @@ namespace basil {
         NUM_PRINT_FLAGS
     };
 
+    enum NativeType {
+        NT_OBJECT,
+        NT_LIBRARY,
+        NT_EXECUTABLE
+    };
+
     optional<ustring> locate_source(const char* path);
 
     optional<rc<Object>> load_artifact(const char* path);
@@ -40,7 +46,7 @@ namespace basil {
     optional<rc<Section>> to_ast(rc<Section> section);
     optional<rc<Section>> advance_section(rc<Section> section, SectionType target);
 
-    rc<Source> load_step(const char* const& str);
+    rc<Source> load_step(const ustring& str);
     vector<Token> lex_step(rc<Source> source);
     Value parse_step(const vector<Token>& tokens);
     Value resolve_step(const Value& term);
@@ -82,7 +88,10 @@ namespace basil {
     void repl();
 
     // Compiles a single Basil source file to a Basil object.
-    void compile(const char* filename, SectionType target);
+    void build(const char* filename, SectionType target);
+
+    // Compiles a single Basil source file to a native artifact.
+    void compile(const char* filename, NativeType target, const_slice<const char*> args);
 
     // Runs the "run file" mode of the compiler.
     void run(const char* filename);

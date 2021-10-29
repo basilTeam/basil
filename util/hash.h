@@ -50,6 +50,9 @@ template<>
 u64 hash(const ustring& s);
 
 template<>
+u64 hash(const u32& u);
+
+template<>
 u64 hash(const u64& u);
 
 template<typename T>

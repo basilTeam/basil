@@ -14,6 +14,8 @@
 #include "source.h"
 #include "obj.h"
 #include "eval.h"
+#include "stdlib.h"
+#include "jasmine/obj.h"
 
 namespace basil {
     void init() {
@@ -53,7 +55,7 @@ namespace basil {
             return some<rc<Object>>(obj);
         }
         else { // create new object with single source section
-            rc<Source> src = ref<Source>(fpath->raw());
+            rc<Source> src = ref<Source>(*fpath);
             obj->sections.push(source_section(*fpath, src));
             obj->main_section = some<u32>(0);
             return some<rc<Object>>(obj);
@@ -86,11 +88,115 @@ namespace basil {
     }
 
     optional<rc<Section>> eval_section(rc<Section> section) {
-        return none<rc<Section>>();
+        if (section->type != ST_PARSED) panic("Tried to evaluate non-parsed section!");
+        rc<Env> env = extend(root_env());
+        Value program = parsed_from_section(section);
+        resolve_form(env, program);
+
+        Value result = eval(env, program);
+        if (error_count()) {
+            print_errors(_stdout, nullptr);
+            discard_errors();
+            return none<rc<Section>>();
+        }
+        return some<rc<Section>>(module_section(section->name, result, env));
     }
 
     optional<rc<Section>> to_ast(rc<Section> section) {
-        return none<rc<Section>>();
+        if (section->type != ST_EVAL) panic("Tried to lower non-module section to AST!");
+        rc<Env> env = module_from_section(section);
+        Value main = module_main(section);
+
+        if (!main.type.of(K_RUNTIME)) main = lower(env, main);
+
+        map<Symbol, rc<AST>> functions;
+        for (auto& [k, v] : env->values) {
+            if (v.type.of(K_FUNCTION)) for (auto& [_, v] : v.data.fn->resolutions) {
+                for (auto& [t, v] : v->insts) {
+                    functions[mangle(k, v->func->type(env))] = v->func;
+                }
+            }
+        }
+
+        if (error_count()) {
+            print_errors(_stdout, nullptr);
+            discard_errors();
+            return none<rc<Section>>();
+        }
+
+        // for (const auto& [k, v] : functions) println(k, ": ", v);
+
+        return some<rc<Section>>(ast_section(section->name, main.data.rt->ast, functions, env));
+    }
+
+    optional<rc<Section>> to_ir(rc<Section> section) {
+        if (section->type != ST_AST) panic("Tried to lower non-AST section to IR!");
+        map<Symbol, rc<AST>> functions = ast_from_section(section);
+        rc<AST> main = ast_main(section);
+        rc<Env> env = ast_env(section);
+
+        rc<IRFunction> main_ir = ref<IRFunction>(symbol_from(".basil_main"), t_func(T_VOID, T_VOID));
+        main->gen_ssa(env, main_ir);
+        main_ir->finish(T_VOID, ir_none());
+
+        if (error_count()) {
+            print_errors(_stdout, nullptr);
+            discard_errors();
+            return none<rc<Section>>();
+        }
+
+        map<Symbol, rc<IRFunction>> ir_functions;
+        for (auto& [k, v] : functions) v->gen_ssa(root_env(), main_ir), ir_functions[k] = get_ssa_function(v);
+
+        // for (auto& [k, v] : ir_functions) println(v);
+
+        if (error_count()) {
+            print_errors(_stdout, nullptr);
+            discard_errors();
+            return none<rc<Section>>();
+        }
+
+        return some<rc<Section>>(ir_section(section->name, main_ir, ir_functions));
+    }
+
+    optional<rc<Section>> to_jasmine(rc<Section> section) {
+        if (section->type != ST_IR) panic("Tried to lower non-IR section to Jasmine bytecode!");
+        map<Symbol, rc<IRFunction>> functions = ir_from_section(section);
+        rc<IRFunction> main = ir_main(section);
+
+        rc<jasmine::Object> object = ref<jasmine::Object>(jasmine::Target{ jasmine::JASMINE, jasmine::DEFAULT_OS });
+        jasmine::bc::writeto(*object);
+
+        for (auto& [k, v] : functions) optimize(v, OPT_FAST), v->emit(object->get_context());
+        optimize(main, OPT_FAST);
+        main->emit(object->get_context());
+
+        if (error_count()) {
+            print_errors(_stdout, nullptr);
+            discard_errors();
+            return none<rc<Section>>();
+        }
+
+        // vector<jasmine::Insn> insns = jasmine::disassemble_all_insns(object->get_context(), *object);
+        // for (auto& insn : insns) jasmine::print_insn(object->get_context(), _stdout, insn);
+
+        return some<rc<Section>>(jasmine_section(section->name, object));
+    }
+
+    optional<rc<Section>> to_native(rc<Section> section) {
+        if (section->type != ST_JASMINE) panic("Tried to compile non-Jasmine section to native binary!");
+        rc<jasmine::Object> object = jasmine_from_section(section);
+        
+        jasmine::Object native = object->retarget(jasmine::DEFAULT_TARGET);
+        rc<jasmine::Object> boxed_native = ref<jasmine::Object>(native);
+
+        if (error_count()) {
+            print_errors(_stdout, nullptr);
+            discard_errors();
+            return none<rc<Section>>();
+        }
+
+        return some<rc<Section>>(native_section(section->name, boxed_native));
     }
 
     optional<rc<Section>> advance_section(rc<Section> section, SectionType target) {
@@ -100,6 +206,9 @@ namespace basil {
             case ST_SOURCE: product = apply(product, lex_and_parse); break;
             case ST_PARSED: product = apply(product, eval_section); break;
             case ST_EVAL: product = apply(product, to_ast); break;
+            case ST_AST: product = apply(product, to_ir); break;
+            case ST_IR: product = apply(product, to_jasmine); break;
+            case ST_JASMINE: product = apply(product, to_native); break;
             default: product = none<rc<Section>>();
         }
         if (error_count()) {
@@ -109,7 +218,7 @@ namespace basil {
         return product;
     }
 
-    rc<Source> load_step(const char* const& str) {
+    rc<Source> load_step(const ustring& str) {
         buffer b;
         write(b, str);
         return ref<Source>(b);
@@ -156,14 +265,14 @@ namespace basil {
     map<Symbol, rc<IRFunction>> ssa_step(const rc<AST>& ast_in) {
         rc<AST> ast = ast_in;
         if (!ast) return {};
-        rc<IRFunction> main_ir = ref<IRFunction>(symbol_from("#main"), t_func(T_VOID, T_VOID));
+        rc<IRFunction> main_ir = ref<IRFunction>(symbol_from(".basil_main"), t_func(T_VOID, T_VOID));
         ast->gen_ssa(root_env(), main_ir);
         main_ir->finish(T_VOID, ir_none());
 
         if (error_count()) print_errors(_stdout, nullptr), discard_errors();
 
         map<Symbol, rc<IRFunction>> functions;
-        functions[symbol_from("#main")] = main_ir;
+        functions[symbol_from(".basil_main")] = main_ir;
         for (const auto& [k, v] : root_env()->values) if (v.type.of(K_FUNCTION)) {
             for (const auto& [_, v] : v.data.fn->resolutions) for (const auto& [_, v] : v->insts) {
                 if (v->func && get_ssa_function(v->func)) {
@@ -204,8 +313,8 @@ namespace basil {
         return none<ustring>();
     }
 
-    ustring compute_object_name(const char* path) {
-        if (endswith(path, ".bob")) return path;
+    ustring compute_object_name(const char* path, const char* suffix) {
+        if (suffix && *suffix && endswith(path, suffix)) return path;
         else {
             ustring upath = path;
             auto it = upath.begin();
@@ -220,7 +329,7 @@ namespace basil {
                 newpath += *it;
                 it ++;
             }
-            newpath += ".bob";
+            newpath += suffix;
             return newpath;
         }
     }
@@ -238,6 +347,10 @@ namespace basil {
             else return true; // don't try and pull input if not REPL
         }
         else return false;
+    }
+
+    i64 square(i64 n) {
+        return n * n;
     }
 
     void repl() {
@@ -263,6 +376,7 @@ namespace basil {
 
                 if (auto v = parse(view)) code.push(*v);
             }
+            if (code.size() == 1) continue;
             if (error_count()) {
                 print_errors(_stdout, source);
                 discard_errors();
@@ -277,6 +391,8 @@ namespace basil {
                 continue;
             }
 
+            if (result.type == T_VOID) continue;
+
             if (!result.type.of(K_RUNTIME)) {
                 println("= ", ITALICBLUE, result, RESET);
                 println("");
@@ -285,11 +401,43 @@ namespace basil {
 
             rc<AST> ast = result.data.rt->ast;
             ast->type(global); // run typechecking
-            rc<IRFunction> main_ir = ref<IRFunction>(symbol_from("#main"), t_func(T_VOID, T_VOID));
-            ast->gen_ssa(global, main_ir);
-            main_ir->finish(T_VOID, ir_none());
+            rc<IRFunction> main_ir = ref<IRFunction>(symbol_from(".basil_main"), t_func(T_VOID, T_VOID));
+            
+            main_ir->finish(T_INT, ast->gen_ssa(global, main_ir));
 
-            println(ITALICBLUE, main_ir, RESET);
+            for (const auto& [k, v] : global->values) if (v.type.of(K_FUNCTION)) {
+                for (const auto& [_, v] : v.data.fn->resolutions) for (const auto& [_, v] : v->insts) {
+                    if (v->func && get_ssa_function(v->func)) {
+                        optimize(get_ssa_function(v->func), OPT_FAST);
+                        // println(get_ssa_function(v->func));
+                    }
+                }
+            }
+            
+            optimize(main_ir, OPT_FAST);
+            // println(main_ir);
+
+            jasmine::Object jobj({ jasmine::JASMINE, jasmine::DEFAULT_OS });
+            jasmine::bc::writeto(jobj);
+
+            for (const auto& [k, v] : global->values) if (v.type.of(K_FUNCTION)) {
+                for (const auto& [_, v] : v.data.fn->resolutions) for (const auto& [_, v] : v->insts) {
+                    if (v->func && get_ssa_function(v->func)) {
+                        get_ssa_function(v->func)->emit(jobj.get_context());
+                    }
+                }
+            }
+            main_ir->emit(jobj.get_context());
+
+            auto insns = jasmine::disassemble_all_insns(jobj.get_context(), jobj);
+            for (const auto& insn : insns) jasmine::print_insn(jobj.get_context(), _stdout, insn);
+
+            jasmine::Object native = jobj.retarget(jasmine::DEFAULT_TARGET); // retarget to native
+            // native.writeELF("out.o");
+            native.define_native(jasmine::global("square"), (void*)square);
+            native.load();
+            auto main = (i64(*)())native.find(jasmine::global(".basil_main"));
+            println(main());
         }
     }
 
@@ -300,7 +448,7 @@ namespace basil {
         if (!obj->main_section) return println("Loaded Basil object has no 'main' section!");
 
         for (rc<Section>& section : obj->sections) {
-            auto sect = advance_section(section, ST_PARSED); // parse everything
+            auto sect = advance_section(section, ST_NATIVE); // fully compile everything
             if (!sect) {
                 print_errors(_stdout, nullptr);
                 discard_errors();
@@ -309,34 +457,14 @@ namespace basil {
             section = *sect;
         }
 
-        Value program = parsed_from_section(obj->sections[*obj->main_section]);
-        rc<Env> global = extend(root_env());
-        Value result = eval(global, program);
-        if (error_count()) {
-            print_errors(_stdout, nullptr);
-            discard_errors();
-            return;
-        }
-
-        if (!result.type.of(K_RUNTIME)) return println(result);
-
-        rc<AST> ast = result.data.rt->ast;
-        ast->type(global); // run typechecking
-        rc<IRFunction> main_ir = ref<IRFunction>(symbol_from("#main"), t_func(T_VOID, T_VOID));
-        ast->gen_ssa(global, main_ir);
-        main_ir->finish(T_VOID, ir_none());
-
-        for (const auto& [k, v] : global->values) if (v.type.of(K_FUNCTION)) {
-            for (const auto& [_, v] : v.data.fn->resolutions) for (const auto& [_, v] : v->insts) {
-                if (v->func && get_ssa_function(v->func)) println(get_ssa_function(v->func));
-            }
-        }
-        println(main_ir);
+        rc<jasmine::Object> native = native_from_section(obj->sections[*obj->main_section]);
+        native->load();
+        auto main = (void(*)())native->find(jasmine::global(".basil_main"));
+        main();
     }
 
-    void compile(const char* filename, SectionType target) {
-        ustring dest = compute_object_name(filename);
-        println("filename = ", filename, ", dest = ", dest);
+    void build(const char* filename, SectionType target) {
+        ustring dest = compute_object_name(filename, ".bob");
         if (exists(dest) && dest != filename) {
             return println("Tried to compile '", filename, "' to object file, but '", dest, "' already exists!");
         }
@@ -358,11 +486,51 @@ namespace basil {
         obj->write(output);
     }
 
-    static map<const char*, rc<Env>> modules;
+    void compile(const char* filename, NativeType target, const_slice<const char*> args) {
+        auto maybe_obj = load_artifact(filename);
+        if (!maybe_obj) return println("Couldn't locate valid Basil file at path '", filename, "'.");
+        auto obj = *maybe_obj;
+        if (!obj->main_section) return println("Loaded Basil object has no 'main' section!");
+
+        for (rc<Section>& section : obj->sections) {
+            auto sect = advance_section(section, ST_NATIVE); // fully compile everything
+            if (!sect) {
+                print_errors(_stdout, nullptr);
+                discard_errors();
+                return;
+            }
+            section = *sect;
+        }
+
+        rc<jasmine::Object> native = native_from_section(obj->sections[*obj->main_section]);
+
+        switch (target) {
+            case NT_OBJECT: native->writeELF(compute_object_name(filename, ".o").raw()); break;
+            case NT_EXECUTABLE: {
+                ustring obj = compute_object_name(filename, ".o");
+                native->writeELF(obj.raw());
+                ustring cmd = format<ustring>("gcc -nostdlib ", obj, " -Wl,-e.basil_main -o ", compute_object_name(obj.raw(), ""));
+                for (const char* arg : args) cmd += " ", cmd += arg; // add linker args
+                println(cmd);
+                system(cmd.raw());
+                cmd = format<ustring>("rm ", obj);
+                system(cmd.raw());
+                break;
+            }
+            default: panic("Unimplemented!");
+        }
+    }
+
+    static map<ustring, rc<Env>> modules;
 
     optional<rc<Env>> load(const char* filename) {
-        if (modules.find(filename) == modules.end()) {
-            rc<Source> source = ref<Source>(filename);
+        auto resolved = locate_source(filename);
+        if (!resolved) {
+            err({}, "Couldn't resolve file path '", filename, "'.");
+            return none<rc<Env>>();
+        }
+        if (modules.find(*resolved) == modules.end()) {
+            rc<Source> source = ref<Source>(*resolved);
             Source::View view(*source);
             vector<Token> token_cache = lex_all(view);
             TokenView tview(source, token_cache);
@@ -400,10 +568,10 @@ namespace basil {
                 return none<rc<Env>>();
             }
 
-            modules.put(filename, global); // store top-level environment
+            modules.put(*resolved, global); // store top-level environment
 
             return some<rc<Env>>(global);
         }
-        return modules[filename];
+        return modules[*resolved];
     }
 }

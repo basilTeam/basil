@@ -181,7 +181,7 @@ namespace basil {
                 Value enclosed = parse_enclosed(pos, TK_RSQUARE, view, 
                     ParseContext{ctx.prev_indent, ctx.indent, some<TokenKind>(TK_RSQUARE)}
                 );
-                return v_cons(enclosed.pos, t_list(T_ANY),  // [x y z] => (list x y z)
+                return v_cons(enclosed.pos, t_list(T_ANY),  // [x y z] => (array x y z)
                     v_symbol(pos, S_LIST),
                     enclosed
                 );
@@ -189,7 +189,7 @@ namespace basil {
             case TK_LBRACE: {
                 Value enclosed = parse_enclosed(pos, TK_RBRACE, view, 
                     ParseContext{ctx.prev_indent, ctx.indent, some<TokenKind>(TK_RBRACE)}
-                ); // {x y z} => (array x y z)
+                ); // {x y z} => (set x y z)
                 return v_cons(enclosed.pos, t_list(T_ANY),
                     v_symbol(pos, S_ARRAY),
                     enclosed

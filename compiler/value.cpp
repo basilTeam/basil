@@ -280,9 +280,14 @@ namespace basil {
                 else write_pairs(io, data.dict->elements, "{", " = ", "; ", "}"); // {"x" = 1; "y" = 2}
                 break;
             }
-            case K_INTERSECT: write_values(io, data.isect->values, "(", " & ", ")"); break; // (1 & 2 & 3)
+            case K_INTERSECT: write_pairs(io, data.isect->values, "(", ": ", " & ", ")"); break; // (1 & 2 & 3)
             case K_MODULE: write(io, "#module"); break;
-            case K_FUNCTION: write(io, "#procedure"); break;
+            case K_FUNCTION: {
+                if (data.fn->name) write(io, *data.fn->name);
+                else if (t_is_macro(type)) write(io, "#macro");
+                else write(io, "#procedure");
+                break;
+            }
             case K_RUNTIME: write(io, "#runtime[", data.rt->ast, " : ", ((rc<AST>)data.rt->ast)->type(root_env()), "]"); break;
             default:
                 panic("Unsupported value kind!"); 
@@ -593,7 +598,10 @@ namespace basil {
         auto it = table.find(tup);
         if (it == table.end()) {
             rc<InstTable> inst = ref<InstTable>(fn.env->clone(), fn.body.clone());
+            // write_seq(_stdout, fn.args, "fn args = [", ", ", "]\n");
+            // println("input forms = ", tup.forms.size());
             for (u32 i = 0; i < tup.forms.size(); i ++) {
+                // println(" => ", tup.forms[i]);
                 inst->env->def(fn.args[i], v_undefined({}, fn.args[i], tup.forms[i]));
             }
             table.put(tup, inst);
@@ -613,10 +621,6 @@ namespace basil {
     }
 
     Alias::Alias(const Value& term_in): term(term_in) {}
-
-    Macro::Macro(optional<const Builtin&> builtin_in, rc<Env> env_in, 
-        const vector<Symbol>& args_in, const Value& body_in):
-        builtin(builtin_in), env(env_in), args(args_in), body(body_in) {}
     
     FormFn::FormFn(rc<Env> env_in, const vector<Symbol>& args_in, const Value& body_in):
         AbstractFunction(env_in, args_in, body_in) {}
@@ -711,11 +715,11 @@ namespace basil {
         if (!type.of(K_LIST)) 
             panic("Attempted to construct list with non-list type '", type, "'!");
         if (!head.type.coerces_to(t_list_element(type)))
-            panic("Cannot construct list - provided head '", head.type, 
-                "' incompatible with list type '", type, "'!");
+            v.type = t_list(T_ANY); // switch to [Any]
+        if (!tail.type.of(K_LIST) && tail.type != T_VOID)
+            panic("Attempted to construct list with non-list tail of type '", tail.type, "'!");
         if (!tail.type.coerces_to(type))
-            panic("Cannot construct list - provided tail '", tail.type, 
-                "' incompatible with list type '", type, "'!"); 
+            v.type = t_list(T_ANY); // switch to [Any]
         v.data.list = ref<List>(head, tail.type.of(K_VOID) ? nullptr : tail.data.list);
         return v;
     }
@@ -888,22 +892,6 @@ namespace basil {
     Value v_alias(Source::Pos pos, const Value& term) {
         Value v(pos, T_ALIAS, nullptr);
         v.data.alias = ref<Alias>(term);
-        return v;
-    }
-
-    Value v_macro(const Builtin& builtin) {
-        Value v({}, builtin.type, builtin.form);
-        if (!builtin.type.of(K_MACRO))
-            panic("Attempted to create macro value with non-macro builtin!");
-        v.data.macro = ref<Macro>(some<const Builtin&>(builtin), nullptr, vector_of<Symbol>(), v_void({}));
-        return v;
-    }
-
-    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body) {
-        Value v(pos, type, nullptr);
-        if (!type.of(K_MACRO))
-            panic("Attempted to construct macro value with non-macro type!");
-        v.data.macro = ref<Macro>(none<const Builtin&>(), env, args, body);
         return v;
     }
 

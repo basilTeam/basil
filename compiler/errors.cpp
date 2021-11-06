@@ -51,6 +51,8 @@ namespace basil {
       
     void print_source(stream& io, const char* color, Source::Pos pos, const Source& src) {
         if (pos == Source::Pos()) return;
+        if (pos.line_start >= src.size()) return;
+        
         const auto& line = src[pos.line_start];
         u32 first = pos.col_start, last = pos.line_end == pos.line_start ? pos.col_end : line.size();
         write(io, color, "│", RESET, "       ");

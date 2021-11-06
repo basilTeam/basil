@@ -12,10 +12,13 @@
 #include "parse.h"
 #include "token.h"
 #include "source.h"
+#include "util/perf.h"
 #include "obj.h"
 #include "eval.h"
 #include "stdlib.h"
-#include "jasmine/obj.h"
+#include "time.h"
+#include "jasmine/jobj.h"
+#include "runtime/core.h"
 
 namespace basil {
     void init() {
@@ -25,6 +28,16 @@ namespace basil {
     void deinit() {
         free_root_env();
         free_types();
+    }
+    
+    void init_rt(jasmine::Object& obj) {
+        // obj.define_native(jasmine::global("print_i"), (void*)print_i);
+    }
+
+    static bool repl_mode = false;
+
+    bool is_repl() {
+        return repl_mode;
     }
     
     optional<rc<Object>> load_artifact(const char* path) {
@@ -63,10 +76,15 @@ namespace basil {
     }
 
     optional<rc<Section>> lex_and_parse(rc<Section> section) {
+        PerfMarker perf("lexing and parsing");
+
         if (section->type != ST_SOURCE) panic("Tried to lex and parse non-source section!");
         rc<Source> source = source_from_section(section);
         vector<Token> token_cache = lex_step(source);
         TokenView tview(source, token_cache);
+
+        bool old_repl = is_repl(); // store whether we are in a repl
+        repl_mode = false; // prevents asking for user input in the module
 
         vector<Value> program_terms;
         program_terms.push(v_symbol({}, S_DO)); // wrap the whole program in a giant "do"
@@ -76,6 +94,9 @@ namespace basil {
                 program_terms.push(*v);
             }
         }
+
+        repl_mode = old_repl;
+
         if (error_count()) {
             print_errors(_stdout, source);
             discard_errors();
@@ -88,6 +109,8 @@ namespace basil {
     }
 
     optional<rc<Section>> eval_section(rc<Section> section) {
+        PerfMarker perf("evaluating module");
+
         if (section->type != ST_PARSED) panic("Tried to evaluate non-parsed section!");
         rc<Env> env = extend(root_env());
         Value program = parsed_from_section(section);
@@ -103,6 +126,8 @@ namespace basil {
     }
 
     optional<rc<Section>> to_ast(rc<Section> section) {
+        PerfMarker perf("lowering to AST");
+
         if (section->type != ST_EVAL) panic("Tried to lower non-module section to AST!");
         rc<Env> env = module_from_section(section);
         Value main = module_main(section);
@@ -130,14 +155,21 @@ namespace basil {
     }
 
     optional<rc<Section>> to_ir(rc<Section> section) {
+        PerfMarker perf("generating SSA IR");
+
         if (section->type != ST_AST) panic("Tried to lower non-AST section to IR!");
         map<Symbol, rc<AST>> functions = ast_from_section(section);
         rc<AST> main = ast_main(section);
         rc<Env> env = ast_env(section);
 
-        rc<IRFunction> main_ir = ref<IRFunction>(symbol_from(".basil_main"), t_func(T_VOID, T_VOID));
-        main->gen_ssa(env, main_ir);
-        main_ir->finish(T_VOID, ir_none());
+        rc<IRFunction> main_ir = ref<IRFunction>(symbol_from(".basil_main"), t_func(T_VOID, T_INT));
+        main_ir->finish(T_INT, main->gen_ssa(env, main_ir));
+
+        map<Symbol, rc<IRFunction>> ir_functions;
+        for (auto& [k, v] : functions) {
+            v->gen_ssa(root_env(), main_ir);
+            if (v->kind() == AST_FUNCTION) ir_functions[k] = get_ssa_function(v);
+        }
 
         if (error_count()) {
             print_errors(_stdout, nullptr);
@@ -145,10 +177,8 @@ namespace basil {
             return none<rc<Section>>();
         }
 
-        map<Symbol, rc<IRFunction>> ir_functions;
-        for (auto& [k, v] : functions) v->gen_ssa(root_env(), main_ir), ir_functions[k] = get_ssa_function(v);
-
         // for (auto& [k, v] : ir_functions) println(v);
+        // println(main_ir);
 
         if (error_count()) {
             print_errors(_stdout, nullptr);
@@ -160,6 +190,8 @@ namespace basil {
     }
 
     optional<rc<Section>> to_jasmine(rc<Section> section) {
+        PerfMarker perf("generating jasmine bytecode");
+
         if (section->type != ST_IR) panic("Tried to lower non-IR section to Jasmine bytecode!");
         map<Symbol, rc<IRFunction>> functions = ir_from_section(section);
         rc<IRFunction> main = ir_main(section);
@@ -177,13 +209,15 @@ namespace basil {
             return none<rc<Section>>();
         }
 
-        vector<jasmine::Insn> insns = jasmine::disassemble_all_insns(object->get_context(), *object);
-        for (auto& insn : insns) jasmine::print_insn(object->get_context(), _stdout, insn);
+        // vector<jasmine::Insn> insns = jasmine::disassemble_all_insns(object->get_context(), *object);
+        // for (auto& insn : insns) jasmine::print_insn(object->get_context(), _stdout, insn);
 
         return some<rc<Section>>(jasmine_section(section->name, object));
     }
 
     optional<rc<Section>> to_native(rc<Section> section) {
+        PerfMarker perf("compiling to native");
+
         if (section->type != ST_JASMINE) panic("Tried to compile non-Jasmine section to native binary!");
         rc<jasmine::Object> object = jasmine_from_section(section);
         
@@ -202,14 +236,16 @@ namespace basil {
     optional<rc<Section>> advance_section(rc<Section> section, SectionType target) {
         optional<rc<Section>> product = some<rc<Section>>(section); 
         rc<Source> src = section->type == ST_SOURCE ? source_from_section(section) : nullptr;
-        while (product && (*product)->type < target) switch ((*product)->type) {
-            case ST_SOURCE: product = apply(product, lex_and_parse); break;
-            case ST_PARSED: product = apply(product, eval_section); break;
-            case ST_EVAL: product = apply(product, to_ast); break;
-            case ST_AST: product = apply(product, to_ir); break;
-            case ST_IR: product = apply(product, to_jasmine); break;
-            case ST_JASMINE: product = apply(product, to_native); break;
-            default: product = none<rc<Section>>();
+        while (product && (*product)->type < target) {
+            switch ((*product)->type) {
+                case ST_SOURCE: product = apply(product, lex_and_parse); break;
+                case ST_PARSED: product = apply(product, eval_section); break;
+                case ST_EVAL: product = apply(product, to_ast); break;
+                case ST_AST: product = apply(product, to_ir); break;
+                case ST_IR: product = apply(product, to_jasmine); break;
+                case ST_JASMINE: product = apply(product, to_native); break;
+                default: product = none<rc<Section>>();
+            }
         }
         if (error_count()) {
             print_errors(_stdout, src);
@@ -284,12 +320,6 @@ namespace basil {
         return functions;
     }
 
-    static bool repl_mode = false;
-
-    bool is_repl() {
-        return repl_mode;
-    }
-
     bool endswith(const ustring& s, const ustring& suffix) {
         auto back = s.end();
         for (u32 i = 0; i < suffix.size(); i ++) back --;
@@ -349,8 +379,16 @@ namespace basil {
         else return false;
     }
 
-    i64 square(i64 n) {
-        return n * n;
+    void write_asm(bytebuf buf, stream& io) {
+        while (buf.size()) {
+            u8 byte = buf.read();
+            u8 upper = byte >> 4, lower = byte & 15;
+            const char* hex = "0123456789abcdef";
+            io.write(hex[upper]);
+            io.write(hex[lower]);
+            io.write(' ');
+        }
+        io.write('\n');
     }
 
     void repl() {
@@ -394,7 +432,7 @@ namespace basil {
             if (result.type == T_VOID) continue;
 
             if (!result.type.of(K_RUNTIME)) {
-                println("= ", ITALICBLUE, result, RESET);
+                println("= ", BOLD, ITALICBLUE, result, RESET);
                 println("");
                 continue;
             }
@@ -429,19 +467,25 @@ namespace basil {
             }
             main_ir->emit(jobj.get_context());
 
-            auto insns = jasmine::disassemble_all_insns(jobj.get_context(), jobj);
-            for (const auto& insn : insns) jasmine::print_insn(jobj.get_context(), _stdout, insn);
+            // auto insns = jasmine::disassemble_all_insns(jobj.get_context(), jobj);
+            // for (const auto& insn : insns) jasmine::print_insn(jobj.get_context(), _stdout, insn);
 
             jasmine::Object native = jobj.retarget(jasmine::DEFAULT_TARGET); // retarget to native
             // native.writeELF("out.o");
-            native.define_native(jasmine::global("square"), (void*)square);
+            init_rt(native);
             native.load();
+            // write_asm(native.code(), _stdout);
             auto main = (i64(*)())native.find(jasmine::global(".basil_main"));
-            println(main());
+            i64 main_result = main();
+            if (ast->type(global) != T_VOID) {
+                println("= ", BOLD, ITALICBLUE, main_result, RESET);
+            }
         }
     }
 
     void run(const char* filename) {
+        PerfMarker perf(format<ustring>("running '", filename, "'"));
+
         auto maybe_obj = load_artifact(filename);
         if (!maybe_obj) return println("Couldn't locate valid Basil file at path '", filename, "'.");
         auto obj = *maybe_obj;
@@ -458,16 +502,21 @@ namespace basil {
         }
 
         rc<jasmine::Object> native = native_from_section(obj->sections[*obj->main_section]);
+        init_rt(*native);
         native->load();
-        auto main = (void(*)())native->find(jasmine::global(".basil_main"));
+        // write_asm(native->code(), _stdout);
+        auto main = (i64(*)())native->find(jasmine::global(".basil_main"));
         main();
+        // println("= ", BOLD, ITALICBLUE, main(), RESET);
     }
 
     void build(const char* filename, SectionType target) {
+        PerfMarker perf(format<ustring>("building '", filename, "'"));
+
         ustring dest = compute_object_name(filename, ".bob");
-        if (exists(dest) && dest != filename) {
-            return println("Tried to compile '", filename, "' to object file, but '", dest, "' already exists!");
-        }
+        // if (exists(dest) && dest != filename) {
+        //     return println("Tried to compile '", filename, "' to object file, but '", dest, "' already exists!");
+        // }
 
         auto maybe_obj = load_artifact(filename);
         if (!maybe_obj) return println("Couldn't locate valid Basil file at path '", filename, "'.");
@@ -487,6 +536,8 @@ namespace basil {
     }
 
     void compile(const char* filename, NativeType target, const_slice<const char*> args) {
+        PerfMarker perf(format<ustring>("compiling '", filename, "'"));
+
         auto maybe_obj = load_artifact(filename);
         if (!maybe_obj) return println("Couldn't locate valid Basil file at path '", filename, "'.");
         auto obj = *maybe_obj;
@@ -505,10 +556,10 @@ namespace basil {
         rc<jasmine::Object> native = native_from_section(obj->sections[*obj->main_section]);
 
         switch (target) {
-            case NT_OBJECT: native->writeELF(compute_object_name(filename, ".o").raw()); break;
+            case NT_OBJECT: native->writeObj(compute_object_name(filename, OBJ_FILE_EXT).raw()); break;
             case NT_EXECUTABLE: {
-                ustring obj = compute_object_name(filename, ".o");
-                native->writeELF(obj.raw());
+                ustring obj = compute_object_name(filename, OBJ_FILE_EXT);
+                native->writeObj(obj.raw());
                 ustring cmd = format<ustring>("gcc -nostdlib ", obj, " -Wl,-e.basil_main -o ", compute_object_name(obj.raw(), ""));
                 for (const char* arg : args) cmd += " ", cmd += arg; // add linker args
                 // println(cmd);
@@ -524,53 +575,32 @@ namespace basil {
     static map<ustring, rc<Env>> modules;
 
     optional<rc<Env>> load(const char* filename) {
+
         auto resolved = locate_source(filename);
         if (!resolved) {
             err({}, "Couldn't resolve file path '", filename, "'.");
             return none<rc<Env>>();
         }
         if (modules.find(*resolved) == modules.end()) {
-            rc<Source> source = ref<Source>(*resolved);
-            Source::View view(*source);
-            vector<Token> token_cache = lex_all(view);
-            TokenView tview(source, token_cache);
+            PerfMarker perf(format<ustring>("loading '", filename, "'"));
             
-            rc<Env> global = extend(root_env());
-            vector<Value> program_terms;
-            program_terms.push(v_symbol({}, S_DO)); // wrap the whole program in a giant "do"
-
-            bool old_repl = is_repl(); // store whether we are in a repl
-            repl_mode = false; // prevents asking for user input in the module
-            while (tview) {
-                if (auto v = parse(tview)) {
-                    program_terms.push(*v);
-                }
-                if (error_count()) {
-                    print_errors(_stdout, source);
-                    discard_errors();
-                    repl_mode = old_repl; // restore previous repl state
-                    return none<rc<Env>>();
-                }
-            }
-            repl_mode = old_repl; // restore previous repl state
-            if (error_count()) {
-                print_errors(_stdout, source);
-                discard_errors();
+            auto maybe_obj = load_artifact(filename);
+            if (!maybe_obj) {
+                err({}, "Couldn't locate valid Basil file at path '", filename, "'.");
                 return none<rc<Env>>();
             }
-
-            Value program = v_list(span(program_terms.front().pos, program_terms.back().pos), 
-                t_list(T_ANY), move(program_terms));
-            Value result = eval(global, program);
-            if (error_count()) {
-                print_errors(_stdout, source);
-                discard_errors();
-                return none<rc<Env>>();
+            rc<Object> obj = *maybe_obj;
+            if (obj->main_section) {
+                rc<Section> sec = obj->sections[*obj->main_section];
+                auto maybe_sec = advance_section(sec, ST_EVAL);
+                if (error_count() || !maybe_sec) return none<rc<Env>>();
+                
+                rc<Env> env = module_from_section(*maybe_sec);
+                modules.put(*resolved, env);
+                return some<rc<Env>>(env);
             }
 
-            modules.put(*resolved, global); // store top-level environment
-
-            return some<rc<Env>>(global);
+            return none<rc<Env>>();
         }
         return modules[*resolved];
     }

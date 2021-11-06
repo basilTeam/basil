@@ -20,14 +20,21 @@ namespace basil {
                 vector<Param> params;
                 params.push(P_SELF);
                 for (u32 i = 0; i < t_arity(type); i ++) params.push(p_var(S_NONE)); // anonymous parameters
-                return f_callable(0, ASSOC_RIGHT, params);
+                rc<Form> form = f_callable(0, ASSOC_RIGHT, params);
+                if (t_is_macro(type)) form->make_macro();
+                return form;
             }
             case K_INTERSECT: {
                 if (t_intersect_procedural(type)) {
                     vector<rc<Form>> forms;
                     for (Type t : t_intersect_members(type)) forms.push(infer_form(t));
+                    bool is_macro = forms[0]->is_macro;
+                    for (u32 i = 1; i < forms.size(); i ++) if (forms[i]->is_macro != is_macro)
+                        return F_TERM; // inconsistent macro attribute
                     if (forms.size() == 1) return forms[0];
-                    return *f_overloaded(forms[0]->precedence, forms[0]->assoc, forms);
+                    rc<Form> form = *f_overloaded(forms[0]->precedence, forms[0]->assoc, forms); // TODO: check success
+                    if (is_macro) form->make_macro();
+                    return form;
                 }
                 else return F_TERM; // non-procedural intersects are not applied
             }
@@ -42,6 +49,13 @@ namespace basil {
         list_iterator& begin, list_iterator end);
     GroupResult retry_group(rc<Env> env, const GroupResult& outer_group, 
         list_iterator it, list_iterator end);
+        
+    struct MacroRange {
+        list_iterator begin, end;
+        Value new_term;
+    };
+
+    static vector<vector<MacroRange>> macro_ranges;
 
     either<GroupResult, GroupError> try_group(rc<Env> env, vector<Value>&& params, FormKind fk, rc<StateMachine> sm,
         list_iterator it, list_iterator end,
@@ -65,6 +79,8 @@ namespace basil {
             }
         }
 
+        bool found_macro = false;
+
         while (!sm->is_finished() && it != end) {
             if (sm->precheck_keyword(*it)) { // keyword matches
                 params.push(*it);
@@ -85,6 +101,7 @@ namespace basil {
                     backtrack(env, params.back(), gr, it, end);
                 }
                 else { // otherwise, we continue past this group
+                    list_iterator prev = it;
                     it = gr.next;
                     resolve_form(env, gr.value);
                     while (gr.value.form->has_prefix_case() && it != end) {
@@ -92,7 +109,16 @@ namespace basil {
                         it = ogr.next;
                         if (ogr.value.type != T_ERROR) gr = ogr;
                         else break; // retrying didn't make progress, so we exit
+
+                        resolve_form(env, gr.value);
                     }
+
+                    if (gr.value.type.of(K_LIST) && macro_ranges.size()
+                        && v_head(gr.value).form && v_head(gr.value).form->is_macro) {
+                        macro_ranges.back().push({ prev, it, gr.value });
+                        found_macro = true;
+                    }
+
                     params.push(gr.value);
                     sm->advance(params.back());
                 }
@@ -111,11 +137,24 @@ namespace basil {
                 }
             }
         }
+
+        if (found_macro) {
+            // Once we see a macro, stop grouping this expression, we'll wait to evaluate the macro.
+            // We return a dummy GroupResult since it won't really matter.
+            return GroupResult {
+                v_void({}),
+                it,
+                outerprec
+            };
+        }
+        
         if (best_match) {
             while (params.size() > n) params.pop(); // remove any extra arguments we added while exploring
 
+            bool was_macro = params[0].form->is_macro;
             params[0].form = ref<Form>(FK_CALLABLE, params[0].form->precedence, params[0].form->assoc);
             params[0].form->invokable = *best_match; // use best match instead of overload
+            params[0].form->is_macro = was_macro; // maintain macro status
 
             Source::Pos resultpos = span(params.front().pos, params.back().pos); // params can never be empty, so this is safe
             if (params.size() >= 2) resultpos = span(params[1].pos, resultpos); // this handles the infix left hand operand
@@ -217,6 +256,7 @@ namespace basil {
             else {
                 report_group_error(gr.right(), term, params);
                 ++ it; // advance just past this term
+                break;
             }
         }
         ++ it; // move to the next term
@@ -357,26 +397,65 @@ namespace basil {
         }
     }
 
+    // looks for macro invocations - specifically lists starting with a macro term
+    bool find_macro(const Value& v) {
+        if (!v.form || !v.type.of(K_LIST)) return false;
+        else if (v_head(v).type == T_SYMBOL && v_head(v).data.sym == S_SPLICE) 
+            return false; // don't enter any existing splices
+        else if (v_head(v).form->is_macro) return true;
+        else for (const Value& elt : iter_list(v)) {
+            if (find_macro(elt)) return true;
+        }
+        return false;
+    }
+
     void group(rc<Env> env, Value& term) {
         vector<Value> results; // all the values in this group
         results.clear();
 
         list_iterable iterable = iter_list(term);
         list_iterator begin = iterable.begin(), end = iterable.end();
+
+        macro_ranges.push({}); // Start a new macro range frame.
+
         while (begin != end) {
             GroupResult gr = next_group(env, begin, end, ASSOC_RIGHT, I64_MIN); // assume lowest precedence at first
             
             resolve_form(env, gr.value); // resolve new group's form
+
             begin = gr.next;
             results.push(gr.value);
         }
 
-        if (results.size() == 0) panic("Somehow found no groups within list!");
+        if (macro_ranges.back().size()) {
+            // in order to ensure expressions parse properly around macro invocations, we will undo
+            // grouping, except for the macro invocations we found
+            vector<Value> new_terms; 
+            list_iterator iter = iterable.begin();
+            for (const MacroRange& range : macro_ranges.back()) {
+                while (iter != range.begin) new_terms.push(*iter ++); // store original raw terms
+                new_terms.push(range.new_term); // add our grouped macro invocation
+                iter = range.end;
+            }
+            while (iter != iterable.end()) new_terms.push(*iter ++); // store any terms at the end
+            term = v_cons(term.pos, t_list(T_ANY), v_symbol(term.pos, S_SPLICE),
+                v_list(term.pos, t_list(T_ANY), move(new_terms)));
+            resolve_form(env, v_head(term)); // resolve form of splice
+        }
+        else if (results.size() == 0) panic("Somehow found no groups within list!");
         else if (results.size() == 1) term = results.front();
         else {
             Source::Pos termpos = span(results.front().pos, results.back().pos);
             term = v_list(termpos, t_list(T_ANY), move(results));
         }
+
+        macro_ranges.pop(); // Close this macro range frame.
+
+        // if (find_macro(term)) {
+        //     // if we found macros, we automatically prepend a splice: (splice ...)
+        //     term = v_cons(term.pos, t_list(T_ANY), v_symbol(term.pos, S_SPLICE), term);
+        //     resolve_form(env, term); // resolve form of the splice symbol
+        // }
     }
 
     rc<Form> to_prefix(rc<Form> src) {
@@ -386,7 +465,9 @@ namespace basil {
                 params[1] = params[0]; // move first parameter up
                 params[0] = P_SELF;
             }
-            return f_callable(src->precedence, src->assoc, params);
+            rc<Form> form = f_callable(src->precedence, src->assoc, params);
+            if (src->is_macro) form->make_macro();
+            return form;
         }
         else if (src->kind == FK_OVERLOADED) {
             vector<rc<Form>> overloads;
@@ -398,14 +479,15 @@ namespace basil {
                 }
                 overloads.push(f_callable(src->precedence, src->assoc, params));
             }
-            return *f_overloaded(src->precedence, src->assoc, overloads);
+            rc<Form> form = *f_overloaded(src->precedence, src->assoc, overloads);
+            if (src->is_macro) form->make_macro();
+            return form;
         }
         else return src;
     }
 
     void resolve_form(rc<Env> env, Value& term) {
-        if (term.form) return; // don't re-resolve forms
-        switch (term.type.kind()) {
+        if (!term.form) switch (term.type.kind()) {
             case K_INT:
             case K_FLOAT:
             case K_DOUBLE:
@@ -413,7 +495,7 @@ namespace basil {
             case K_STRING:
             case K_VOID:
                 term.form = F_TERM;
-                return;
+                break;
             case K_SYMBOL: {
                 auto found = env->find(term.data.sym); // try and look up the variable's form
                 if (found) {
@@ -425,11 +507,10 @@ namespace basil {
                     }
                 }
                 else term.form = F_TERM; // default to 'term'
-                return;
+                break;
             }
             case K_LIST: { // the spooky one...
                 if (!v_head(term).form) group(env, term); // group all terms within the list first
-
                 if (!term.type.of(K_LIST)) // make sure that it's still some kind of list
                     term = v_cons(term.pos, t_list(T_ANY), term, v_void(term.pos)).with(term.form);
 
@@ -437,7 +518,6 @@ namespace basil {
                     auto callback = ((const rc<Callable>)v_head(term).form->invokable)->callback;
                     if (callback) {
                         term.form = (*callback)(env, term); // apply callback and finish resolving
-                        return;
                     }
                     else if (v_head(term).type.of(K_SYMBOL)) {
                         auto lookup = env->find(v_head(term).data.sym);
@@ -483,23 +563,23 @@ namespace basil {
                             if (body && body->is_resolving()) term.form = F_TERM;
                             else term.form = body->base->form;
                             if (!term.form) term.form = F_TERM; // default to term
-                            return;
                         }
-                        // fallthrough
+                        else term.form = F_TERM; 
                     }
-                    term.form = F_TERM; // default to F_TERM if the callable has no special callback or was unresolved
+                    else term.form = F_TERM; // default to F_TERM if the callable has no special callback or was unresolved
                 }
                 else term.form = F_TERM; // default to F_TERM if the first element is not callable
-                return;
+                break;
             }
             case K_ERROR: {
                 term.form = F_TERM; // default to F_TERM if an error already occurred
-                return;
+                break;
             }
             default:
                 panic("Unknown term in form evaluation!");
-                return;  
+                break;  
         }
+        // println("resolved form of ", term, " to ", term.form);
     }
 
     void unbind(rc<Env> env) {
@@ -739,9 +819,10 @@ namespace basil {
 
     void PerfInfo::begin_call(const Value& term, rc<InstTable> fn, u32 base_cost) {
         if (counts.size() >= max_depth) exceeded = true;
-        counts.push({term, fn, base_cost, counts.size() 
-            && counts.back().comptime, counts.size() // inherent comptime from parent frame
-            && counts.back().ismeta // likewise for meta status
+        counts.push({term, fn, base_cost, 
+            counts.size() && counts.back().comptime, // inherent comptime from parent frame
+            counts.size() && counts.back().ismeta, // likewise for meta status
+            counts.size() && counts.back().instantiating // likewise for instantiating
         });
     }
 
@@ -776,6 +857,14 @@ namespace basil {
         return counts.size() > 0 ? counts.back().comptime : false;
     }
 
+    void PerfInfo::make_instantiating() {
+        if (counts.size()) counts.back().instantiating = true;
+    }
+
+    bool PerfInfo::is_instantiating() const {
+        return counts.size() > 0 ? counts.back().instantiating : false;
+    }
+
     void PerfInfo::make_meta() {
         if (counts.size()) counts.back().ismeta = counts.back().comptime = true;
     }
@@ -798,8 +887,7 @@ namespace basil {
 
     Value call(rc<Env> env, Value call_term, Value func, const Value& args_in) {
         if ((perfinfo.current_count() >= perfinfo.max_count || perfinfo.counts.size() >= perfinfo.max_depth)
-            && !perfinfo.is_comptime()) {
-            // println("skipping call to ", call_term, " ", args_in, " - current cost is ", perfinfo.current_count(), ", current depth is ", perfinfo.counts.size());
+            && !perfinfo.is_instantiating() && !perfinfo.is_comptime()) {
             return v_error({}); // return error value if current function is too expensive
         }
 
@@ -844,7 +932,7 @@ namespace basil {
                 return v_error({});
             }
             func = it->second;
-            fntype = it->second.type;
+            fntype = t_runtime_base(it->second.type);
         }
 
         if (fntype.of(K_INTERSECT)) { // we'll perform overload resolution among the intersection's cases
@@ -932,14 +1020,14 @@ namespace basil {
 
         Value orig_args = args;
         args = coerce_args(env, params, is_runtime, flags, 
-            args, func.type.of(K_INTERSECT) ? args_type : t_arg(fntype));
+            args, func.type.of(K_INTERSECT) ? args_type : t_arg(t_runtime_base(fntype)));
         // println("args_type = ", args_type, " and coerced to ", args);
         if (args.type == T_ERROR) return v_error({});
 
         if (func.type == T_ERROR) {
             return v_error({});
         }
-        else if (func.type.of(K_INTERSECT)) {
+        else if (t_runtime_base(func.type).of(K_INTERSECT)) {
             // if we're still in an intersect at this point, we'll figure things out in the AST phase
 
             map<Type, either<Builtin, rc<InstTable>>> cases;
@@ -1063,12 +1151,18 @@ namespace basil {
                 rc<AST> fn_ast = nullptr;
 
                 if (func.type.of(K_FUNCTION)) {
+                    // println("instantiating ", call_term, " on ", args);
                     // instantiate runtime call
+                    perfinfo.begin_call(call_term, fn_body, 0); // wrap the instantiation in a perf frame
+                    perfinfo.make_instantiating(); // mark the frame as belonging to a function instantiation
+
                     rc<FnInst> inst = func.data.fn->inst(args_type, args);
                     if (!inst) return v_error({}); // propagate errors
 
                     fntype = inst->func->type(env);
                     fn_ast = inst->func;
+
+                    perfinfo.end_call_without_add();
                 }
                 else if (func.type.of(K_RUNTIME)) {
                     fn_ast = func.data.rt->ast;
@@ -1137,7 +1231,7 @@ namespace basil {
                     return head.with(infer_form(head.type)); // return the function if no args, e.g. (+)
 
                 if (t_runtime_base(head.type).of(K_FUNCTION) 
-                    || (t_runtime_base(head.type).of(K_INTERSECT) && t_intersect_procedural(head.type))
+                    || (t_runtime_base(head.type).of(K_INTERSECT) && t_intersect_procedural(t_runtime_base(head.type)))
                     || head.type.of(K_FORM_ISECT)) {
                     vector<Value> args;
                     vector<Value> varargs; // we use this to accumulate arguments for an individual variadic parameter;
@@ -1221,6 +1315,7 @@ namespace basil {
                         : v_tuple(span(args.front().pos, args.back().pos), infer_tuple(args), move(args));
 
                     Value result = call(env, term, head, args_value);
+                    result.form = term.form; // use call term's form
                     if (result.type == T_ERROR && !error_count()) {
                         return result;
                     }

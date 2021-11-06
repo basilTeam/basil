@@ -9,7 +9,6 @@
 
 #include "ssa.h"
 
-
 template<>
 u64 hash(const basil::VarInfo& i) {
     return raw_hash(&i, sizeof(basil::VarInfo));   
@@ -139,7 +138,7 @@ namespace basil {
     }
 
     void IRBlock::emit(IRFunction& func, Context& ctx) {
-        jasmine::bc::label(label());
+        jasmine::bc::label(label(), jasmine::OS_CODE);
         for (const auto& insn : insns) {
             insn->emit(func, ctx);
         }
@@ -208,7 +207,7 @@ namespace basil {
     }
 
     void IRFunction::emit(Context& ctx) {
-        jasmine::bc::label(jasmine::global(string_from(label).raw()));
+        jasmine::bc::label(jasmine::global(string_from(label).raw()), jasmine::OS_CODE);
         jasmine::bc::frame();
         for (rc<IRBlock> block : block_layout) block->emit(*this, ctx);
     }
@@ -216,7 +215,9 @@ namespace basil {
     IRParam find_var(rc<IRFunction> func, VarInfo info) {
         IRParam p(IK_VAR);
         auto existing = func->var_indices.find(info);
-        if (existing != func->var_indices.end()) p.data.var = existing->second;
+        if (existing != func->var_indices.end()) {
+            p.data.var = existing->second;
+        }
         else {
             func->var_indices[info] = func->vars.size();
             p.data.var = func->vars.size();
@@ -1069,7 +1070,7 @@ namespace basil {
                 rc<IRBlock> ifTrue = func->get_block(insn->src[1].data.block);
                 rc<IRBlock> ifFalse = func->get_block(insn->src[2].data.block);
                 if (ifTrue->ord == block->ord + 1) insn = ir_if_goto(insn->src[0], true, ifFalse);
-                else if (ifFalse->ord == block->ord + 1) insn = ir_if_goto(insn->src[0], false, ifTrue);
+                if (ifFalse->ord == block->ord + 1) insn = ir_if_goto(insn->src[0], false, ifTrue);
             }
         }
 

@@ -81,6 +81,12 @@ namespace basil {
         // constant, or the result variable of the generated instruction.
         virtual IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) = 0;
 
+        // Serializes this AST node and its children to the provided byte buffer.
+        virtual void serialize(rc<Env> env, bytebuf& buf);
+
+        // Deserializes an AST node and its children from the provided byte buffer.
+        static rc<AST> deserialize(bytebuf& buf);
+
         // Returns the kind of AST node this is.
         ASTKind kind() const;
     };

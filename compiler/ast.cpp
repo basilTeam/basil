@@ -108,6 +108,10 @@ namespace basil {
         return k;
     }
 
+    void AST::serialize(rc<Env> env, bytebuf& buf) {
+        
+    }
+
     // Useful intermediate classes.
 
     // An AST node with no children.
@@ -1088,7 +1092,7 @@ namespace basil {
     struct ASTDefine : public ASTUnary {
         Symbol name;
         ASTDefine(Source::Pos pos, Symbol name_in, rc<AST> init):
-            ASTUnary(pos, AST_DEF, T_VOID, init), name(name_in) {}
+            ASTUnary(pos, AST_DEF, t_func(T_ANY, T_VOID), init), name(name_in) {}
 
         void format(stream& io) const override {
             write(io, "(def ", name, " ", operand(), ")");
@@ -1099,7 +1103,9 @@ namespace basil {
         }
 
         IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
-            func->add_insn(ir_assign(func, operand()->type(env), ir_var(func, name), operand()->gen_ssa(env, func)));
+            IRParam init = operand()->gen_ssa(env, func);
+            IRParam::CURRENT_FN = &*func;
+            func->add_insn(ir_assign(func, operand()->type(env), ir_var(func, name), init));
             return ir_none();
         }
     };
@@ -1151,7 +1157,7 @@ namespace basil {
             name(name_in ? *name_in : next_anon_fn()), args(args_in) {}
 
         void format(stream& io) const override {
-            write(io, name);
+            write(io, name, "=", operand());
         }
 
         rc<AST> clone() const override {
@@ -1172,9 +1178,12 @@ namespace basil {
             if (!ir_func) {
                 name = mangle(name, type(env));
                 ir_func = ref<IRFunction>(name, type(outer_env));
-                for (u32 i = 0; i < args.size(); i ++) ir_func->add_insn(
-                    ir_arg(ir_func, env->find(args[i])->data.rt->ast->type(outer_env), ir_var(func, args[i]), i)
-                );
+                for (u32 i = 0; i < args.size(); i ++) {
+                    IRParam dst = ir_var(ir_func, args[i]);
+                    ir_func->add_insn(
+                        ir_arg(ir_func, env->find(args[i])->data.rt->ast->type(outer_env), dst, i)
+                    );
+                }
                 IRParam returned = operand()->gen_ssa(env, ir_func);
                 ir_func->finish(operand()->type(env), returned);
             }
@@ -1255,7 +1264,6 @@ namespace basil {
 
         IRParam gen_ssa(rc<Env> env, rc<IRFunction> func) override {
             resolved = false;
-            println("resolved overload call to ", type(env), " with type ", t);
             return ir_none();
         }
     };

@@ -8,7 +8,7 @@
  */
 
 #include "jasmine/bc.h"
-#include "jasmine/obj.h"
+#include "jasmine/jobj.h"
 #include "test.h"
 
 using namespace jasmine;

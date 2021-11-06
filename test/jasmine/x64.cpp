@@ -8,7 +8,7 @@
  */
 
 #include "test.h"
-#include "jasmine/obj.h"
+#include "jasmine/jobj.h"
 #include "jasmine/x64.h"
 
 using namespace jasmine;
@@ -34,7 +34,7 @@ TEST(simple_arithmetic) {
     Object obj;
     writeto(obj);
 
-    label(global("foo"));
+    label(global("foo"), OS_CODE);
     push(r64(RBP));
     mov(r64(RBP), r64(RSP));
     mov(r64(RAX), imm(1));
@@ -58,17 +58,17 @@ TEST(small_loop) {
     Object obj;
     writeto(obj);
 
-    label(global("foo"));
+    label(global("foo"), OS_CODE);
         push(r64(RBP));
         mov(r64(RBP), r64(RSP));
         sub(r64(RSP), imm(4));
         mov(m32(RBP, -4), r32(RDI));
-    label(local("loop"));
+    label(local("loop"), OS_CODE);
         cmp(m32(RBP, -4), imm(10));
         jcc(label32(local("end")), GREATER_OR_EQUAL);
         inc(m64(RBP, -4));
         jmp(label32(local("loop")));
-    label(local("end"));
+    label(local("end"), OS_CODE);
         mov(r32(RAX), m32(RBP, -4));
         mov(r64(RSP), r64(RBP));
         pop(r64(RBP));
@@ -85,12 +85,12 @@ TEST(recursive) {
     Object obj;
     writeto(obj);
 
-    label(global("factorial"));
+    label(global("factorial"), OS_CODE);
         cmp(r16(RDI), imm(0));
         jcc(label32(local("recur")), NOT_EQUAL);
         mov(r16(RAX), imm(1));
         ret();
-    label(local("recur"));
+    label(local("recur"), OS_CODE);
         push(r16(RDI));
         sub(r16(RDI), imm(1));
         call(label32(global("factorial")));
@@ -110,15 +110,15 @@ TEST(extends) {
     Object obj;
     writeto(obj);
 
-    label(global("add_zerox"));
+    label(global("add_zerox"), OS_CODE);
         add(r8(RDI), r8(RSI));
         movzx(r32(RAX), r8(RDI));
         ret();
-    label(global("add_signx"));
+    label(global("add_signx"), OS_CODE);
         add(r8(RDI), r8(RSI));
         movsx(r32(RAX), r8(RDI));
         ret();
-    label(global("foo"));
+    label(global("foo"), OS_CODE);
         mov(r8(RAX), imm(-1));
         movsx(r16(RAX), r8(RAX));
         movzx(r32(RAX), r16(RAX));
@@ -141,30 +141,30 @@ TEST(indexing) {
     Object obj;
     writeto(obj);
 
-    label(global("sum_array"));
+    label(global("sum_array"), OS_CODE);
         // RDI = array ptr, RSI = length
         mov(r64(RCX), imm(0)); // index
         xor_(r64(RAX), r64(RAX));
-    label(local("sum_loop"));
+    label(local("sum_loop"), OS_CODE);
         lea(r64(RDX), m64(RSI, -1)); // compare against size - 1
         cmp(r64(RCX), r64(RDX));
         jcc(label32(local("sum_end")), GREATER_OR_EQUAL);
         add(r64(RAX), m64(RDI, RCX, SCALE8, 8));
         inc(r64(RCX));
         jmp(label32(local("sum_loop")));
-    label(local("sum_end"));
+    label(local("sum_end"), OS_CODE);
         ret();
-    label(global("fill_array"));
+    label(global("fill_array"), OS_CODE);
         // RDI = array ptr, RSI = length, RDX = value
         mov(r64(R10), imm(0)); // index
-    label(local("fill_loop"));
+    label(local("fill_loop"), OS_CODE);
         lea(r64(RBX), m64(RSI, -1)); // compare against size - 1
         cmp(r64(R10), r64(RBX));
         jcc(label32(local("fill_end")), GREATER_OR_EQUAL);
         mov(m32(RDI, R10, SCALE4, 4), r32(RDX));
         inc(r64(R10));
         jmp(label32(local("fill_loop")));
-    label(local("fill_end"));
+    label(local("fill_end"), OS_CODE);
         ret();
 
     obj.load();
@@ -184,7 +184,7 @@ TEST(nops) {
     Object obj;
     writeto(obj);
 
-    label(global("foo"));
+    label(global("foo"), OS_CODE);
         mov(r64(RAX), imm(13));
         for (u32 i = 1; i <= 9; i ++) nop(i);
         ret();
@@ -198,7 +198,7 @@ TEST(nop_payloads) {
     Object obj;
     writeto(obj);
 
-    label(global("foo"));
+    label(global("foo"), OS_CODE);
         nop(3);
         nop32(4000);
         nop(2);
@@ -206,7 +206,7 @@ TEST(nop_payloads) {
         nop(1);
         nop32(2000);
         nop32(1000);
-    label(local("ret"));
+    label(local("ret"), OS_CODE);
         ret();
 
     obj.load();

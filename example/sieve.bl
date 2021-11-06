@@ -16,11 +16,10 @@ def indivisible n? = # constructs check that x is not divisible by n
     lambda x? = 
         x % n != 0
 
-def sieve-helper nums? = 
-    match nums with:
-        () => ()
-        x? :: xs? => x :: sieve-helper (xs filter (indivisible x))
- 
 def sieve n? = # performs sieve of eratosthenes on range [2, n]
+    def sieve-helper nums? = 
+        match nums with:
+            () => ()
+            x? :: xs? => x :: sieve-helper (xs filter (indivisible x))
     sieve-helper 2 .. n
 

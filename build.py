@@ -28,13 +28,16 @@ if OS.startswith("MSYS"): OS = "MSYS"
 # the first one that's available.
 
 SUPPORTED_COMPILERS = []
+
 SUPPORTED_COMPILERS.append("clang++") # default to clang
 for i in range(13, 4, -1): SUPPORTED_COMPILERS.append("clang++-" + str(i)) # clang++ 5 and higher support C++17
 
 SUPPORTED_COMPILERS.append("g++")
 for i in range(11, 6, -1): SUPPORTED_COMPILERS.append("g++-" + str(i))  # g++ 7 and higher support C++17 to the degree we need
 
-SUPPORTED_COMPILERS.append("msvc++")
+SUPPORTED_COMPILERS.append("i++") # intel C compiler
+
+SUPPORTED_COMPILERS.append("cl") # msvc toolchain
 
 CXX = None
 for cxx in SUPPORTED_COMPILERS:
@@ -62,7 +65,7 @@ for ar in SUPPORTED_ARCHIVERS:
 
 # Finally, we'll parse the program arguments, overriding our defaults if specified.
 
-PRODUCTS = ["basil-release", "basil-debug", "rt-static", "rt-dynamic", "jasmine-release", "jasmine-debug", "test"]
+PRODUCTS = ["basil-release", "basil-debug", "librt-static", "librt-dynamic", "jasmine-release", "jasmine-debug", "test"]
 
 import sys
 import argparse
@@ -84,6 +87,8 @@ if "clang" in CXX:
     CXXTYPE = "clang"
 elif "g++" in CXX:
     CXXTYPE = "gcc"
+elif "icpc" in CXX or "icpx" in CXX:
+    CXXTYPE = "intel"
 elif "cl" in CXX:
     CXXTYPE = "msvc"
 else:
@@ -122,47 +127,67 @@ CXXFLAGS = []
 LDFLAGS = []
 LDLIBS = []
 
-if CXXTYPE in {"clang", "gcc"}:
+if CXXTYPE in {"clang", "gcc", "intel"}:
     CXXFLAGS += [
         "-I.", "-Iutil", "-Ijasmine", "-Icompiler", "-Itest",
         "-std=c++17", 
         "-ffunction-sections", "-fdata-sections", "-ffast-math", "-fno-rtti", "-finline-functions",
         "-fPIC", "-fomit-frame-pointer", "-fmerge-all-constants", "-fno-exceptions", "-fno-threadsafe-statics",
-        "-Wall", "-Wno-unused", "-Wno-comment", "-DINCLUDE_UTF8_LOOKUP_TABLE" 
+        "-Wall", "-Wno-unused", "-Wno-comment"
     ]
     if OS == "Linux":
-        LDFLAGS += ["-nodefaultlibs", "-Wl,--gc-sections"]
+        CXXFLAGS.append("-DINCLUDE_UTF8_LOOKUP_TABLE")
+        LDFLAGS += ["-Wl,--gc-sections"]
         LDLIBS += ["-lc"]
+        if CXXTYPE == "intel": LDLIBS += ["-limf", "-lirc"]
     elif OS == "Darwin":
+        CXXFLAGS.append("-DINCLUDE_UTF8_LOOKUP_TABLE")
         LDFLAGS += ["-nodefaultlibs", "-Wl,--gc-sections"]
         LDLIBS += ["-lc"]
+        if CXXTYPE == "intel": LDLIBS += ["-limf", "-lirc"]
     if "release" in TARGET:
         CXXFLAGS += ["-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-Os", "-DBASIL_RELEASE"]
     elif "debug" in TARGET:
         CXXFLAGS += ["-g3", "-O0"]
     if TARGET == "librt-dynamic":
         LDFLAGS.append("-shared")
+elif CXXTYPE == "msvc":
+    CXXFLAGS += [
+        "/I .", "/I util", "/I jasmine", "/I compiler", "/I test",
+        "/std:c++17", "/Gw", "/GL", 
+        "/W0"
+    ]
+    if "release" in TARGET:
+        CXXFLAGS += ["/Os", "/Oy", "/O1", "/DBASIL_RELEASE"]
+    elif "debug" in TARGET:
+        CXXFLAGS += ["/Z7", "/Od"]
+    if TARGET == "librt-dynamic":
+        LDFLAGS.append("/Ld")
 
 CXXFLAG_STRING = " ".join(CXXFLAGS) + " " + args.cxxflags
 LDFLAG_STRING = " ".join(LDFLAGS) + " " + args.ldflags
 LDLIB_STRING = " ".join(LDLIBS)
 
 def cxx_compile_object_cmd(src, obj):
-    return " ".join([CXX, CXXFLAG_STRING, "-c", src, "-o", obj])
+    if CXXTYPE in {"clang", "gcc", "intel"}: DEST = "-c " + src + " -o " + obj
+    elif CXXTYPE == "msvc": DEST = "/c " + src + " /Fo" + obj
+    return " ".join(['"' + CXX + '"', CXXFLAG_STRING, DEST])
 
 def cxx_compile_all_cmd(inputs, product):
     inputs_string = " ".join(inputs)
-    return " ".join([CXX, CXXFLAG_STRING, inputs_string, "-o", product])
+    if CXXTYPE in {"clang", "gcc", "intel"}: DEST = "-o " + product
+    elif CXXTYPE == "msvc": DEST = "/Fe" + product
+    return " ".join(['"' + CXX + '"', CXXFLAG_STRING, LDFLAG_STRING, inputs_string, DEST, LDLIB_STRING])
 
 def ar_lib_cmd(objs, product):
     if AR == 'ar':
         ARFLAGS = "r " + product
     elif AR == 'lib':
-        ARFLAGS = "/out " + product
-    return AR + " " + ARFLAGS + " " + " ".join(objs)
+        ARFLAGS = "/out" + product
+    return '"' + AR + "\" " + ARFLAGS + " " + " ".join(objs)
 
 def strip_cmd(target):
-    if OS == "Linux":
+    if OS in {"Linux", "MSYS", "MinGW"}:
         strip_args = " ".join([
             "-g", 
             "-R .gnu.version",
@@ -189,6 +214,7 @@ if VERBOSE:
 
 import glob
 import os
+import shutil
 
 # First, we find all sources in all source directories.
 
@@ -199,54 +225,109 @@ RUNTIME_SRCS = glob.glob("runtime/*.cpp")
 
 # We compute object file names for each C++ source.
 
-COMPILER_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in COMPILER_SRCS}
-JASMINE_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in JASMINE_SRCS}
-UTIL_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in UTIL_SRCS}
-RUNTIME_OBJS = {src : os.path.splitext(src)[0] + ".o" for src in RUNTIME_SRCS}
+OBJ_EXT = ".obj" if CXXTYPE == "msvc" else ".o"
+
+COMPILER_OBJS = {src : os.path.splitext(src)[0] + OBJ_EXT for src in COMPILER_SRCS}
+JASMINE_OBJS = {src : os.path.splitext(src)[0] + OBJ_EXT for src in JASMINE_SRCS}
+UTIL_OBJS = {src : os.path.splitext(src)[0] + OBJ_EXT for src in UTIL_SRCS}
+RUNTIME_OBJS = {src : os.path.splitext(src)[0] + OBJ_EXT for src in RUNTIME_SRCS}
 
 # This table defines our desired target pattern based on the selected target and our
 # current operating system.
 
 PRODUCTS_BY_TARGET = {
     "librt-static": {
-        "Windows": "bin/librt.lib", 
+        "Windows": "bin\\librt.lib", 
         "Linux": "bin/librt.a", 
         "Darwin": "bin/librt.a", 
         "MSYS": "bin/librt.a",
         "MinGW": "bin/librt.a"
     }[OS],
     "librt-dynamic": {
-        "Windows": "bin/librt.dll",
+        "Windows": "bin\\librt.dll",
         "Linux": "bin/librt.so",
         "Darwin": "bin/librt.dylib",
         "MSYS": "bin/librt.dll",
         "MinGW": "bin/librt.dll"
     }[OS],
-    "jasmine-debug": "bin/jasmine",
-    "jasmine-release": "bin/jasmine",
-    "basil-debug": "bin/basil",
-    "basil-release": "bin/basil"
+    "jasmine-debug": {
+        "Windows": "bin\\jasmine.exe",
+        "Linux": "bin/jasmine",
+        "Darwin": "bin/jasmine",
+        "MSYS": "bin/jasmine.exe",
+        "MinGW": "bin/jasmine.exe"
+    }[OS],
+    "jasmine-release": {
+        "Windows": "bin\\jasmine.exe",
+        "Linux": "bin/jasmine",
+        "Darwin": "bin/jasmine",
+        "MSYS": "bin/jasmine.exe",
+        "MinGW": "bin/jasmine.exe"
+    }[OS],
+    "basil-debug": {
+        "Windows": "bin\\basil.exe",
+        "Linux": "bin/basil",
+        "Darwin": "bin/basil",
+        "MSYS": "bin/basil.exe",
+        "MinGW": "bin/basil.exe"
+    }[OS],
+    "basil-release": {
+        "Windows": "bin\\basil.exe",
+        "Linux": "bin/basil",
+        "Darwin": "bin/basil",
+        "MSYS": "bin/basil.exe",
+        "MinGW": "bin/basil.exe"
+    }[OS],
+    "test": "" # tests use different targets
 }
+
+TEST_PRODUCTS = [os.path.splitext(test)[0] + ".test" for test in glob.glob("test/**/*.cpp")]
 
 # This table defines which objects we need to build our desired target.
 
-if "jasmine" not in TARGET: del JASMINE_OBJS["jasmine/main.cpp"]
+if "basil" not in TARGET:
+    if "compiler/main.cpp" in COMPILER_OBJS: del COMPILER_OBJS["compiler/main.cpp"]
+    if "compiler\\main.cpp" in COMPILER_OBJS: del COMPILER_OBJS["compiler\\main.cpp"]
+
+if "jasmine" not in TARGET: 
+    if "jasmine/main.cpp" in JASMINE_OBJS: del JASMINE_OBJS["jasmine/main.cpp"]
+    if "jasmine\\main.cpp" in JASMINE_OBJS: del JASMINE_OBJS["jasmine\\main.cpp"]
 
 OBJS_BY_TARGET = {
     "librt-static": [RUNTIME_OBJS],
     "librt-dynamic": [RUNTIME_OBJS],
     "jasmine-debug": [JASMINE_OBJS, UTIL_OBJS],
     "jasmine-release": [JASMINE_SRCS, UTIL_OBJS],
-    "basil-debug": [COMPILER_OBJS, JASMINE_OBJS, UTIL_OBJS],
-    "basil-release": [COMPILER_OBJS, JASMINE_OBJS, UTIL_OBJS]
+    "basil-debug": [COMPILER_OBJS, JASMINE_OBJS, RUNTIME_OBJS, UTIL_OBJS],
+    "basil-release": [COMPILER_OBJS, JASMINE_OBJS, RUNTIME_OBJS, UTIL_OBJS],
+    "test": [COMPILER_OBJS, JASMINE_OBJS, RUNTIME_OBJS, UTIL_OBJS]
 }
 
 # Now that we've computed all the object and target names, let's clean up any existing ones
 # if specified in the arguments.
 
 if CLEAN:
-    for src in OBJS: os.remove(OBJS[src])
-    os.rmdir("bin/")
+    for obj in COMPILER_OBJS.values(): 
+        if os.path.exists(obj): 
+            if VERBOSE: print("Removing '" + obj + "'.")
+            os.remove(obj)
+    for obj in JASMINE_OBJS.values(): 
+        if os.path.exists(obj): 
+            if VERBOSE: print("Removing '" + obj + "'.")
+            os.remove(obj)
+    for obj in RUNTIME_OBJS.values(): 
+        if os.path.exists(obj): 
+            if VERBOSE: print("Removing '" + obj + "'.")
+            os.remove(obj)
+    for obj in UTIL_OBJS.values(): 
+        if os.path.exists(obj): 
+            if VERBOSE: print("Removing '" + obj + "'.")
+            os.remove(obj)
+    for test in TEST_PRODUCTS: 
+        if os.path.exists(test): 
+            if VERBOSE: print("Removing '" + test + "'.")
+            os.remove(test)
+    shutil.rmtree("bin/")
 
 # We determine which objects are needed by our target...
 
@@ -281,12 +362,13 @@ if os.path.isfile("bin"):
 TASKS = []
 PRODUCT = PRODUCTS_BY_TARGET[TARGET]
 
-if TARGET in {"librt-static", "librt-dynamic", "basil-debug", "jasmine-debug"}:
+if TARGET in {"librt-static", "librt-dynamic", "basil-debug", "jasmine-debug", "test"}:
     for src in RECOMPILED_OBJS:
         TASKS.append(cxx_compile_object_cmd(src, RECOMPILED_OBJS[src]))
 
 if TARGET in {"basil-debug", "jasmine-debug", "librt-dynamic"}:
-    TASKS.append(cxx_compile_all_cmd(OBJS.values(), PRODUCT))
+    if not os.path.exists(PRODUCT) or len(TASKS):  # we only need to re-link if we recompiled any of the sub-objects
+        TASKS.append(cxx_compile_all_cmd(OBJS.values(), PRODUCT))
 
 if TARGET in {"basil-release", "jasmine-release"}:
     TASKS.append(cxx_compile_all_cmd(OBJS.keys(), PRODUCT))
@@ -295,10 +377,20 @@ if TARGET in {"basil-release", "jasmine-release"}:
 if TARGET == "librt-static":
     TASKS.append(ar_lib_cmd(OBJS.values(), PRODUCT))
 
+if TARGET in {"test"}:
+    for test_exec in TEST_PRODUCTS:
+        srcs = {os.path.splitext(test_exec)[0] + ".cpp", "test/test.cpp"}
+        srcs = srcs.union(OBJS.values())
+        if not os.path.exists(test_exec) or len(RECOMPILED_OBJS) > 0: 
+            TASKS.append(cxx_compile_all_cmd(srcs, test_exec))
+    for test_exec in TEST_PRODUCTS:
+        TASKS.append(test_exec)
+
 errors = 0
 for task in TASKS:
     if VERBOSE: print(task)
-    errors += os.system(task)
+    if task: result = os.system(task)
+    if task and result: errors += result
 
 if errors == 0:
     if VERBOSE: print("Successfully built '" + PRODUCT + "'.")

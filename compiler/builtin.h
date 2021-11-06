@@ -44,6 +44,9 @@ namespace basil {
 
     // Adds all built-in functions and macros to the provided environment.
     void add_builtins(rc<Env> env);
+
+    // Returns the canonical name of the provided builtin (the name under which it is defined in the root env).
+    optional<Symbol> builtin_name(const Builtin& builtin);
 }
 
 #endif

@@ -15,7 +15,7 @@
 #include "util/bytebuf.h"
 #include "type.h"
 #include "ssa.h"
-#include "jasmine/obj.h"
+#include "jasmine/jobj.h"
 
 namespace basil {
     struct Form;

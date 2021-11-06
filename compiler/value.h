@@ -51,7 +51,6 @@ namespace basil {
     struct FormFn;
     struct FormIsect;
     struct Alias;
-    struct Macro;
     struct Module;
     struct Runtime;
 
@@ -89,7 +88,6 @@ namespace basil {
             rc<Module> mod;         // A module value.
             rc<Function> fn;        // A function value.
             rc<Alias> alias;        // An alias value.
-            rc<Macro> macro;        // A macro value.
             rc<Runtime> rt;         // A runtime value.
 
             Symbol undefined_sym; // Not used in operations. Stores the variable name associated
@@ -156,8 +154,6 @@ namespace basil {
         friend Value v_func(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_func(Source::Pos, Symbol, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_alias(Source::Pos, const Value&);
-        friend Value v_macro(const Builtin&);
-        friend Value v_macro(Source::Pos, Type, rc<Env>, const vector<Symbol>&, const Value&);
         friend Value v_runtime(Source::Pos, Type, rc<AST>);
     };
 
@@ -314,16 +310,6 @@ namespace basil {
         Alias(const Value& term);
     };
 
-    // Represents the associated data for a macro.
-    struct Macro {
-        optional<const Builtin&> builtin;
-        rc<Env> env;
-        vector<Symbol> args;
-        Value body;
-
-        Macro(optional<const Builtin&> builtin, rc<Env> env, const vector<Symbol>& args, const Value& body);
-    };
-
     // Represents the associated data for a runtime type.
     struct Runtime {
         rc<AST> ast;
@@ -469,12 +455,6 @@ namespace basil {
 
     // Constructs an alias value from a term.
     Value v_alias(Source::Pos pos, const Value& term);
-
-    // Constructs a macro value from a builtin.
-    Value v_macro(const Builtin& builtin);
-
-    // Constructs a macro value from a body and env.
-    Value v_macro(Source::Pos pos, Type type, rc<Env> env, const vector<Symbol>& args, const Value& body);
 
     // Constructs a runtime value from an AST node.
     Value v_runtime(Source::Pos pos, Type type, rc<AST> ast);

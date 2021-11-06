@@ -26,6 +26,9 @@ namespace basil {
     // Safely cleans up all resources before the compiler terminates.
     void deinit();
 
+    // Defines all core runtime functions in the provided Jasmine object.
+    void init_rt(jasmine::Object& obj);
+
     enum PrintFlag {
         PRINT_TOKENS,
         PRINT_PARSED,

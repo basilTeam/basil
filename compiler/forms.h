@@ -23,6 +23,7 @@ namespace basil {
     struct Env;
 
     enum FormKind {
+        FK_NONE,        // Not a valid kind for a form, but represents the absence of one in encodings.
         FK_TERM,        // Form for a non-applied, singular value. 
         FK_CALLABLE,    // Form that can be applied, like a single function.
         FK_OVERLOADED,  // Form of multiple callable forms, like an overloaded function.
@@ -258,6 +259,8 @@ namespace basil {
                                     // this form. May be null!
         rc<Compound> compound; // A pointer to the compound data associated with this form. May be null!
 
+        bool is_macro = false; // Whether or not this form is a macro.
+
         // Constructs a Form equal to F_TERM.
         Form();
 
@@ -278,6 +281,9 @@ namespace basil {
         // Returns whether this form can be called in an infix (<value> <name> <value>*) fashion in
         // any of its overloads.
         bool has_infix_case();
+
+        // Marks this form as a macro, which affects its interpretation in certain circumstances.
+        void make_macro();
 
         // Returns the parsing state machine associated with this form, reset to
         // the starting position.

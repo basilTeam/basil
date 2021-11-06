@@ -35,20 +35,21 @@ greet (read String) greetings[1]
 
 ## **Installation**
 
-Currently, we only support building the Basil compiler from source. You'll need a **C++17-conformant** C++ compiler (and maybe a bit of
-resourcefulness...).
+Currently, we only support building the Basil compiler from source. You'll need a **C++17-conformant** C++ compiler, a **Python 2.7** or **Python 3** interpreter, and maybe a bit of
+resourcefulness...
 
 ```sh
 $ git clone https://github.com/basilTeam/basil
-$ make CXX=<C++ compiler, default=clang++> release
+$ ./build.py --help             # lists all build options (compiler to use, additional flags, etc)
+$ ./build.py basil-release
 $ build/basil help
 ```
 
 Basil's language runtime can be compiled separately, as either a statically or dynamically linked library.
 
 ```sh
-$ make CXX=<C++ compiler, default=clang++> librt.a      # to build a statically-linked library
-$ make CXX=<C++ compiler, default=clang++> librt.so     # to build a dynamically-linked library
+$ ./build.py librt-static       # to build a statically-linked library
+$ ./build.py librt-dynamic      # to build a dynamically-linked library
 ```
 
 ---
@@ -57,7 +58,7 @@ $ make CXX=<C++ compiler, default=clang++> librt.so     # to build a dynamically
 
 Operating Systems:
  - [x] Linux
- - [ ] Windows
+ - [x] Windows
  - [x] MacOS
 
 Architectures:

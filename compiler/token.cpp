@@ -271,7 +271,7 @@ namespace basil {
                     }
                     else { // prefix quote or normal ident
                         end = view.pos(), acc += view.read(), ch = view.peek();
-                        if (is_letter(ch) || is_digit(ch) || is_opener(ch)) 
+                        if (!is_space(ch) && ch != ':') 
                             skip_symbol = true, result = Token{span(begin, end), S_COLON, TK_QUOTE};
                     }
                     break;

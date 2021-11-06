@@ -126,8 +126,7 @@ do:
     def f (x? : Int) : Int = x + 1
     f x
 )", load_step, lex_step, parse_step, eval_step);
-    ASSERT_EQUAL(two.type, T_INT);
-    ASSERT_EQUAL(two.data.i, 2);
+    ASSERT_EQUAL(two.type, t_runtime(T_INT));
 }
 
 TEST(capture) {

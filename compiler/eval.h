@@ -72,6 +72,9 @@ namespace basil {
     // the resulting environment.
     void group(rc<Env> env, Value& term);
 
+    // Attempts to deduce the form of a value based on its type.
+    rc<Form> infer_form(Type type);
+
     // Don't call this unless you know what you're doing! Resolves the form of the
     // provided term. Returns the resulting environment.
     void resolve_form(rc<Env> env, Value& term);
@@ -96,7 +99,7 @@ namespace basil {
             Value call_term;
             rc<InstTable> fn;
             u32 count;
-            bool comptime, ismeta;
+            bool comptime = false, ismeta = false, instantiating = false;
         };
 
         u32 max_depth, max_count;
@@ -123,6 +126,12 @@ namespace basil {
         // operation.
         void make_comptime();
         bool is_comptime() const;
+
+        // Mark this call frame (and its descendents) as part of a runtime function
+        // instantiation - this means cost is ignored, independent of comptime or meta
+        // properties, so we compile the whole function body.
+        void make_instantiating();
+        bool is_instantiating() const;
 
         // Mark this call frame (and its descendents) as evaluated at compile-time,
         // regardless of the contents (that is, no cost analysis will be done, and

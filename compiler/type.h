@@ -99,7 +99,8 @@ namespace basil {
     extern Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION, S_ELLIPSIS, S_COMMA, S_ASSIGN, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
+        S_QUESTION, S_ELLIPSIS, S_COMMA, S_ASSIGN, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF,
+        S_QUASIQUOTE, S_EVAL;
 
     // Returns the associated string for the provided symbol.
     const ustring& string_from(Symbol sym);
@@ -129,6 +130,9 @@ namespace basil {
         // exceptional cases that we really need to know if a type is a type
         // variable or not.
         Kind kind() const;
+
+        // Returns the kind of this type, in the above enum.
+        Kind true_kind() const;
         
         // Returns whether the kind of this type equals the provided one.
         //
@@ -252,6 +256,9 @@ namespace basil {
     // Constructs a function type with the given argument and return types.
     Type t_func(Type arg, Type ret);
 
+    // Constructs a macro function type with the given argument and return types.
+    Type t_macro(Type arg, Type ret);
+
     // Constructs a complete struct type with the given fields and associated field types.
     Type t_struct(const map<Symbol, Type>& fields);
     template<typename ...Args>
@@ -271,9 +278,6 @@ namespace basil {
 
     // Constructs a dictionary type with the given key type and a void value type.
     Type t_dict(Type key);
-
-    // Constructs a macro type with the given arity.
-    Type t_macro(u32 arity);
 
     // Returns a fresh type variable.
     Type t_var();
@@ -299,6 +303,9 @@ namespace basil {
 
     // Returns whether the union type 'u' contains the provided member.
     bool t_union_has(Type u, Type member);
+    
+    // Returns the set of member types from the provided union type.
+    set<Type> t_union_members(Type u);
 
     // Returns the intersection type resulting from adding 'other' to the members of.
     // intersection type 'intersect'.
@@ -348,6 +355,9 @@ namespace basil {
     // Returns the number of fields in the provided struct type.
     u32 t_struct_len(Type str);
 
+    // Returns the fields in the provided struct type.
+    map<Symbol, Type> t_struct_fields(Type str);
+
     // Returns the key type of the provided dictionary type.
     Type t_dict_key(Type dict);
 
@@ -363,11 +373,17 @@ namespace basil {
     // Returns the return type of the provided function type.
     Type t_ret(Type fn);
 
+    // Returns whether or not the provided function type is a macro function type.
+    bool t_is_macro(Type fn);
+
     // Returns the best symbol representation of the provided type variable.
     Symbol t_tvar_name(Type tvar);
 
     // Returns the currently-bound type of the provided type variable.
     Type t_tvar_concrete(Type tvar);
+
+    // Binds the provided tvar to the desired type.
+    void t_tvar_bind(Type tvar, Type dest);
 
     // Returns the arity of the provided form-level function type.
     u32 t_form_fn_arity(Type func);

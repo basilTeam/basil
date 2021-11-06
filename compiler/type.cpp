@@ -55,7 +55,8 @@ namespace basil {
     Symbol S_NONE,
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
-        S_QUESTION, S_ELLIPSIS, S_COMMA, S_ASSIGN, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF;
+        S_QUESTION, S_ELLIPSIS, S_COMMA, S_ASSIGN, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF,
+        S_QUASIQUOTE, S_EVAL;
 
     void init_symbols() {
         S_NONE = symbol_from("");
@@ -87,6 +88,8 @@ namespace basil {
         S_WITH = symbol_from("with");
         S_CASE_ARROW = symbol_from("=>");
         S_OF = symbol_from("of");
+        S_QUASIQUOTE = symbol_from("quasiquote");
+        S_EVAL = symbol_from("eval");
     }
 
     const char* KIND_NAMES[NUM_KINDS] = {
@@ -209,6 +212,10 @@ namespace basil {
             k = TYPE_LIST[t.id]->kind();
         }
         return k;
+    }
+
+    Kind Type::true_kind() const {
+        return TYPE_LIST[id]->kind();
     }
 
     bool Type::of(Kind kind) const {
@@ -850,16 +857,19 @@ namespace basil {
 
     struct FunctionClass : public Class {
         rc<Class> arg, ret;
+        bool is_macro;
 
-        FunctionClass(Type arg_in, Type ret_in):
-            Class(K_FUNCTION), arg(TYPE_LIST[arg_in.id]), ret(TYPE_LIST[ret_in.id]) {}
+        FunctionClass(Type arg_in, Type ret_in, bool is_macro_in):
+            Class(K_FUNCTION), arg(TYPE_LIST[arg_in.id]), ret(TYPE_LIST[ret_in.id]), is_macro(is_macro_in) {}
 
         u64 lazy_hash() const override {
-            return raw_hash(kind()) ^ arg->hash() * 4858037243276500399ul ^ ret->hash() * 16668975004056768077ul;
+            return raw_hash(kind()) ^ arg->hash() * 4858037243276500399ul 
+                ^ ret->hash() * 16668975004056768077ul
+                ^ raw_hash(is_macro);
         }
 
         void format(stream& io) const override {
-            write(io, arg, " -> ", ret);
+            write(io, arg, " -", is_macro ? "macro" : "", "> ", ret);
         }
 
         void write_mangled(stream& io) const override {
@@ -873,27 +883,33 @@ namespace basil {
 
             if (other.kind() == K_FUNCTION) {
                 return arg->coerces_to_generic(*as<FunctionClass>(other).arg)
-                    && ret->coerces_to_generic(*as<FunctionClass>(other).ret);
+                    && ret->coerces_to_generic(*as<FunctionClass>(other).ret)
+                    && is_macro == as<FunctionClass>(other).is_macro;
             }
 
             return false;
         }
 
-        bool coerces_to(const Class& other) const override {
-            if (Class::coerces_to(other)) return true;
+        // bool coerces_to(const Class& other) const override {
+        //     if (Class::coerces_to(other)) return true;
 
-            return false;
-        }
+        //     return false;
+        // }
 
         bool operator==(const Class& other) const override {
             return other.kind() == K_FUNCTION
                 && *arg == *as<FunctionClass>(other).arg
-                && *ret == *as<FunctionClass>(other).ret;
+                && *ret == *as<FunctionClass>(other).ret
+                && is_macro == as<FunctionClass>(other).is_macro;
         }
     };
 
     Type t_func(Type arg, Type ret) {
-        return t_create(ref<FunctionClass>(arg, ret));
+        return t_create(ref<FunctionClass>(arg, ret, false));
+    }
+
+    Type t_macro(Type arg, Type ret) {
+        return t_create(ref<FunctionClass>(arg, ret, true));
     }
 
     struct StructClass : public Class {
@@ -1344,6 +1360,14 @@ namespace basil {
         return as<UnionClass>(*TYPE_LIST[u.id]).members.contains(TYPE_LIST[member.id]);
     }
 
+    set<Type> t_union_members(Type u) {
+        if (!u.of(K_UNION)) panic("Expected union type!");
+        set<Type> members;
+        for (const rc<Class>& c : as<UnionClass>(*TYPE_LIST[u.id]).members)
+            members.insert(t_from(c->id()));
+        return members;
+    }
+
     Type t_intersect_with(Type intersect, Type other) {
         if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
         vector<rc<Class>> members = as<IntersectionClass>(*TYPE_LIST[intersect.id]).members;
@@ -1372,8 +1396,8 @@ namespace basil {
 
     bool t_intersect_procedural(Type intersect) {
         if (!intersect.of(K_INTERSECT)) panic("Expected intersection type!");
-        for (const rc<Class>& c : as<IntersectionClass>(*TYPE_LIST[intersect.id]).members)
-            if (c->kind() != K_FUNCTION) return false;
+        for (Type t : t_intersect_members(intersect))
+            if (!t_runtime_base(t).of(K_FUNCTION)) return false;
         return true;
     }
     
@@ -1437,6 +1461,14 @@ namespace basil {
         if (!str.of(K_STRUCT)) panic("Expected struct type!");
         return as<StructClass>(*TYPE_LIST[str.id]).fields.size();
     }
+    
+    map<Symbol, Type> t_struct_fields(Type str) {
+        if (!str.of(K_STRUCT)) panic("Expected struct type!");
+        map<Symbol, Type> fields;
+        for (const auto& [k, v] : as<StructClass>(*TYPE_LIST[str.id]).fields)
+            fields.put(k, t_from(v->id()));
+        return fields;
+    }
 
     Type t_dict_key(Type dict) {
         if (!dict.of(K_DICT)) panic("Expected dictionary type!");
@@ -1473,6 +1505,11 @@ namespace basil {
         return t_from(as<FunctionClass>(*TYPE_LIST[fn.id]).ret->id());
     }
 
+    bool t_is_macro(Type fn) {
+        if (!fn.of(K_FUNCTION)) panic("Expected function type!");
+        return as<FunctionClass>(*TYPE_LIST[fn.id]).is_macro;
+    }
+
     Type t_tvar_concrete(Type tvar) {
         if (!tvar.is_tvar()) panic("Expected type variable!");
         Type t = tvar_bindings[as<TVarClass>(*TYPE_LIST[tvar.id]).id];
@@ -1492,6 +1529,11 @@ namespace basil {
     void t_tvar_unbind(Type tvar) {
         if (!tvar.is_tvar()) panic("Expected type variable!");
         bind_tvar(as<TVarClass>(*TYPE_LIST[tvar.id]).id, T_UNDEFINED);
+    }
+    
+    void t_tvar_bind(Type tvar, Type dest) {
+        if (!tvar.is_tvar()) panic("Expected type variable!");
+        bind_tvar(as<TVarClass>(*TYPE_LIST[tvar.id]).id, dest);
     }
 
     Type t_runtime_base(Type t) {
@@ -1650,6 +1692,7 @@ namespace basil {
                 return elt == T_ERROR ? elt : t_list(elt);
             }
             case K_FUNCTION: {
+                if (t_is_macro(t)) return T_ERROR; // can't lower macro types
                 Type arg = t_lower(t_arg(t)), ret = t_lower(t_ret(t));
                 return arg == T_ERROR || ret == T_ERROR ? T_ERROR : t_func(arg, ret);
             }

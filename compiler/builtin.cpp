@@ -15,7 +15,8 @@
 
 namespace basil {
     Builtin
-        DEF, DEF_TYPED, DEF_EXTERN, LAMBDA, DO, META, EVAL, QUOTE, // special forms, core behavior
+        DEF, DEF_TYPED, DEF_EXTERN, MACRO, MACRO_TYPED, // definitions
+        LAMBDA, DO, META, EVAL, QUOTE, SPLICE, // other special forms, core behavior
         IMPORT, MODULE, USE_STRING, USE_MODULE, // modules
         AT_MODULE, AT_TUPLE, AT_ARRAY, DOT, // accessors
         IF, IF_ELSE, WHILE, ARROW, MATCHES, MATCH, // conditionals
@@ -66,20 +67,21 @@ namespace basil {
     // have distinct types and have the same form.
     Value add_type_overload(Source::Pos pos, const Value& existing, const Value& fresh) {
         // println("adding type overload to ", existing, ": ", fresh);
-        if (existing.type == fresh.type) panic("Tried to add type overload with identical type!");
+        Type etype = t_runtime_base(existing.type), ftype = t_runtime_base(fresh.type);
+        if (etype == ftype) panic("Tried to add type overload with identical type!");
         if (existing.form != fresh.form) panic("Tried to add type overload with different form!");
         vector<Type> types;
         map<Type, Value> values;
         if (existing.type.of(K_INTERSECT)) {
-            types = t_intersect_members(existing.type);
+            types = t_intersect_members(etype);
             values = existing.data.isect->values;
-            types.push(fresh.type);
-            values[fresh.type] = fresh;
+            types.push(ftype);
+            values[ftype] = fresh;
             return v_intersect(pos, t_intersect(types), move(values));
         }
         else {
-            types = vector_of<Type>(existing.type, fresh.type);
-            values = map_of<Type, Value>(existing.type, existing, fresh.type, fresh);
+            types = vector_of<Type>(etype, ftype);
+            values = map_of<Type, Value>(etype, existing, ftype, fresh);
             return v_intersect(pos, t_intersect(types), move(values));
         }
     }
@@ -88,23 +90,29 @@ namespace basil {
     // must have distinct forms.
     Value add_form_overload(Source::Pos pos, const Value& existing, const Value& fresh) {
         // println("adding form overload to ", existing, ": ", fresh);
+        Type etype = t_runtime_base(existing.type), ftype = t_runtime_base(fresh.type);
         if (existing.form == fresh.form) panic("Tried to add form overload with identical form!");
         i64 prec = existing.form->precedence;
         Associativity assoc = existing.form->assoc;
         rc<Form> new_form = f_overloaded(prec, assoc, existing.form, fresh.form);
+        if (existing.form->is_macro != fresh.form->is_macro) 
+            panic("Existing form and fresh form should not differ in macro status!");
+
+        if (existing.form->is_macro) new_form->make_macro();
+
         map<rc<Form>, Type> types;
         map<rc<Form>, Value> values;
         if (existing.type.of(K_FORM_ISECT)) {
-            types = t_form_isect_members(existing.type);
+            types = t_form_isect_members(etype);
             values = existing.data.fl_isect->overloads;
-            types[fresh.form] = fresh.type;
+            types[fresh.form] = ftype;
             values[fresh.form] = fresh;
             return v_form_isect(pos, t_form_isect(types), new_form, move(values));
         }
         else {
-            types[existing.form] = existing.type;
+            types[existing.form] = etype;
             values[existing.form] = existing;
-            types[fresh.form] = fresh.type;
+            types[fresh.form] = ftype;
             values[fresh.form] = fresh;
             return v_form_isect(pos, t_form_isect(types), new_form, move(values));
         }
@@ -117,10 +125,16 @@ namespace basil {
     //  - Merge values with different types into type-level intersections.
     //  - Return an error value if an incompatibility is observed.
     Value merge_defs(Source::Pos pos, rc<Env> env, optional<const Value&> existing, const Value& fresh) {
-        if (!existing || existing->type.of(K_UNDEFINED)) return fresh;
-        else if (fresh.type.of(K_UNDEFINED)) return *existing; // skip undefined values
-        else if (existing->type.of(K_UNDEFINED)) return fresh; // replace undefined values with fresh ones
-        else if (existing->type.of(K_FORM_FN)) {
+        if (!existing) return fresh;
+        Type etype = t_runtime_base(existing->type), ftype = t_runtime_base(fresh.type);
+        if (existing->form->is_macro != fresh.form->is_macro) {
+            return v_error(fresh.pos, "Tried to add ", fresh.form->is_macro ? "macro" : "non-macro", 
+                " overload to ", existing->form->is_macro ? "macro" : "non-macro", " value '", *existing, "'.");
+        }
+        if (etype.of(K_UNDEFINED)) return fresh;
+        else if (ftype.of(K_UNDEFINED)) return *existing; // skip undefined values
+        else if (etype.of(K_UNDEFINED)) return fresh; // replace undefined values with fresh ones
+        else if (etype.of(K_FORM_FN)) {
             if (fresh.form == existing->form) {
                 // reuse properties if possible
                 if (fresh.type.of(K_FUNCTION)) 
@@ -140,7 +154,7 @@ namespace basil {
                 Value merged = merge_defs(pos, env, some<const Value&>(cases[fresh.form]), fresh);
                 if (merged.type == T_ERROR) return merged;
                 else {
-                    types[fresh.form] = merged.type;
+                    types[fresh.form] = t_runtime_base(merged.type);
                     cases[fresh.form] = merged;
                     return v_form_isect(pos, t_form_isect(types), existing->form, move(cases));
                 }
@@ -149,21 +163,21 @@ namespace basil {
                 return add_form_overload(pos, *existing, fresh);
             }
         }
-        else if (existing->type.of(K_FUNCTION)) {
+        else if (etype.of(K_FUNCTION)) {
             if (existing->form != fresh.form) {
                 return add_form_overload(pos, *existing, fresh); // add form overload
             }
-            else if (fresh.type.of(K_FORM_FN) || fresh.type.of(K_UNDEFINED)) 
+            else if (ftype.of(K_FORM_FN) || ftype.of(K_UNDEFINED)) 
                 return *existing; // ignore form fn if we already have a concrete function
             else {
                 return add_type_overload(pos, *existing, fresh); // do type-level overload
             }
         }
-        else if (existing->type.of(K_INTERSECT)) {
+        else if (etype.of(K_INTERSECT)) {
             if (existing->form != fresh.form) {
                 return add_form_overload(pos, *existing, fresh); // add form overload
             }
-            else if (fresh.type.of(K_UNDEFINED) || fresh.type.of(K_FORM_FN)) 
+            else if (ftype.of(K_UNDEFINED) || ftype.of(K_FORM_FN)) 
                 return *existing; // ignore form fn if we already have a concrete intersect
             else {
                 return add_type_overload(pos, *existing, fresh); // do type-level overload
@@ -265,7 +279,7 @@ namespace basil {
                         Value ann_type = eval(env, term);
                         if (ann_type.type == T_ERROR) return ERROR;
                         if (!ann_type.type.coerces_to(T_TYPE)) {
-                            err(sub_it->pos, "Expected type expression in annotated parameter, found value '", 
+                            err(ann_type.pos, "Expected type expression in annotated parameter, found value '", 
                                 ann_type, "' of type '", ann_type.type, "' instead.");
                             return ERROR;
                         }
@@ -322,17 +336,27 @@ namespace basil {
         return self;
     }
 
+    enum DefFlags {
+        DF_NOFLAGS = 0,
+        DF_EXTERN = 1,
+        DF_TYPED = 2,
+        DF_MACRO = 4
+    };
+
     // Handles form-level predefinition.
-    template<bool HAS_TYPE, bool IS_EXTERN>
+    template<u32 flags>
     rc<Form> define_form(rc<Env> env, const Value& term) {
         Value params = v_head(v_tail(term)), next = v_head(v_tail(v_tail(term)));
         auto iterable = iter_list(term);
         list_iterator a = iterable.begin(), b = iterable.begin();
         ++ a;
         while (a != iterable.end()) ++ a, ++ b;
-        Value body = IS_EXTERN ? v_void({}) : *b; // body is last term
+        Value body = flags & DF_EXTERN ? v_void({}) : *b; // body is last term unless def is extern
         body = v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body);
         if (next.type == T_SYMBOL && (next.data.sym == S_ASSIGN || next.data.sym == S_OF || next.data.sym == S_COLON)) { // defining var
+            if (flags & DF_MACRO) {
+                return F_TERM; // no macro variables (yet)
+            }
             if (params.type != T_SYMBOL) {
                 return F_TERM;
             }
@@ -354,6 +378,7 @@ namespace basil {
             if (result.type == T_ERROR) return F_TERM;
 
             rc<Form> form = f_callable(0, new_params[0].kind == PK_SELF ? ASSOC_RIGHT : ASSOC_LEFT, new_params);
+            if (flags & DF_MACRO) form->make_macro();
 
             auto location = locate(env, result.data.sym); // try and find existing definitions
 
@@ -372,8 +397,8 @@ namespace basil {
     }
 
     // Handles a value-level definition.
-    Value define(rc<Env> env, const Value& args, optional<Value> type_expr, bool is_extern) {
-        Value params = v_at(args, 0), body = is_extern ? v_void({}) : v_at(args, type_expr ? 2 : 1);
+    Value define(rc<Env> env, const Value& args, optional<Value> type_expr, u32 flags) {
+        Value params = v_at(args, 0), body = flags & DF_EXTERN ? v_void({}) : v_at(args, type_expr ? 2 : 1);
         body = v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body);
         if (params.type != T_VOID && v_tail(params).type == T_VOID) { // defining var
             params = v_head(params);
@@ -383,7 +408,13 @@ namespace basil {
                 return v_error({});
             }
             Symbol name = params.data.sym;
-            Value init = is_extern ? v_void({}) : eval(env, body); // get the initial value
+
+            if (flags & DF_MACRO) {
+                return v_error(params.pos, "Macro definitions must define procedures, but found definition ",
+                    "for variable '", name, "'.");
+            }
+
+            Value init = flags & DF_EXTERN ? v_void({}) : eval(env, body); // get the initial value
             init.form = body.form;
             if (init.type == T_ERROR) return init; // propagate errors
 
@@ -396,17 +427,20 @@ namespace basil {
                 }
                 type_value = coerce(env, type_value, T_TYPE);
                 Type type = type_value.data.type;
-                if (!is_extern && !init.type.coerces_to(type)) {
+                if (!(flags & DF_EXTERN) && !init.type.coerces_to(type)) {
                     err(init.pos, "Inferred variable type '", init.type, 
                         "' is incompatible with declared type '", type, "'.");
                     return v_error({});
                 }
-                init = is_extern ? v_runtime(params.pos, t_runtime(type), ast_unknown(params.pos, type))
+                init = flags & DF_EXTERN 
+                     ? v_runtime(params.pos, t_runtime(type), ast_unknown(params.pos, type))
                      : coerce(env, init, type);
             }
-
+            
             env->def(name, init);
-            return v_void({}); // define doesn't return a value
+            if (init.type.of(K_RUNTIME)) 
+                return v_runtime({}, t_runtime(T_VOID), ast_def(params.pos, name, init.data.rt->ast));
+            else return v_void({}); // define doesn't return a value
         }
         else if (params.type.of(K_LIST)) { // defining procedure
             vector<Symbol> arg_names;
@@ -417,6 +451,8 @@ namespace basil {
             if (result.type == T_ERROR) return result; // propagate errors
 
             rc<Form> form = f_callable(0, new_params[0].kind == PK_SELF ? ASSOC_RIGHT : ASSOC_LEFT, new_params);
+            if (flags & DF_MACRO) form->make_macro();
+
             rc<Env> fn_env = extend(env); // extend parent environment
 
             Type args_type = arg_types.size() > 1 ? t_tuple(arg_types) : arg_types[0];
@@ -433,22 +469,35 @@ namespace basil {
                 ret_type = type_value.data.type;
             }
 
-            Type fntype = t_func(args_type, ret_type);
-            if (is_extern && !t_is_concrete(fntype)) {
+            Type fntype = flags & DF_MACRO ? t_macro(args_type, ret_type) : t_func(args_type, ret_type);
+            if ((flags & DF_EXTERN) && !t_is_concrete(fntype)) {
                 err(type_expr->pos, "Found generic type annotation '", fntype, "' for extern function '",
                     result.data.sym, "'.");
                 return v_error({});
             }
-            Value func = is_extern
+            Value func = flags & DF_EXTERN
                 ? v_runtime(args.pos, t_runtime(fntype), ast_func_stub(args.pos, fntype, result.data.sym, false))
                     .with(form)
                 : v_func(args.pos, result.data.sym, fntype, fn_env, arg_names, 
                 v_cons(body.pos, t_list(T_ANY), v_symbol(body.pos, S_DO), body)).with(form);
 
             Value merged = merge_defs(params.pos, env, env->find(result.data.sym), func);
+            
             // println("merged new def ", func, " to get ", merged);
             if (merged.type == T_ERROR) return merged;
             else env->def(result.data.sym, merged);
+
+            if (t_is_concrete(args_type) && !(flags & DF_EXTERN) && !(flags & DF_MACRO)) {
+                // instantiate fully typed function bodies
+                vector<Value> arg_vals;
+                for (u32 i = 0; i < (args_type.of(K_TUPLE) ? t_tuple_len(args_type) : 1); i ++) {
+                    Type arg_type = args_type.of(K_TUPLE) ? t_tuple_at(args_type, i) : args_type;
+                    arg_vals.push(v_undefined({}, S_NONE, infer_form(arg_type)));
+                }
+                func.data.fn->inst(args_type, arg_vals.size() == 1 
+                    ? arg_vals[0] 
+                    : v_tuple({}, args_type, move(arg_vals)));
+            }
 
             return v_void(args.pos); // define doesn't return a value
         }
@@ -776,42 +825,100 @@ namespace basil {
         }
     }
 
+    Value expand_macros(rc<Env> env, Value v) {
+        if (!v.type.of(K_LIST)) return v; // leave existing terms intact
+
+        vector<Value> values;
+        for (Value t : iter_list(v)) {
+            if (t.type.of(K_LIST) && v_head(t).form->is_macro) { // macro calls
+                Value result = eval(env, t); // eval this call
+                if (!result.type.of(K_LIST)) {
+                    err(v.pos, "Expected call to macro '", v_head(t), "' to return a list value, but ",
+                        "found non-list value '", result, "'.");
+                    return v_error({});
+                }
+                for (Value n : iter_list(result))
+                    values.push(n); // push all returned values
+            }
+            else values.push(expand_macros(env, t)); // push all existing values
+        }
+
+        for (Value& v : values) v.form = nullptr;
+        return v_list(v.pos, t_list(T_ANY), move(values));
+    }
+
+    void reparse(rc<Env> env, Value& v) {
+        v.form = nullptr;
+        if (v.type.of(K_LIST)) for (Value& e : iter_list(v)) reparse(env, e);
+    }
+
     void init_builtins() {
         DEF = {
             t_func(t_tuple(t_list(T_ANY), T_ANY), T_VOID), // type
-            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<false, false>, P_SELF, p_term_variadic("params"), p_keyword("="), p_term("body")), // form
-            BF_COMPTIME,
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<DF_NOFLAGS>, P_SELF, 
+                p_term_variadic("params"), p_keyword("="), p_term("body")), // form
+            BF_COMPTIME | BF_RUNTIME | BF_PRESERVING,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
-                return define(env, args, none<Value>(), false);
+                return define(env, args, none<Value>(), DF_NOFLAGS);
             },
-            nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> { // runtime
+                Value def = define(env, args, none<Value>(), DF_NOFLAGS);
+
+                if (def.type.of(K_RUNTIME)) return def.data.rt->ast;
+                else return ast_void(call_term.pos);
+            }
         };
         DEF_TYPED = {
             t_func(t_tuple(t_list(T_ANY), T_ANY, T_ANY), T_VOID), // type
-            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<true, false>, P_SELF, p_term_variadic("params"), 
-                p_keyword(":"), p_quoted("type"), p_keyword("="), p_term("body")), // form
-            BF_COMPTIME,
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<DF_TYPED>, P_SELF, p_term_variadic("params"), 
+                p_keyword(":"), p_term_variadic("type"), p_keyword("="), p_term("body")), // form
+            BF_COMPTIME | BF_RUNTIME | BF_PRESERVING,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
-                return define(env, args, some<Value>(v_at(args, 1)), false);
+                return define(env, args, some<Value>(v_at(args, 1)), DF_TYPED);
             },
-            nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> { // runtime
+                Value def = define(env, args, some<Value>(v_at(args, 1)), DF_TYPED);
+                
+                if (def.type.of(K_RUNTIME)) return def.data.rt->ast;
+                else return ast_void(call_term.pos);
+            }
         };
         DEF_EXTERN = {
             t_func(t_tuple(t_list(T_ANY), T_ANY), T_VOID), // type
-            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<true, true>, P_SELF, p_term_variadic("params"), 
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<DF_TYPED | DF_EXTERN>, P_SELF, p_term_variadic("params"), 
                 p_keyword(":"), p_quoted("type")), // form
             BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
-                return define(env, args, some<Value>(v_at(args, 1)), true);
+                return define(env, args, some<Value>(v_at(args, 1)), DF_TYPED | DF_EXTERN);
+            },
+            nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
+        };
+        MACRO = {
+            t_func(t_tuple(t_list(T_ANY), T_ANY), T_VOID), // type
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<DF_MACRO>, P_SELF, 
+                p_term_variadic("params"), p_keyword("="), p_term("body")), // form
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
+                return define(env, args, none<Value>(), DF_MACRO);
+            },
+            nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
+        };
+        MACRO_TYPED = {
+            t_func(t_tuple(t_list(T_ANY), T_ANY, T_ANY), T_VOID), // type
+            f_callable(PREC_STRUCTURE, ASSOC_RIGHT, define_form<DF_TYPED | DF_MACRO>, P_SELF, p_term_variadic("params"), 
+                p_keyword(":"), p_term_variadic("type"), p_keyword("="), p_term("body")), // form
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value { // comptime
+                return define(env, args, some<Value>(v_at(args, 1)), DF_TYPED | DF_MACRO);
             },
             nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
         };
         LAMBDA = {
             t_func(t_tuple(T_ANY, T_ANY), T_VOID), // type
             f_callable(PREC_STRUCTURE, ASSOC_RIGHT, lambda_form, P_SELF, p_term_variadic("params"), p_keyword("="), p_term("body")), // form
-            BF_COMPTIME,
-            lambda, // comptime
-            nullptr // we shouldn't be invoking def on runtime args because it doesn't eval its arguments
+            BF_COMPTIME | BF_RUNTIME | BF_PRESERVING,
+            lambda, // comptime,
+            nullptr // TODO: runtime lambdas
         };
         DO = {
             t_func(t_list(T_ANY), T_ANY), // type
@@ -827,13 +934,15 @@ namespace basil {
                 // known at compile time, `do`'s order of execution is independent of any
                 // runtime subexpressions. but, we don't want to discard them like we'd
                 // discard compile-time values, so we track them in this vector.
-                static vector<rc<AST>> runtime;
+                vector<rc<AST>> runtime;
                 runtime.clear();
 
                 while (b != iterable.end()) {
-                    if (b->type.of(K_RUNTIME)) runtime.push(b->data.rt->ast);
+                    if (a->type.of(K_RUNTIME)) runtime.push(a->data.rt->ast);
                     ++ a, ++ b; // loop until the end
                 }
+                if (a->type.of(K_RUNTIME)) runtime.push(a->data.rt->ast); // remember last element
+
                 if (runtime.size()) { // we want to run all runtime subexprs
                     rc<AST> ast = ast_do(call_term.pos, runtime);
                     return v_runtime(ast->pos, t_runtime(ast->type(env)), ast);
@@ -853,6 +962,7 @@ namespace basil {
             BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 Value temp = arg;
+                reparse(env, temp);
                 return eval(env, temp);
             },
             nullptr
@@ -863,6 +973,20 @@ namespace basil {
             BF_COMPTIME,
             [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
                 return arg;
+            },
+            nullptr
+        };
+        SPLICE = {
+            t_func(T_ANY, T_ANY), // type
+            f_callable(PREC_QUOTE, ASSOC_LEFT, P_SELF, p_term_variadic("expr")),
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
+                if (!arg.type.of(K_LIST)) return arg; // behave like quote on non-lists
+                // println("spliced arg = ", arg);
+                Value new_term = expand_macros(env, arg);
+                resolve_form(env, new_term);
+                // println("new term = ", new_term);
+                return eval(env, new_term); // eval list of new values
             },
             nullptr
         };
@@ -1768,10 +1892,28 @@ namespace basil {
         };
     }
 
+    static map<u64, Symbol> builtin_names;
+
+    void name_builtin(Symbol name, const Value& value) {
+        if (value.type.of(K_FUNCTION) && value.data.fn->builtin) 
+            builtin_names[u64(&*value.data.fn->builtin)] = name;
+        if (value.type.of(K_INTERSECT)) for (const auto& [t, f] : value.data.isect->values)
+            name_builtin(name, f);
+        if (value.type.of(K_FORM_ISECT)) for (const auto& [f, v] : value.data.fl_isect->overloads)
+            name_builtin(name, v);
+    }
+
+    optional<Symbol> builtin_name(const Builtin& builtin) {
+        auto it = builtin_names.find(u64(&builtin));
+        if (it == builtin_names.end()) return none<Symbol>();
+        else return some<Symbol>(it->second);
+    }
+
     void add_builtins(rc<Env> env) {
         if (!builtins_inited) builtins_inited = true, init_builtins();
 
         env->def(symbol_from("def"), v_intersect(&DEF, &DEF_TYPED));
+        env->def(symbol_from("macro"), v_intersect(&MACRO, &MACRO_TYPED));
         env->def(symbol_from("extern"), v_func(DEF_EXTERN));
         env->def(symbol_from("lambda"), v_func(LAMBDA));
         env->def(symbol_from("λ"), v_func(LAMBDA));
@@ -1779,6 +1921,7 @@ namespace basil {
         env->def(symbol_from("meta"), v_func(META));
         env->def(symbol_from("eval"), v_func(EVAL));
         env->def(symbol_from("quote"), v_func(QUOTE));
+        env->def(symbol_from("splice"), v_func(SPLICE));
         env->def(symbol_from("if"), v_intersect(&IF, &IF_ELSE));
         env->def(symbol_from("while"), v_func(WHILE));
         env->def(symbol_from("matches"), v_func(MATCHES));
@@ -1846,5 +1989,7 @@ namespace basil {
         env->def(symbol_from("true"), v_bool({}, true));
         env->def(symbol_from("false"), v_bool({}, false));
         env->def(symbol_from("π"), v_double({}, 3.141592653589793238462643383279502884197169399375105820974944592307));
+
+        for (const auto& [k, v] : env->values) name_builtin(k, v);
     }
 }

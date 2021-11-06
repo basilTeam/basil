@@ -35,7 +35,6 @@ namespace basil {
 
         // Loads the entirety of the file at the provided path into the constructed
         // Source object.
-        Source(const char* path);
         Source(const ustring& path);
 
         // Reads all characters from the provided stream into the constructed
@@ -48,7 +47,6 @@ namespace basil {
 
         // Represents an exclusive range of characters within a source file.
         struct Pos {
-            const char* filename;
             u32 line_start : 20;
             u32 col_start : 12;
             u32 line_end : 20;

@@ -125,7 +125,10 @@ namespace basil {
 
     bool Callable::precheck_keyword(const Value& keyword) {
         if (is_finished()) return false;
-        if ((*parameters)[index].kind == PK_KEYWORD) return (*parameters)[index].matches(keyword);
+        if ((*parameters)[index].kind == PK_KEYWORD) {
+            bool match = (*parameters)[index].matches(keyword);
+            return match;
+        }
         if (is_variadic((*parameters)[index].kind)
             && index < parameters->size() - 1
             && (*parameters)[index + 1].kind == PK_KEYWORD
@@ -238,7 +241,7 @@ namespace basil {
         if (matched) { // if there were any matches...
             for (auto& overload : overloads) 
                 if (!overload->precheck_keyword(keyword)) // ...stop any machines that didn't match
-                    overload->stopped = true;
+                    overload->stopped = true, overload->index = overload->parameters->size() + 1;
         }
         return matched;
     }
@@ -333,7 +336,7 @@ namespace basil {
 
     bool Form::operator==(const Form& other) const {
         if (kind != other.kind) return false; // kinds should be the same
-
+        if (is_macro != other.is_macro) return false;
         switch (kind) {
             case FK_OVERLOADED:
                 return *(rc<Overloaded>)invokable == *(rc<Overloaded>)other.invokable;
@@ -353,12 +356,16 @@ namespace basil {
         }
     }
 
+    void Form::make_macro() {
+        is_macro = true;
+    }
+
     bool Form::operator!=(const Form& other) const {
         return !(*this == other);
     }
 
     u64 Form::hash() const {
-        u64 kind_hash = raw_hash(kind);
+        u64 kind_hash = raw_hash(kind) * 8996956657359370813ul ^ raw_hash(is_macro);
         switch (kind) {
             case FK_CALLABLE:
                 return kind_hash * 14361106427190892639ul ^ ((rc<Callable>)invokable)->hash();

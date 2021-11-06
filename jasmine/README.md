@@ -38,7 +38,7 @@ To build Jasmine's command-line driver from source, make sure you have a **C++17
 $ git clone https://github.com/basilTeam/basil
 $ ./build.py --help             # lists all build options (compiler to use, additional flags, etc)
 $ ./build.py jasmine-release
-$ build/jasmine --help
+$ bin/jasmine --help
 ```
 
 We'll be adding a more convenient single header, along with static and dynamic Jasmine libraries, at some point in the future.

@@ -42,7 +42,7 @@ resourcefulness...
 $ git clone https://github.com/basilTeam/basil
 $ ./build.py --help             # lists all build options (compiler to use, additional flags, etc)
 $ ./build.py basil-release
-$ build/basil help
+$ bin/basil help
 ```
 
 Basil's language runtime can be compiled separately, as either a statically or dynamically linked library.

@@ -76,7 +76,7 @@ parser.add_argument("--ld", default=LD, help="Override the default linker.")
 parser.add_argument("--clean", action='store_true', help="Scrub all compiler artifacts from the current directory before building.")
 parser.add_argument("--cxxflags", default="", help="Define additional C++ compiler flags to use.")
 parser.add_argument("--ldflags", default="", help="Define additional C++ linker flags to use.")
-parser.add_argument("target", choices=PRODUCTS, default="basil-debug", metavar="target", nargs='?', help="Specifies the desired product you'd like to build.")
+parser.add_argument("target", choices=PRODUCTS, default="basil-debug", metavar="target", nargs='?', help="Specifies the desired product you'd like to build. (Options are " + ", ".join(PRODUCTS) + ")")
 args = parser.parse_args(sys.argv[1:])
 
 CXX = args.cxx

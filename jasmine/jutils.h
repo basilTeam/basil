@@ -18,12 +18,18 @@
 #include "../util/bytebuf.h"
 
 // allocates writable, executable memory
-void* alloc_exec(u64 size);
+void* alloc_vmem(u64 size);
 
 // protects executable memory from being written
 void protect_exec(void* exec, u64 size);
 
+// protects data memory from being written or executed
+void protect_data(void* data, u64 size);
+
+// protects static memory from being executed
+void protect_static(void* stat, u64 size);
+
 // deallocates executable memory
-void free_exec(void* exec, u64 size);
+void free_vmem(void* mem, u64 size);
 
 #endif

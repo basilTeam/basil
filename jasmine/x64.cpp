@@ -890,19 +890,19 @@ namespace jasmine::x64 {
         emitprefix(dest, src, actual_size);
         if (is_immediate(src.type)) {
             i64 value = immediate_value(src);
-            if (is_register(dest.type) && (value < -0x80000000l || value > 0x7fffffffl)) {
+            if (is_register(dest.type)) {
                 u8 opcode = 0xb0;
                 if (actual_size != BYTE) opcode += 8; // set bottom bit for non-8-bit mode
                 opcode += (dest.data.reg & 7);
+                
                 target->code().write<u8>(opcode);
-
                 write_immediate(src, actual_size, true);
             }
             else {
                 u8 opcode = 0xc6;
                 if (actual_size != BYTE) opcode ++; // set bottom bit for non-8-bit mode
+                
                 target->code().write(opcode);
-
                 emitargs(dest, src, actual_size);
             }
         }
@@ -919,7 +919,7 @@ namespace jasmine::x64 {
             else emitargs(dest, realsrc, actual_size);
 
             if (is_label(src.type))
-                target->reference(src.data.label, relative(DWORD), -4);
+                target->reference(src.data.label, OS_CODE, relative(DWORD), -4);
         }
     }
     
@@ -1276,7 +1276,7 @@ namespace jasmine::x64 {
             if (is_displacement_only(disp.type)) emitargs(dest, disp, actual_size);
             else emitargs(disp, dest, actual_size);
             if (is_label(src.type))
-                target->reference(src.data.label, relative(DWORD), -4);
+                target->reference(src.data.label, OS_CODE, relative(DWORD), -4);
         }
     }
 
@@ -1298,12 +1298,12 @@ namespace jasmine::x64 {
         target->code().write<u8>(0x0f, 0x05);
     }
 
-    void label(jasmine::Symbol symbol) {
-        target->define(symbol);
+    void label(jasmine::Symbol symbol, ObjectSection section) {
+        target->define(symbol, section);
     }
 
-    void label(const char* symbol) {
-        label(jasmine::local(symbol));
+    void label(const char* symbol, ObjectSection section) {
+        label(jasmine::local(symbol), section);
     }
 
     void jmp(const Arg& dest, Size size) {
@@ -1328,7 +1328,7 @@ namespace jasmine::x64 {
                 i8 imm_size = 1;
                 if (actual_size == WORD) imm_size = 2;
                 else if (actual_size == DWORD) imm_size = 4;
-                target->reference(dest.data.label, relative(actual_size), -imm_size);
+                target->reference(dest.data.label, OS_CODE, relative(actual_size), -imm_size);
             }
         }
         else {
@@ -1365,7 +1365,7 @@ namespace jasmine::x64 {
                 i8 imm_size = 1;
                 if (size == WORD) imm_size = 2;
                 else if (size == DWORD) imm_size = 4;
-                target->reference(dest.data.label, relative(size), -imm_size);
+                target->reference(dest.data.label, OS_CODE, relative(size), -imm_size);
             }
         }
         else {
@@ -1393,7 +1393,7 @@ namespace jasmine::x64 {
 
             target->code().write<u8>(0xe8); // opcode
             write_immediate(imm, actual_size);
-            if (is_label(dest.type)) target->reference(dest.data.label, relative(actual_size), -4);
+            if (is_label(dest.type)) target->reference(dest.data.label, OS_CODE, relative(actual_size), -4);
         }
         else {
             emitprefix(dest, actual_size);
@@ -1440,42 +1440,48 @@ namespace jasmine::x64 {
         }
     }
     
-    void lit8(u8 val) {
+    void lit8(u8 val, ObjectSection section) {
         verify_buffer();
-        target->code().write<u8>(val);
+        target->get(section).write<u8>(val);
     }
 
-    void lit16(u16 val) {
+    void lit16(u16 val, ObjectSection section) {
         verify_buffer();
-        target->code().write(little_endian<u16>(val));
+        target->get(section).write(little_endian<u16>(val));
     }
 
-    void lit32(u32 val) {
+    void lit32(u32 val, ObjectSection section) {
         verify_buffer();
-        target->code().write(little_endian<u32>(val));
+        target->get(section).write(little_endian<u32>(val));
     }
 
-    void lit64(u64 val) {
+    void lit64(u64 val, ObjectSection section) {
         verify_buffer();
-        target->code().write(little_endian<u64>(val));
+        target->get(section).write(little_endian<u64>(val));
     }
 
-    void litf32(float f) {
+    void litf32(float f, ObjectSection section) {
         verify_buffer();
         u32 u = *(u32*)&f;
-        target->code().write(little_endian<u32>(u));
+        target->get(section).write(little_endian<u32>(u));
     }
 
-    void litf64(double d) {
+    void litf64(double d, ObjectSection section) {
         verify_buffer();
         u64 u = *(u64*)&d;
-        target->code().write(little_endian<u64>(u));
+        target->get(section).write(little_endian<u64>(u));
     }
 
-    void rel32(jasmine::Symbol symbol) {
+    void litstr(const ustring& s, ObjectSection section) {
         verify_buffer();
-        target->code().write<u32>(0);
-        target->reference(symbol, jasmine::RefType::REL32_LE, -4);
+        for (u32 i = 0; i < s.bytes(); i ++) target->get(section).write<u8>(s.raw()[i]);
+        target->get(section).write<u8>(0);
+    }
+
+    void rel32(jasmine::Symbol symbol, ObjectSection section) {
+        verify_buffer();
+        target->get(section).write<u32>(0);
+        target->reference(symbol, OS_DATA, jasmine::RefType::REL32_LE, -4);
     }
 
     void nop32(u32 val) {

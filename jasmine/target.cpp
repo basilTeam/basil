@@ -284,7 +284,7 @@ namespace jasmine {
         switch (arch) {
             case X86_64: return x64::register_set(kind);
             default:
-                panic("Unimplemented architecture!");
+                panic("Unimplemented architecture ", u64(arch), "!");
                 return EMPTY;
         }
     }
@@ -348,6 +348,7 @@ namespace jasmine {
                             panic("Unimplemented OS!");
                             break;
                     }
+                    break;
                 }
                 case K_STRUCT:
                     param_locs.push({ LT_PUSHED_R2L, none<GenericRegister>(), none<i64>() });
@@ -429,7 +430,7 @@ namespace jasmine {
             case X86_64: {
                 using namespace x64;
                 writeto(obj);
-                obj.define(label);
+                obj.define(label, OS_CODE);
                 mov(r64(RAX), imm(address));
                 jmp(r64(RAX)); // use jmp instead of call to maintain previous return value
                 break;

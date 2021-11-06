@@ -9,6 +9,54 @@
 
 #include "bytebuf.h"
 
+template<>
+float big_endian(float f) {
+    u32 u = big_endian<u32>(*(u32*)&f);
+    return *(float*)&u;
+}
+
+template<>
+double big_endian(double f) {
+    u64 u = big_endian<u64>(*(u64*)&f);
+    return *(double*)&u;
+}
+
+template<>
+float little_endian(float f) {
+    u32 u = little_endian<u32>(*(u32*)&f);
+    return *(float*)&u;
+}
+
+template<>
+double little_endian(double f) {
+    u64 u = little_endian<u64>(*(u64*)&f);
+    return *(double*)&u;
+}
+
+template<>
+float from_big_endian(float f) {
+    u32 u = from_big_endian<u32>(*(u32*)&f);
+    return *(float*)&u;
+}
+
+template<>
+double from_big_endian(double f) {
+    u64 u = from_big_endian<u64>(*(u64*)&f);
+    return *(double*)&u;
+}
+
+template<>
+float from_little_endian(float f) {
+    u32 u = from_little_endian<u32>(*(u32*)&f);
+    return *(float*)&u;
+}
+
+template<>
+double from_little_endian(double f) {
+    u64 u = from_little_endian<u64>(*(u64*)&f);
+    return *(double*)&u;
+}
+
 bytebuf::bytebuf():
     _start(0), _end(0), _capacity(32), _data(new u8[_capacity]) {
     // starts with empty (uninitialized) buffer of 32 bytes

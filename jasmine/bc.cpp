@@ -12,9 +12,10 @@
 #include "stdio.h"
 #include "util/str.h"
 #include "util/hash.h"
+#include "util/perf.h"
 #include "util/sets.h"
 #include "x64.h"
-#include "obj.h"
+#include "jobj.h"
 
 namespace jasmine {
     struct Insn;
@@ -455,7 +456,7 @@ namespace jasmine {
 
     Symbol disassemble_label(const Context& context, bytebuf& buf, const Object& obj) {
         for (u8 i = 0; i < 4; i ++) buf.read<u8>();
-        auto it = obj.references().find(obj.code().size() - buf.size());
+        auto it = obj.references().find({ OS_CODE, obj.code().size() - buf.size() });
         if (it == obj.references().end()) {
             fprintf(stderr, "[ERROR] Undefined symbol in object file!\n");
             exit(1);
@@ -592,7 +593,7 @@ namespace jasmine {
                         break;
                     case MK_LABEL_OFF:
                         for (u8 i = 0; i < 4; i ++) obj.code().write<u8>(0);
-                        obj.reference(param.data.mem.label, REL32_LE, -4);
+                        obj.reference(param.data.mem.label, OS_CODE, REL32_LE, -4);
                         assemble_60bit(obj.code(), abs(param.data.mem.off), param.data.mem.off < 0);
                         break;
                     case MK_REG_TYPE:
@@ -602,7 +603,7 @@ namespace jasmine {
                         break;
                     case MK_LABEL_TYPE:
                         for (u8 i = 0; i < 4; i ++) obj.code().write<u8>(0);
-                        obj.reference(param.data.mem.label, REL32_LE, -4);
+                        obj.reference(param.data.mem.label, OS_CODE, REL32_LE, -4);
                         assemble_60bit(obj.code(), param.data.mem.off, false);
                         assemble_type(context, param.data.mem.type, obj);
                         assemble_60bit(obj.code(), abs(param.data.mem.off), param.data.mem.off < 0);
@@ -611,7 +612,7 @@ namespace jasmine {
                 break;
             case PK_LABEL:
                 for (u8 i = 0; i < 4; i ++) obj.code().write<u8>(0);
-                obj.reference(param.data.label, REL32_LE, -4);
+                obj.reference(param.data.label, OS_CODE, REL32_LE, -4);
                 break;
             case PK_IMM:
                 assemble_60bit(obj.code(), abs(param.data.imm.val), param.data.imm.val < 0);
@@ -1069,7 +1070,7 @@ namespace jasmine {
     Insn disassemble_insn(Context& context, bytebuf& buf, const Object& obj) {
         Insn insn;
         u64 offset = obj.code().size() - buf.size();
-        auto it = obj.symbol_positions().find(offset);
+        auto it = obj.symbol_positions().find({ OS_CODE, offset });
         if (it != obj.symbol_positions().end())
             insn.label = some<Symbol>(it->second);
         u8 opcode = buf.read<u8>();
@@ -1106,7 +1107,7 @@ namespace jasmine {
 
     void assemble_insn(const Context& context, Object& obj, const Insn& insn) {
         // [opcode 6         ] [p1 2] [p2 2] [p3 2] [typekind 4]
-        if (insn.label) obj.define(*insn.label);
+        if (insn.label) obj.define(*insn.label, OS_CODE);
         u8 opcode = (insn.opcode & 63) << 2;
         if (insn.params.size() > 0) opcode |= insn.params[0].kind;
         u8 typearg = insn.type.kind;
@@ -1546,14 +1547,14 @@ namespace jasmine {
             endtype();
         }
 
-        void label(Symbol symbol) {
+        void label(Symbol symbol, ObjectSection section) {
             verify_buffer();
-            obj->define(symbol);
+            obj->define(symbol, section);
         }
 
-        void label(const char* symbol) {
+        void label(const char* symbol, ObjectSection section) {
             verify_buffer();
-            obj->define(jasmine::local(symbol));
+            obj->define(jasmine::local(symbol), section);
         }
 
         void global(Type type, Symbol symbol) {
@@ -1562,8 +1563,10 @@ namespace jasmine {
         }
     }
 
-    LiveRange::LiveRange(Reg reg_in, Type type_in, u64 f, u64 l):
-        reg(reg_in), type(type_in), first(f), last(l) {}
+    LiveRange::LiveRange() {}
+
+    LiveRange::LiveRange(Reg reg_in, Type type_in):
+        reg(reg_in), type(type_in) {}
 
     struct Function {
         const Context& ctx;
@@ -1573,6 +1576,7 @@ namespace jasmine {
         vector<Location> params;
         u32 n_params;
         vector<vector<LiveRange*>> starts_by_insn, ends_by_insn, preserved_regs;
+        map<u64, u64> assignments;
 
         Function(const Context& ctx_in): ctx(ctx_in), stack(0), n_params(0) {}
 
@@ -1686,86 +1690,164 @@ namespace jasmine {
             }
         }
 
-        println("");
-        for (u64 i = function.first; i <= function.last; i ++) {
-            print("{");
-            bool first = true;
-            for (u32 r : sets[i - function.first].first) {
-                Param p;
-                p.kind = PK_REG;
-                p.data.reg = {false, r};
-                print(first ? "" : " ");
-                print_param(function.ctx, p, _stdout, "");
-                first = false;
-            }
-            print("} => {");
-            first = true;
-            for (u32 r : sets[i - function.first].second) {
-                Param p;
-                p.kind = PK_REG;
-                p.data.reg = {false, r};
-                print(first ? "" : " ");
-                print_param(function.ctx, p, _stdout, "");
-                first = false;
-            }
-            print("}\t");
-            print_insn(function.ctx, _stdout, insns[i]);
-        }
-        println("");
+        // in this next phase, we do a pseudo-SSA, uniquely numbering as many distinct
+        // registers as possible
+        // in order for two register occurrences to be distinct, they must have:
+        //  - different register ids (trivial: %0 is different from %1)
+        //  - clearly different defining instructions (but we don't explore branches when going up the insn stream)
+        auto& assignments = function.assignments;
 
-        map<u64, optional<LiveRange>> ranges;
         for (u64 i = function.first; i <= function.last; i ++) {
-            const Insn& in = insns[i];
-            for (const Param& p : in.params) if (p.kind == PK_REG)
-                ranges[p.data.reg.id] = none<LiveRange>();
+            u64 idx = i - function.first;
+            const Insn& insn = insns[i];
+            if (destructive(insn) && insns[i].params[0].kind == PK_REG) 
+                assignments[idx] = insns[i].params[0].data.reg.id;
         }
-        u32 param_idx = 0;
-        for (u64 i = function.first; i <= function.last; i ++) {
-            const auto& live = sets[i - function.first];
-            for (auto& [reg, range] : ranges) {
-                // if (range && range->type.kind != K_STRUCT && (insns[i].type.kind != range->type.kind
-                //     || (insns[i].type.kind == K_STRUCT && insns[i].type.id != range->type.id))) {
-                //     fprintf(stderr, "[ERROR] Found inconsistent types for virtual register %%%lu.\n", reg);
-                //     exit(1);
-                // }
 
-                if (!range && live.second.contains(reg)) { // new definition
-                    range = some<LiveRange>(Reg{false, reg}, insns[i].type, i, i);
+        vector<map<u64, u64>> dom_assign;
+        map<u64, u64> eqv; // we use this to mark assignment ids as identical
+        for (u64 i = function.first; i <= function.last; i ++) 
+            dom_assign.push({}); // map for every instruction (kinda hefty...maybe optimize this later)
+        for (u64 i = function.first; i <= function.last; i ++) {
+            u64 idx = i - function.first;
+            map<u64, u64>& bind = dom_assign[idx];
+            
+            auto it = assignments.find(idx);
+            if (it != assignments.end()) bind.put(it->second, idx); // associate assignments with themselves
+
+            for (u32 r : sets[idx].first) if (idx > 0) {
+                // if we do not already know an assignment for live register r,
+                // copy it from the previous instruction
+                const auto& prev = dom_assign[idx - 1];
+                auto it = prev.find(r);
+                auto existing = bind.find(r);
+                if (existing != bind.end() && it != prev.end()) {
+                    eqv[existing->second] = it->second;
+                    eqv[it->second] = existing->second;
                 }
-                else if (range && !live.first.contains(reg)) { // range ended last instruction
-                    range->last = i - 1;
-                    function.ranges.push(*range);
-                    range = none<LiveRange>();
+                else if (it != prev.end()) bind[r] = it->second; // use prev binding
+                else if (existing == bind.end()) 
+                    panic("Expected previous assignment of register %", r, " on instruction ", idx + function.first, "! Might be undefined!");
+            }
+            
+            if (insns[i].opcode >= OP_JEQ && insns[i].opcode <= OP_JUMP) { // jump instruction
+                auto it = local_syms.find(insns[i].params[0].data.label);
+                if (it == local_syms.end()) {
+                    fprintf(stderr, "[ERROR] Tried to jump to label '%s' outside of current function.\n", 
+                        name(insns[i].params[0].data.label));
+                    exit(1);
                 }
-                
-                if (range && !range->param_idx && insns[i].opcode == OP_PARAM) {
-                    range->param_idx = some<u32>(param_idx), function.n_params ++; // arg
-                    param_idx ++;
-                }
-                
-                if (range && !live.second.contains(reg)) { // range ends this instruction
-                    range->last = i;
-                    function.ranges.push(*range);
-                    range = none<LiveRange>();
+                // copy bindings to jump targets
+                u64 dest = it->second - function.first;
+                for (const auto& [r, i] : bind) {
+                    auto it = dom_assign[dest].find(r); // check for existing binding
+                    if (it != dom_assign[dest].end() && it->second != i) { // unify these two bindings
+                        eqv[it->second] = i;
+                        eqv[i] = it->second;
+                    }
+                    else dom_assign[dest].put(r, i);
                 }
             }
         }
-        for (auto& [reg, range] : ranges) if (range) range->last = function.last, function.ranges.push(*range); // add any ranges we didn't catch
 
-        for (LiveRange& r : function.ranges) {
-            for (u64 i = r.first + 1; i < r.last; i ++) if (insns[i].opcode == OP_CALL)
-                function.preserved_regs[i - function.first].push(&r);
+        // eliminate eqv
+        map<u64, u64> canonical; // canonical values for all eqv entries
+        for (const auto& [a, b] : eqv) {
+            if (a < b) canonical[b] = a;
+            else canonical[a] = b;
+        }
+        
+        changed = true;
+        while (changed) {
+            changed = false;
+            for (u64 i = function.first; i <= function.last; i ++) {
+                for (auto& [r, i] : dom_assign[i - function.first]) {
+                    auto it = canonical.find(i);
+                    if (it != canonical.end()) i = it->second, changed = true;
+                }
+            }
+        }
+        eqv.clear();
+        // println("");
+        // for (u64 i = function.first; i <= function.last; i ++) {
+        //     print("#", i, ": {");
+        //     bool first = true;
+        //     for (u32 r : sets[i - function.first].first) {
+        //         Param p;
+        //         p.kind = PK_REG;
+        //         p.data.reg = {false, r};
+        //         print(first ? "" : " ");
+        //         print_param(function.ctx, p, _stdout, "");
+        //         first = false;
+        //     }
+        //     print("} => {");
+        //     first = true;
+        //     for (u32 r : sets[i - function.first].second) {
+        //         Param p;
+        //         p.kind = PK_REG;
+        //         p.data.reg = {false, r};
+        //         print(first ? "" : " ");
+        //         print_param(function.ctx, p, _stdout, "");
+        //         first = false;
+        //     }
+        //     print("}\t");
+        //     print("[");
+        //     first = true;
+        //     for (const auto& [k, v] : dom_assign[i - function.first]) {
+        //         if (!first) print(", ");
+        //         first = false;
+        //         print("%", k, ": ", v + function.first);
+        //         if (eqv.contains(v)) print("=", eqv[v] + function.first);
+        //     }
+        //     print("]\t");
+        //     print_insn(function.ctx, _stdout, insns[i]);
+        // }
+        // println("");
+
+        map<u64, LiveRange> ranges; // map unique assignments to ranges
+        for (u64 i = function.first; i <= function.last; i ++) {
+            u64 idx = i - function.first;
+            const auto& live = sets[idx];
+            for (u32 r : live.second) {
+                u64 assignment = dom_assign[idx][r];
+                if (!live.first.contains(r) || (i > function.first && !sets[idx - 1].second.contains(r))) {
+                    // start of interval
+                    if (!ranges.contains(assignment)) {
+                        LiveRange range(Reg{false, r}, insns[i].type);
+                        if (insns[i].opcode == OP_PARAM) range.param_idx = some<u32>(function.n_params ++);
+                        ranges.put(assignment, range);
+                    }
+                    ranges[assignment].intervals.push({ idx, idx });
+                }
+                else ranges[assignment].intervals.back().second = idx; // continue interval to this insn
+            }
+            for (u32 r : live.first) if (!live.second.contains(r)) { // end of interval
+                ranges[dom_assign[idx][r]].intervals.back().second = idx;
+            }
+        }
+        for (const auto& [_, range] : ranges) function.ranges.push(range);
+        for (LiveRange& r : function.ranges) for (const auto& in : r.intervals) {
+            for (i64 i = in.first + 1; i < in.second; i ++) if (insns[i].opcode == OP_CALL) {
+                function.preserved_regs[i].push(&r);
+            }
         }
 
-        for (const LiveRange& r : function.ranges) {
-            Param p;
-            p.kind = PK_REG;
-            p.data.reg = r.reg;
-            print("register ");
-            print_param({}, p, _stdout, "");
-            println(" live from ", r.first, " to ", r.last);
-        }
-        println("");
+        // for (const LiveRange& r : function.ranges) {
+        //     Param p;
+        //     p.kind = PK_REG;
+        //     p.data.reg = r.reg;
+        //     print("register ");
+        //     print_param({}, p, _stdout, "");
+        //     print(" live from ");
+        //     bool first = true;
+        //     for (const auto& [a, b] : r.intervals) {
+        //         if (!first) print(", ");
+        //         first = false;
+        //         print(a, " to ", b);
+        //     }
+        //     println("");
+        // }
+        // println("");
     }
 
     void clobber(Function& f, const Insn& insn, u32 insn_idx, const_slice<bitset*> regs, 
@@ -1779,7 +1861,8 @@ namespace jasmine {
                 b->erase(i);
                 to_release.push({ b, i });
             }
-            if (mappings[i] && mappings[i]->first != insn_idx) { // don't worry about dests
+            if (mappings[i] && // don't worry about dests
+                (!f.assignments.contains(insn_idx) || f.assignments[insn_idx] != i)) {
                 fixup.push(mappings[i]); // reallocate conflicting variables
                 to_release.push({ regs[mappings[i]->type.kind], i });
             }
@@ -1801,7 +1884,6 @@ namespace jasmine {
         }
         // release clobbered registers for use after this instruction
         for (const auto& [kregs, r] : to_release) {
-            if (mappings[r] && mappings[r]->first != r) mappings[r] = nullptr;
             kregs->insert(r); 
             // println("\treleased ", x64::REGISTER_NAMES[r]);
         }
@@ -1832,21 +1914,34 @@ namespace jasmine {
             f.starts_by_insn.push({});
             f.ends_by_insn.push({});
         }
-        for (LiveRange& r : f.ranges) {
-            f.starts_by_insn[r.first - f.first].push(&r);
-            f.ends_by_insn[r.last - f.first].push(&r);
+        for (LiveRange& r : f.ranges) for (const auto& [a, b] : r.intervals) {
+            f.starts_by_insn[a].push(&r);
+            f.ends_by_insn[b].push(&r);
         }
 
+        vector<vector<LiveRange*>> live_at;
         for (u64 i = f.first; i <= f.last; i ++) {
-            static vector<LiveRange*> ranges;
-            ranges.clear();
-            for (const Param& p : insns[i].params) 
-                if (p.kind == PK_REG && mappings[p.data.reg.id]) ranges.push(mappings[p.data.reg.id]);
-                else ranges.push(nullptr);
-            for (LiveRange* r : f.starts_by_insn[i - f.first]) 
-                if (insns[i].params[0].kind == PK_REG && r->reg.id == insns[i].params[0].data.reg.id)
-                    ranges[0] = r; // pull dest from freshly-started range
-            target.hint(insns[i], ranges);
+            vector<LiveRange*> params;
+            for (u64 j = 0; j < insns[i].params.size(); j ++) params.push(nullptr);
+            live_at.push(move(params));
+        }
+        for (LiveRange& r : f.ranges) for (const auto& [a, b] : r.intervals) {
+            for (u64 j = a; j <= b; j ++) {
+                const Insn& insn = insns[f.first + j];
+                for (u64 k = 0; k < insn.params.size(); k ++) {
+                    if (insn.params[k].kind == PK_REG && r.reg.id == insn.params[k].data.reg.id)
+                        live_at[j][k] = &r;
+                }
+            }
+        }
+        for (u64 i = f.first; i <= f.last; i ++) {
+            // for (const Param& p : insns[i].params) 
+            //     if (p.kind == PK_REG && mappings[p.data.reg.id]) ranges.push(mappings[p.data.reg.id]);
+            //     else ranges.push(nullptr);
+            // for (LiveRange* r : f.starts_by_insn[i - f.first]) 
+            //     if (insns[i].params[0].kind == PK_REG && r->reg.id == insns[i].params[0].data.reg.id)
+            //         ranges[0] = r; // pull dest from freshly-started range
+            target.hint(insns[i], live_at[i - f.first]);
         }
 
         for (u64 i = f.first; i <= f.last; i ++) {
@@ -1861,6 +1956,17 @@ namespace jasmine {
 
             for (LiveRange* r : f.starts_by_insn[i - f.first]) {
                 bitset& kregs = *regs[r->type.kind];
+                if (r->loc.type != LT_NONE) { // already allocated in a previous interval
+                    if (r->loc.type == LT_REGISTER) {
+                        if (kregs.contains(*r->loc.reg)) { // remove register and continue
+                            kregs.erase(*r->loc.reg);
+                            mappings[*r->loc.reg] = r;
+                            continue; 
+                        }
+                        else r = mappings[*r->loc.reg]; // remap existing range and fall through
+                    }
+                }
+
                 if (kregs.begin() != kregs.end()) {
                     auto reg = r->hint && r->hint->type == LT_REGISTER ? *r->hint->reg : *kregs.begin();
                     // println("\tallocated %", r->reg.id, " to ", x64::REGISTER_NAMES[reg]);
@@ -2025,9 +2131,16 @@ namespace jasmine {
                 u32 ideal = ((obj.code().size() + 7) / 8) * 8;
                 x64::nop(ideal - obj.code().size()); // align branch targets to 8 bytes
             }
-            obj.define(*insn.label);
+            obj.define(*insn.label, OS_CODE);
         }
         using namespace x64;
+
+        static Condition conds_x64[6] = {
+            EQUAL, NOT_EQUAL,
+            LESS, LESS_OR_EQUAL,
+            GREATER, GREATER_OR_EQUAL
+        };
+
         switch (insn.opcode) {
             case OP_ADD:
                 commute_ternary(args);
@@ -2232,11 +2345,6 @@ namespace jasmine {
             case OP_JLE:
             case OP_JG:
             case OP_JGE:
-                static Condition conds_x64[6] = {
-                    EQUAL, NOT_EQUAL,
-                    LESS, LESS_OR_EQUAL,
-                    GREATER, GREATER_OR_EQUAL
-                };
                 cmp(args[1], args[2]);
                 jcc(args[0], conds_x64[insn.opcode - OP_JEQ]);
                 return;
@@ -2317,16 +2425,24 @@ namespace jasmine {
         vector<Insn> insns = insns_in;
 
         // platform-independent analysis
+        perf_begin("finding functions");
         vector<Function> functions = find_functions(ctx, insns);
+        perf_end("finding functions");
+
+        perf_begin("computing live ranges");
         for (Function& f : functions) compute_ranges(f, insns);
+        perf_end("computing live ranges");
 
         // associate virtual registers with native ones
+        perf_begin("allocating registers");
         for (Function& f : functions) allocate_registers(f, insns, target);
+        perf_end("allocating registers");
 
         Object obj(target); // create our destination object
         obj.set_context(ctx);
 
         // generate native instructions
+        perf_begin("generating native code");
         switch (target.arch) {
             case X86_64: 
                 for (Function& f : functions) generate_x64(f, insns, obj);
@@ -2335,6 +2451,7 @@ namespace jasmine {
                 panic("Unimplemented architecture!");
                 break;
         }
+        perf_end("generating native code");
 
         return obj;
     }

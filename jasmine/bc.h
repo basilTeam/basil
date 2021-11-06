@@ -10,7 +10,7 @@
 #ifndef JASMINE_BYTECODE_H
 #define JASMINE_BYTECODE_H
 
-#include "utils.h"
+#include "jutils.h"
 #include "util/io.h"
 #include "util/vec.h"
 #include "util/option.h"
@@ -139,14 +139,14 @@ namespace jasmine {
     struct LiveRange {
         Reg reg;
         Type type;
-        u64 first, last;
-        Location loc;
+        vector<pair<u64, u64>> intervals; // the list of intervals this variable is live over
+        Location loc = { LT_NONE, none<GenericRegister>(), none<i64>() };
         bitset illegal; // a set of registers this live range is forbidden from binding to
-        LiveRange* link; // a linked range that should mirror this one
         optional<u32> param_idx = none<u32>(); // which parameter this is
         optional<Location> hint = none<Location>();
 
-        LiveRange(Reg reg_in, Type type_in, u64 f, u64 l);
+        LiveRange();
+        LiveRange(Reg reg_in, Type type_in);
     };
 
     class Object;
@@ -251,8 +251,8 @@ namespace jasmine {
             type_recur(args...);
         }
 
-        void label(Symbol symbol);
-        void label(const char* symbol);
+        void label(Symbol symbol, ObjectSection section);
+        void label(const char* symbol, ObjectSection section);
         void global(Type type, Symbol symbol);
     }
     

@@ -59,12 +59,18 @@ typedef int64_t i64;
 
 // OS flags 
 
-#if defined(__amd64) || defined(__amd64__) || defined(__x86_64) || defined(__x86_64__)
+#if defined(__amd64) || defined(__amd64__) || defined(__x86_64) || defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
     #define BASIL_X86_64
-#elif defined(__i386) || defined(__i386__) || defined(__x86) || defined(__x86__)
+#elif defined(__i386) || defined(__i386__) || defined(__x86) || defined(__x86__) || defined(_M_IX86)
     #define BASIL_X86_32
-#elif defined(__aarch64) || defined(__aarch64__)
+#elif defined(__aarch64) || defined(__aarch64__) || defined(_M_ARM)
     #define BASIL_AARCH64
+#endif
+
+#if defined(_MSC_VER)
+    #define OBJ_FILE_EXT ".obj"
+#else
+    #define OBJ_FILE_EXT ".o"
 #endif
 
 #if defined(_WIN32) || defined(_WIN64) || defined(__CYGWIN__)
@@ -76,7 +82,6 @@ typedef int64_t i64;
     #define BASIL_UNIX
     #define BASIL_LINUX
 #endif
-
 
 // hash.h
 
@@ -95,7 +100,7 @@ class buffer;
 // option.h
 
 template<typename T>
-struct option;
+struct optional;
 
 // slice.h
 

@@ -60,6 +60,24 @@ T from_little_endian(T value) {
     return flip_endian(value);
 }
 
+template<>
+float big_endian(float f);
+template<>
+double big_endian(double f);
+template<>
+float little_endian(float f);
+template<>
+double little_endian(double f);
+
+template<>
+float from_big_endian(float f);
+template<>
+double from_big_endian(double f);
+template<>
+float from_little_endian(float f);
+template<>
+double from_little_endian(double f);
+
 class bytebuf {
     u64 _start;
     u64 _end;

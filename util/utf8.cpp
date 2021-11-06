@@ -21,6 +21,198 @@ rune::operator uint32_t&() {
 	return u;
 }
 
+static UnicodeError ERROR = NO_ERROR;
+
+UnicodeError unicode_error() {
+    return ERROR;
+}
+
+static const uint8_t UTF8_FOUR = 0b11110000,
+            UTF8_THREE = 0b11100000,
+            UTF8_TWO = 0b11000000,
+            UTF8_INNER = 0b10000000;
+
+static const uint8_t UTF8_ONE_MASK = 0b01111111,
+            UTF8_INNER_MASK = 0b00111111,
+            UTF8_TWO_MASK = 0b00011111,
+            UTF8_THREE_MASK = 0b00001111,
+            UTF8_FOUR_MASK = 0b00000111;
+
+static const uint32_t UTF8_ONE_MAX = 0x7f,
+            UTF8_TWO_MAX = 0x7ff,
+            UTF8_THREE_MAX = 0xffff,
+            UTF8_FOUR_MAX = 0x1fffff;
+
+const char* utf8_forward(const char* str) {
+	unsigned char ch = *str;
+	if (ch < UTF8_TWO) return str + 1;
+	else if (ch < UTF8_THREE) return str + 2;
+	else if (ch < UTF8_FOUR) return str + 3;
+	else return str + 4;
+}
+
+const char* utf8_backward(const char* str) {
+	str --;
+	while ((*str & 0b11000000) == 0b10000000) str --;
+	return str;
+}
+
+rune rune_at(const char* str) {
+	if ((unsigned char)str[0] < UTF8_INNER) {
+		return str[0] & UTF8_ONE_MASK;
+	}
+	else if ((unsigned char)str[0] < UTF8_THREE) {
+		return (rune)(str[0] & UTF8_TWO_MASK) << 6 
+					| (rune)(str[1] & UTF8_INNER_MASK);
+	}
+	else if ((unsigned char)str[0] < UTF8_FOUR) {
+		return (rune)(str[0] & UTF8_THREE_MASK) << 12 
+					| (rune)(str[1] & UTF8_INNER_MASK) << 6 
+					| (rune)(str[2] & UTF8_INNER_MASK);
+	}
+	else {
+		return (rune)(str[0] & UTF8_FOUR_MASK) << 18 
+					| (rune)(str[1] & UTF8_INNER_MASK) << 12 
+					| (rune)(str[2] & UTF8_INNER_MASK) << 6 
+					| (rune)(str[3] & UTF8_INNER_MASK);
+	}
+}
+
+const char* utf8_decode_forward(const char* str, rune* out) {
+	*out = rune_at(str);
+	return utf8_forward(str);
+}
+
+const char* utf8_decode_backward(const char* str, rune* out) {
+	str = utf8_backward(str);
+	*out = rune_at(str);
+	return str;
+}
+
+unsigned long int utf8_length(const char* str, unsigned long int str_length) {
+    unsigned long int i = 0, n = 0;
+    while (i < str_length) {
+        if ((unsigned char)str[i] < UTF8_TWO) ++ n, ++ i;
+        else if ((unsigned char)str[i] < UTF8_THREE) ++ n, i += 2;
+        else if ((unsigned char)str[i] < UTF8_FOUR) ++ n, i += 3;
+        else ++ n, i += 4;
+    }
+    if (i != str_length) ERROR = INCORRECT_FORMAT;
+    return n;
+}
+
+unsigned long int utf8_decode(const char* str, unsigned long int str_length, 
+                              rune* out, unsigned long int out_length) {
+    unsigned long int i = 0, n = 0;
+    while (i < str_length && n < out_length) {
+        if ((unsigned char)str[i] < UTF8_INNER) {
+            out[n] = str[i] & UTF8_ONE_MASK;
+            ++ n, ++ i;
+        }
+        else if ((unsigned char)str[i] < UTF8_THREE) {
+            if (i > str_length - 1) {
+                ERROR = RAN_OUT_OF_BOUNDS;
+                return n;
+            }
+            else out[n] = (rune)(str[i] & UTF8_TWO_MASK) << 6 
+                        | (rune)(str[i + 1] & UTF8_INNER_MASK);
+            ++ n, i += 2;
+        }
+        else if ((unsigned char)str[i] < UTF8_FOUR) {
+            if (i > str_length - 2) {
+                ERROR = RAN_OUT_OF_BOUNDS;
+                return n;
+            }
+            else out[n] = (rune)(str[i] & UTF8_THREE_MASK) << 12 
+                        | (rune)(str[i + 1] & UTF8_INNER_MASK) << 6 
+                        | (rune)(str[i + 2] & UTF8_INNER_MASK);
+            ++ n, i += 3;
+        }
+        else {
+            if (i > str_length - 3) {
+                ERROR = RAN_OUT_OF_BOUNDS;
+                return n;
+            }
+            else out[n] = (rune)(str[i] & UTF8_FOUR_MASK) << 18 
+                        | (rune)(str[i + 1] & UTF8_INNER_MASK) << 12 
+                        | (rune)(str[i + 2] & UTF8_INNER_MASK) << 6 
+                        | (rune)(str[i + 3] & UTF8_INNER_MASK);
+            ++ n, i += 4;
+        }
+    }
+    if (i != str_length) ERROR = INCORRECT_FORMAT;
+    return n;
+}
+
+unsigned long int utf8_encode(const rune* str, unsigned long int str_length,
+                              char* out, unsigned long int out_length) {
+    unsigned long int i = 0, n = 0;
+    while (i < str_length && n < out_length) {
+        if (str[i] <= UTF8_ONE_MAX) {
+            out[n] = str[i] & UTF8_ONE_MASK;
+            ++ n, ++ i;
+        }
+        else if (str[i] <= UTF8_TWO_MAX) {
+            if (n > out_length - 1) {
+                ERROR = BUFFER_TOO_SMALL;
+                return n;
+            }
+            else {
+                out[n] = (str[i] >> 6 & UTF8_TWO_MASK) | UTF8_TWO;
+                out[n + 1] = (str[i] & UTF8_INNER_MASK) | UTF8_INNER;
+            }
+            n += 2, ++ i;
+        }
+        else if (str[i] <= UTF8_THREE_MAX) {
+            if (n > out_length - 2) {
+                ERROR = BUFFER_TOO_SMALL;
+                return n;
+            }
+            else {
+                out[n] = (str[i] >> 12 & UTF8_THREE_MASK) | UTF8_THREE;
+                out[n + 1] = (str[i] >> 6 & UTF8_INNER_MASK) | UTF8_INNER;
+                out[n + 2] = (str[i] & UTF8_INNER_MASK) | UTF8_INNER;
+            }
+            n += 3, ++ i;
+        }
+        else if (str[i] <= UTF8_FOUR_MAX) {
+            if (n > out_length - 3) {
+                ERROR = BUFFER_TOO_SMALL;
+                return n;
+            }
+            else {
+                out[n] = (str[i] >> 18 & UTF8_FOUR_MASK) | UTF8_FOUR;
+                out[n + 1] = (str[i] >> 12 & UTF8_INNER_MASK) | UTF8_INNER;
+                out[n + 2] = (str[i] >> 6 & UTF8_INNER_MASK) | UTF8_INNER;
+                out[n + 3] = (str[i] & UTF8_INNER_MASK) | UTF8_INNER;
+            }
+            n += 4, ++ i;
+        }
+        else {
+            ERROR = INVALID_RUNE;
+            return n;
+        }
+    }
+    if (i != str_length) ERROR = INCORRECT_FORMAT;
+    return n;
+}
+
+unsigned long int utf16_length(const char* str, unsigned long int str_length) {
+    return 0; // todo
+}
+
+unsigned long int utf16_decode(const char* str, unsigned long int str_length, 
+                               rune* out, unsigned long int out_length) {
+    return 0; // todo
+}
+
+unsigned long int utf16_encode(const rune* str, unsigned long int str_length,
+                               char* out, unsigned long int out_length) {
+    return 0; // todo
+}
+
+#ifndef UTF8_MINIMAL
+
 typedef struct {
     rune start;
     rune end;
@@ -58,7 +250,7 @@ static const range format_chars[] = { //  Cf
 	{ 0xe0020, 0xe007f }
 };
 
-static const range not_assigned_chars[] = {}; // Cn
+// static const range not_assigned_chars[] = {}; // Cn
 
 static const range private_use_chars[] = { //  Co
 	{ 0xe000, 0xe000 },
@@ -76,7 +268,7 @@ static const range surrogate_chars[] = { //  Cs
 	{ 0xdfff, 0xdfff }
 };
 
-static const range cased_letters[] = {}; //  LC
+// static const range cased_letters[] = {}; //  LC
 
 static const range lowercase_letters[] = { //  Ll
 	{ 0x61, 0x7a },
@@ -3769,8 +3961,8 @@ static const range separators[] = { //  Z
 
 static const range * const specific_categories[] = {
     0, // invalid
-    control_chars, format_chars, not_assigned_chars, private_use_chars, surrogate_chars,
-    cased_letters, lowercase_letters, letter_modifiers, other_letters, titlecase_letters, uppercase_letters,
+    control_chars, format_chars, /* not_assigned_chars */ nullptr, private_use_chars, surrogate_chars,
+    /* cased_letters */ nullptr, lowercase_letters, letter_modifiers, other_letters, titlecase_letters, uppercase_letters,
     spacing_combining_marks, enclosing_marks, nonspacing_marks,
     decimal_digits, letter_numbers, other_numbers,
     punctuation_connectors, dashes, punctuation_closes, final_quotes, initial_quotes, other_punctuation, punctuation_opens,
@@ -3782,8 +3974,8 @@ static const range * const specific_categories[] = {
 
 static const int specific_lengths[] = {
     0, // invalid
-    LEN(control_chars), LEN(format_chars), LEN(not_assigned_chars), LEN(private_use_chars), LEN(surrogate_chars),
-    LEN(cased_letters), LEN(lowercase_letters), LEN(letter_modifiers), LEN(other_letters), LEN(titlecase_letters), LEN(uppercase_letters),
+    LEN(control_chars), LEN(format_chars), /* LEN(not_assigned_chars) */ 0, LEN(private_use_chars), LEN(surrogate_chars),
+    /* LEN(cased_letters) */ 0, LEN(lowercase_letters), LEN(letter_modifiers), LEN(other_letters), LEN(titlecase_letters), LEN(uppercase_letters),
     LEN(spacing_combining_marks), LEN(enclosing_marks), LEN(nonspacing_marks),
     LEN(decimal_digits), LEN(letter_numbers), LEN(other_numbers),
     LEN(punctuation_connectors), LEN(dashes), LEN(punctuation_closes), LEN(final_quotes), LEN(initial_quotes), LEN(other_punctuation), LEN(punctuation_opens),
@@ -3836,196 +4028,6 @@ static int inited = 0;
     }
 #endif
 
-static UnicodeError ERROR = NO_ERROR;
-
-UnicodeError unicode_error() {
-    return ERROR;
-}
-
-static const uint8_t UTF8_FOUR = 0b11110000,
-            UTF8_THREE = 0b11100000,
-            UTF8_TWO = 0b11000000,
-            UTF8_INNER = 0b10000000;
-
-static const uint8_t UTF8_ONE_MASK = 0b01111111,
-            UTF8_INNER_MASK = 0b00111111,
-            UTF8_TWO_MASK = 0b00011111,
-            UTF8_THREE_MASK = 0b00001111,
-            UTF8_FOUR_MASK = 0b00000111;
-
-static const uint32_t UTF8_ONE_MAX = 0x7f,
-            UTF8_TWO_MAX = 0x7ff,
-            UTF8_THREE_MAX = 0xffff,
-            UTF8_FOUR_MAX = 0x1fffff;
-
-const char* utf8_forward(const char* str) {
-	unsigned char ch = *str;
-	if (ch < UTF8_TWO) return str + 1;
-	else if (ch < UTF8_THREE) return str + 2;
-	else if (ch < UTF8_FOUR) return str + 3;
-	else return str + 4;
-}
-
-const char* utf8_backward(const char* str) {
-	str --;
-	while ((*str & 0b11000000) == 0b10000000) str --;
-	return str;
-}
-
-rune rune_at(const char* str) {
-	if ((unsigned char)str[0] < UTF8_INNER) {
-		return str[0] & UTF8_ONE_MASK;
-	}
-	else if ((unsigned char)str[0] < UTF8_THREE) {
-		return (rune)(str[0] & UTF8_TWO_MASK) << 6 
-					| (rune)(str[1] & UTF8_INNER_MASK);
-	}
-	else if ((unsigned char)str[0] < UTF8_FOUR) {
-		return (rune)(str[0] & UTF8_THREE_MASK) << 12 
-					| (rune)(str[1] & UTF8_INNER_MASK) << 6 
-					| (rune)(str[2] & UTF8_INNER_MASK);
-	}
-	else {
-		return (rune)(str[0] & UTF8_FOUR_MASK) << 18 
-					| (rune)(str[1] & UTF8_INNER_MASK) << 12 
-					| (rune)(str[2] & UTF8_INNER_MASK) << 6 
-					| (rune)(str[3] & UTF8_INNER_MASK);
-	}
-}
-
-const char* utf8_decode_forward(const char* str, rune* out) {
-	*out = rune_at(str);
-	return utf8_forward(str);
-}
-
-const char* utf8_decode_backward(const char* str, rune* out) {
-	str = utf8_backward(str);
-	*out = rune_at(str);
-	return str;
-}
-
-unsigned long int utf8_length(const char* str, unsigned long int str_length) {
-    unsigned long int i = 0, n = 0;
-    while (i < str_length) {
-        if ((unsigned char)str[i] < UTF8_TWO) ++ n, ++ i;
-        else if ((unsigned char)str[i] < UTF8_THREE) ++ n, i += 2;
-        else if ((unsigned char)str[i] < UTF8_FOUR) ++ n, i += 3;
-        else ++ n, i += 4;
-    }
-    if (i != str_length) ERROR = INCORRECT_FORMAT;
-    return n;
-}
-
-unsigned long int utf8_decode(const char* str, unsigned long int str_length, 
-                              rune* out, unsigned long int out_length) {
-    unsigned long int i = 0, n = 0;
-    while (i < str_length && n < out_length) {
-        if ((unsigned char)str[i] < UTF8_INNER) {
-            out[n] = str[i] & UTF8_ONE_MASK;
-            ++ n, ++ i;
-        }
-        else if ((unsigned char)str[i] < UTF8_THREE) {
-            if (i > str_length - 1) {
-                ERROR = RAN_OUT_OF_BOUNDS;
-                return n;
-            }
-            else out[n] = (rune)(str[i] & UTF8_TWO_MASK) << 6 
-                        | (rune)(str[i + 1] & UTF8_INNER_MASK);
-            ++ n, i += 2;
-        }
-        else if ((unsigned char)str[i] < UTF8_FOUR) {
-            if (i > str_length - 2) {
-                ERROR = RAN_OUT_OF_BOUNDS;
-                return n;
-            }
-            else out[n] = (rune)(str[i] & UTF8_THREE_MASK) << 12 
-                        | (rune)(str[i + 1] & UTF8_INNER_MASK) << 6 
-                        | (rune)(str[i + 2] & UTF8_INNER_MASK);
-            ++ n, i += 3;
-        }
-        else {
-            if (i > str_length - 3) {
-                ERROR = RAN_OUT_OF_BOUNDS;
-                return n;
-            }
-            else out[n] = (rune)(str[i] & UTF8_FOUR_MASK) << 18 
-                        | (rune)(str[i + 1] & UTF8_INNER_MASK) << 12 
-                        | (rune)(str[i + 2] & UTF8_INNER_MASK) << 6 
-                        | (rune)(str[i + 3] & UTF8_INNER_MASK);
-            ++ n, i += 4;
-        }
-    }
-    if (i != str_length) ERROR = INCORRECT_FORMAT;
-    return n;
-}
-
-unsigned long int utf8_encode(const rune* str, unsigned long int str_length,
-                              char* out, unsigned long int out_length) {
-    unsigned long int i = 0, n = 0;
-    while (i < str_length && n < out_length) {
-        if (str[i] <= UTF8_ONE_MAX) {
-            out[n] = str[i] & UTF8_ONE_MASK;
-            ++ n, ++ i;
-        }
-        else if (str[i] <= UTF8_TWO_MAX) {
-            if (n > out_length - 1) {
-                ERROR = BUFFER_TOO_SMALL;
-                return n;
-            }
-            else {
-                out[n] = (str[i] >> 6 & UTF8_TWO_MASK) | UTF8_TWO;
-                out[n + 1] = (str[i] & UTF8_INNER_MASK) | UTF8_INNER;
-            }
-            n += 2, ++ i;
-        }
-        else if (str[i] <= UTF8_THREE_MAX) {
-            if (n > out_length - 2) {
-                ERROR = BUFFER_TOO_SMALL;
-                return n;
-            }
-            else {
-                out[n] = (str[i] >> 12 & UTF8_THREE_MASK) | UTF8_THREE;
-                out[n + 1] = (str[i] >> 6 & UTF8_INNER_MASK) | UTF8_INNER;
-                out[n + 2] = (str[i] & UTF8_INNER_MASK) | UTF8_INNER;
-            }
-            n += 3, ++ i;
-        }
-        else if (str[i] <= UTF8_FOUR_MAX) {
-            if (n > out_length - 3) {
-                ERROR = BUFFER_TOO_SMALL;
-                return n;
-            }
-            else {
-                out[n] = (str[i] >> 18 & UTF8_FOUR_MASK) | UTF8_FOUR;
-                out[n + 1] = (str[i] >> 12 & UTF8_INNER_MASK) | UTF8_INNER;
-                out[n + 2] = (str[i] >> 6 & UTF8_INNER_MASK) | UTF8_INNER;
-                out[n + 3] = (str[i] & UTF8_INNER_MASK) | UTF8_INNER;
-            }
-            n += 4, ++ i;
-        }
-        else {
-            ERROR = INVALID_RUNE;
-            return n;
-        }
-    }
-    if (i != str_length) ERROR = INCORRECT_FORMAT;
-    return n;
-}
-
-unsigned long int utf16_length(const char* str, unsigned long int str_length) {
-    return 0; // todo
-}
-
-unsigned long int utf16_decode(const char* str, unsigned long int str_length, 
-                               rune* out, unsigned long int out_length) {
-    return 0; // todo
-}
-
-unsigned long int utf16_encode(const rune* str, unsigned long int str_length,
-                               char* out, unsigned long int out_length) {
-    return 0; // todo
-}
-
 int utf8_digit_value(rune digit) {
     int range = find(decimal_digits, (sizeof(decimal_digits)) / sizeof(range), digit);
 	if (range == -1) { // Not a digit
@@ -4063,7 +4065,7 @@ int utf8_is_not_assigned(rune r) {
     #ifdef INCLUDE_UTF8_LOOKUP_TABLE
         return lookup(r, UNICODE_NOT_ASSIGNED, UNICODE_NOT_ASSIGNED);
     #else
-        return find(not_assigned_chars, sizeof(not_assigned_chars) / sizeof(range), r) != -1;
+        return 0; // find(not_assigned_chars, sizeof(not_assigned_chars) / sizeof(range), r) != -1;
     #endif
 }
 
@@ -4095,7 +4097,7 @@ int utf8_is_cased_letter(rune r) {
     #ifdef INCLUDE_UTF8_LOOKUP_TABLE
         return lookup(r, UNICODE_CASED_LETTER, UNICODE_CASED_LETTER);
     #else
-        return find(cased_letters, sizeof(cased_letters) / sizeof(range), r) != -1;
+        return 0; // find(cased_letters, sizeof(cased_letters) / sizeof(range), r) != -1;
     #endif
 }
 
@@ -4338,3 +4340,5 @@ int utf8_is_space_separator(rune r) {
         return find(spaces, sizeof(spaces) / sizeof(range), r) != -1;
     #endif
 }
+
+#endif

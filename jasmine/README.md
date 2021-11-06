@@ -48,7 +48,7 @@ We'll be adding a more convenient single header, along with static and dynamic J
 
 Operating Systems:
  - [x] Linux
- - [ ] Windows
+ - [x] Windows
  - [x] MacOS
 
 Planned Architectures:

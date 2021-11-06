@@ -10,7 +10,7 @@
 #ifndef JASMINE_OBJECT_H
 #define JASMINE_OBJECT_H
 
-#include "utils.h"
+#include "jutils.h"
 #include "target.h"
 #include "sym.h"
 #include "bc.h"
@@ -29,19 +29,29 @@ namespace jasmine {
         i8 field_offset;
     };
 
+    struct SymbolLocation {
+        ObjectSection section : 2;
+        u64 offset : 62;
+    };
+
+    bool operator==(const SymbolLocation& a, const SymbolLocation& b);
+
     struct Context;
 
     class Object {
         Target target;
-        bytebuf buf;
+        bytebuf codebuf, databuf, staticbuf;
         Context ctx;
-        map<Symbol, u64> defs;
-        map<u64, Symbol> def_positions;
-        map<u64, SymbolRef> refs;
-        void* loaded_code;
+        map<Symbol, SymbolLocation> defs;
+        map<SymbolLocation, Symbol> def_positions;
+        map<SymbolLocation, SymbolRef> refs;
+        void *loaded_code, *loaded_data, *loaded_static;
 
         void resolve_refs();
         void resolve_ELF_addends();
+        void writeELF(FILE* file);
+        void writeMachO(FILE* file);
+        void writeCOFF(FILE* file);
     public:
         Object(const Target& target = DEFAULT_TARGET);
         Object(const char* path, const Target& target = DEFAULT_TARGET);
@@ -51,22 +61,34 @@ namespace jasmine {
         Object(Object&& other);
         Object& operator=(Object&& other);
 
-        const map<Symbol, u64>& symbols() const;
-        const map<u64, SymbolRef>& references() const;
-        const map<u64, Symbol>& symbol_positions() const;
+        const map<Symbol, SymbolLocation>& symbols() const;
+        const map<SymbolLocation, SymbolRef>& references() const;
+        const map<SymbolLocation, Symbol>& symbol_positions() const;
+
         const bytebuf& code() const;
         bytebuf& code();
-        u64 size() const;
-        void define(Symbol symbol);
+        const bytebuf& data() const;
+        bytebuf& data();
+        const bytebuf& stat() const;
+        bytebuf& stat();
+        const bytebuf& get(ObjectSection section) const;
+        bytebuf& get(ObjectSection section);
+        void* get_loaded(ObjectSection section) const;
+        u64 size(ObjectSection section) const;
+
+        void define(Symbol symbol, ObjectSection section);
         void define_native(Symbol symbol, void* address);
-        void reference(Symbol symbol, RefType type, i8 field_offset);
+        void reference(Symbol symbol, ObjectSection section, RefType type, i8 field_offset);
+
         void load();
         void write(const char* path);
         void read(const char* path);
         void write(FILE* file);
         void read(FILE* file);
-        void writeELF(const char* path);
-        void writeELF(FILE* file);
+        void writeObj(const char* path);
+        void writeObj(FILE* file);
+        void append(const Object& other);
+
         Context& get_context();
         const Context& get_context() const;
         void set_context(const Context& ctx);
@@ -81,6 +103,9 @@ namespace jasmine {
         }
     };
 }
+
+template<>
+u64 hash(const jasmine::SymbolLocation& symbol);
 
 template<>
 u64 hash(const jasmine::SymbolRef& symbol);

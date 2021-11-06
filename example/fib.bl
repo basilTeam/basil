@@ -1,10 +1,7 @@
 # Computes fib(10) recursively.
 
-def fib n? =
+def fib (n? : Int) =
     if n < 2 then 
         n 
     else 
         (fib n - 1) + (fib n - 2)
-
-fib 10 # 55
-

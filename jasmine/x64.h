@@ -11,7 +11,7 @@
 #define JASMINE_X64_H
 
 #include "utils.h"
-#include "obj.h"
+#include "jobj.h"
 
 namespace jasmine::x64 {
     enum Register : u8 {
@@ -265,8 +265,8 @@ namespace jasmine::x64 {
     void cdq();
     void ret();
     void syscall();
-    void label(jasmine::Symbol symbol);
-    void label(const char* name);
+    void label(jasmine::Symbol symbol, ObjectSection section);
+    void label(const char* name, ObjectSection section);
     void jmp(const Arg& dest, Size size = AUTO);
     void jcc(const Arg& dest, Condition condition);
     void call(const Arg& dest, Size size = AUTO);
@@ -275,13 +275,14 @@ namespace jasmine::x64 {
 
     // Pseudo-instructions that embed raw data in the text section of an
     // object file.
-    void lit8(u8 val);
-    void lit16(u16 val);
-    void lit32(u32 val);
-    void lit64(u64 val);
-    void litf32(float f);
-    void litf64(double d);
-    void rel32(jasmine::Symbol symbol);
+    void lit8(u8 val, ObjectSection section = OS_DATA);
+    void lit16(u16 val, ObjectSection section = OS_DATA);
+    void lit32(u32 val, ObjectSection section = OS_DATA);
+    void lit64(u64 val, ObjectSection section = OS_DATA);
+    void litf32(float f, ObjectSection section = OS_DATA);
+    void litf64(double d, ObjectSection section = OS_DATA);
+    void litstr(const ustring& s, ObjectSection section = OS_DATA);
+    void rel32(jasmine::Symbol symbol, ObjectSection section = OS_DATA);
     void nop32(u32 val); // embeds 32-bit immediate in nop. 4-byte aligned
 }
 

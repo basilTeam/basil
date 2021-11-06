@@ -7,7 +7,7 @@
  * of this project.
  */
 
-#include "obj.h"
+#include "jobj.h"
 #include "target.h"
 #include "util/io.h"
 #include "bc.h"
@@ -212,7 +212,7 @@ int main(int argc, const char** argv) {
                 usage_error(argc, argv, "Object file does not contain native machine code.");
                 return 0;
             }
-            obj.writeELF(fout);
+            obj.writeObj(fout);
             return 0;
         }
     }

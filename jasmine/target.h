@@ -21,6 +21,13 @@ namespace jasmine {
     class Object;
     struct Symbol;
 
+    enum ObjectSection {
+        OS_UNDEF,
+        OS_CODE,
+        OS_DATA,
+        OS_STATIC
+    };
+
     enum Architecture : u16 {
         UNSUPPORTED_ARCH = 0,
         X86_64 = 1,

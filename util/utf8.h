@@ -9,9 +9,7 @@
 
 #ifndef BASIL_UTF8_H
 #define BASIL_UTF8_H
-
-#include "defs.h"
-#include "panic.h"
+#include "stdint.h"
 
 // representation of a single unicode character
 struct rune {
@@ -106,6 +104,8 @@ unsigned long int utf16_decode(const char* str, unsigned long int str_length,
 unsigned long int utf16_encode(const rune* str, unsigned long int str_length,
                                char* out, unsigned long int out_length);
 
+#ifndef UTF8_MINIMAL
+
 // returns the decimal digit value of the provided rune. sets error if rune is not a digit
 int utf8_digit_value(rune r);
 
@@ -153,5 +153,7 @@ int utf8_is_separator(rune r);
 int utf8_is_line_separator(rune r);
 int utf8_is_paragraph_separator(rune r);
 int utf8_is_space_separator(rune r);
+
+#endif
 
 #endif

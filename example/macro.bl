@@ -1,0 +1,16 @@
+def interleave (xs? : [Any]) val? =
+    match xs with:
+        x? :: () => [x]
+        hd? :: tl? => hd :: val :: interleave tl val
+
+macro sum :xs...? = interleave xs :+
+
+def replist item? n? =
+    if n == 0 then () else item :: (replist item n - 1)
+
+macro repeat :expr? (n? : Int) = replist expr n
+
+macro xs?... = xs
+
+macro let :name? :params? :body? =
+    (list :def name params :? := [body])

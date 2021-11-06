@@ -9,11 +9,11 @@
 
 #include "sys.h"
 
-extern void* _mmap(void*, u64, u64, u64) asm("_mmap");
-extern void _munmap(void*, u64) asm("_munmap");
-extern void _exit(u64) asm("_exit");
-extern i64 _read(u64, char*, u64) asm("_read");
-extern i64 _write(u64, const char*, u64) asm("_write");
+extern "C" void* _sys_mmap(void*, u64, u64, u64);
+extern "C" void _sys_munmap(void*, u64);
+extern "C" void _sys_exit(u64);
+extern "C" i64 _sys_read(u64, char*, u64);
+extern "C" i64 _sys_write(u64, const char*, u64);
 
 /* * * * * * * * * * * * * * * *
  *                             *
@@ -22,12 +22,10 @@ extern i64 _write(u64, const char*, u64) asm("_write");
  * * * * * * * * * * * * * * * */
 
 #ifdef BASIL_WINDOWS
-#include "fileapi.h"
-#include "memoryapi.h"
-#include "processthreadsapi.h"
+#include "windows.h"
 #endif
 
-inline void* _mmap(void* addr, u64 len, u64 prot, u64 flags) {
+extern "C" void* _sys_mmap(void* addr, u64 len, u64 prot, u64 flags) {
     #if defined(BASIL_UNIX)
         #ifdef __APPLE__
             #define MMAP_CODE "0x20000C5"
@@ -76,7 +74,7 @@ inline void* _mmap(void* addr, u64 len, u64 prot, u64 flags) {
     #endif
 }
 
-inline void _munmap(void* addr, u64 len) {
+extern "C" void _sys_munmap(void* addr, u64 len) {
     #if defined(BASIL_UNIX)
         #ifdef __APPLE__
             #define MUNMAP_CODE "0x2000049"
@@ -98,7 +96,7 @@ inline void _munmap(void* addr, u64 len) {
     #endif
 }
 
-inline void _exit(u64 ret) {
+extern "C" void _sys_exit(u64 ret) {
     #if defined(BASIL_UNIX)
         #ifdef __APPLE__
             #define EXIT_CODE "0x2000001"
@@ -118,7 +116,7 @@ inline void _exit(u64 ret) {
     #endif
 }
 
-inline i64 _read(u64 fd, char* buf, u64 len) {
+extern "C" i64 _sys_read(u64 fd, char* buf, u64 len) {
     #if defined(BASIL_UNIX)
         #ifdef __APPLE__
             #define READ_CODE "0x2000003"
@@ -146,7 +144,7 @@ inline i64 _read(u64 fd, char* buf, u64 len) {
     #endif
 }
 
-inline i64 _write(u64 fd, const char* text, u64 len) {
+extern "C" i64 _sys_write(u64 fd, const char* text, u64 len) {
     #if defined(BASIL_UNIX)
         #if defined(BASIL_MACOS)
             #define WRITE_CODE "0x2000004"
@@ -174,202 +172,228 @@ inline i64 _write(u64 fd, const char* text, u64 len) {
     #endif
 }
 
-extern "C" void* memcpy(void* dst, const void* src, size_t size) {
+extern "C" void* _sys_memcpy(void* dst, const void* src, size_t size) {
     int i = 0;
-    while (i < (size & ~7)) *(u64*)dst = *(u64*)src, i += 8;
-    while (i < size) *(u8*)dst = *(u8*)src, i ++;
+    while (i < (size & ~7)) ((u64*)dst)[i] = ((u64*)src)[i], i += 8;
+    while (i < size) ((u8*)dst)[i] = ((u8*)src)[i], i ++;
     return nullptr;
 }
 
-void exit(u64 code) {
-    _exit(code);
-}
+#define UTF8_MINIMAL
+// #include "util/utf8.cpp"
+#undef UTF8_MINIMAL
 
-struct stream {
-    i32 fd;
-    u32 start, end;
-    char buf[4096];
-};
-
-static stream internal_stdout = { 1, 0, 0 }, 
-    internal_stdin = { 0, 0, 0 };
-
-stream &_stdout = internal_stdout, 
-    &_stdin = internal_stdin;
-
-static void flush_input(stream& io) {
-    memcpy(io.buf, io.buf + io.start, io.end - io.start);
-    io.end -= io.start, io.start = 0;
-    i64 amt = _read(io.fd, io.buf + io.end, 4096 - (io.end - io.start));
-    io.end += amt;
-}
-
-static void flush_output(stream& io) {
-    _write(io.fd, io.buf + io.start, io.end - io.start);
-    io.end = io.start;
-}
-
-static void push_if_necessary(stream& io, u32 n = 64) {
-    if (4096 - io.end < n) flush_output(io);
-}
-
-static void pull_if_necessary(stream& io, u32 n = 64) {
-    if (io.end - io.start < n) flush_input(io);
-}
-
-static inline void put(stream& io, u8 c) {
-    io.buf[io.end ++] = c;
-    if (&io == &_stdout && c == '\n') flush_output(io);
-}
-
-static inline void write_uint(stream& io, u64 u) {
-    if (!u) return put(io, '0');
-    int c = 0, d = 0;
-    u64 p = 1;
-    while (p < u) p *= 10, ++ c;
-    d = c;
-    while (u) {
-        io.buf[io.end + c] = '0' + u % 10; 
-        u /= 10;
-        -- c;
+namespace sys {
+    void exit(u64 code) {
+        _sys_exit(code);
     }
-    io.end += d + 1;
-}
 
-static inline void write_int(stream& io, i64 i) {
-    if (i < 0) put(io, '-'), i = -i;
-    write_uint(io, i); 
-}
+    #define STREAMBUF_SIZE 4080
+    #define N_STREAMS 65536
 
-void write(stream& io, const char* str, u32 n) {
-    push_if_necessary(io, (n + 63) / 64 * 64);
-    if (&io == &_stdout) for (u32 i = 0; i < n; i ++) {
-        io.buf[io.end ++] = str[i];
-        if (str[i] == '\n') flush_output(io);
+    struct stream {
+        i32 fd;
+        u32 start, end, unused;
+        char buf[STREAMBUF_SIZE];
+    };
+
+    static stream* _sys_streams[N_STREAMS];
+
+    static_assert(sizeof(stream) == 4096);
+
+    stream* new_stream(i32 fd) {
+        stream* s = (stream*)_sys_mmap(nullptr, sizeof(stream), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED);
+        s->fd = fd;
+        s->start = 0;
+        s->end = 0;
+        return s;
     }
-    else memcpy(io.buf + io.end, str, n);
-}
 
-void write(stream& io, const char& c) {
-    push_if_necessary(io);
-    put(io, c);
-}
-
-void write(stream& io, const u8& c) {
-    push_if_necessary(io);
-    put(io, c);
-}
-
-void write(stream& io, const u16& u) {
-    push_if_necessary(io);
-    write_uint(io, u);
-}
-
-void write(stream& io, const u32& u) {
-    push_if_necessary(io);
-    write_uint(io, u);
-}
-
-void write(stream& io, const u64& u) {
-    push_if_necessary(io);
-    write_uint(io, u);
-}
-
-void write(stream& io, const i8& c) {
-    push_if_necessary(io);
-    put(io, c);
-}
-
-void write(stream& io, const i16& i) {
-    push_if_necessary(io);
-    write_int(io, i);
-}
-
-void write(stream& io, const i32& i) {
-    push_if_necessary(io);
-    write_int(io, i);
-}
-
-void write(stream& io, const i64& i) {
-    push_if_necessary(io);
-    write_int(io, i);
-}
-
-bool isdigit(char c) {
-    return c >= '0' && c <= '9';
-}
-
-u64 read_uint(stream& io) {
-    u64 acc = 0;
-    u8 i = 0;
-    while (isdigit(io.buf[io.start]) && i < 18) {
-        acc *= 10;
-        acc += io.buf[io.start] - '0';
-        i ++;
-        io.start ++;
+    void init_io() {
+        _sys_streams[0] = new_stream(0); // stdin
+        _sys_streams[1] = new_stream(1); // stdout
+        _sys_streams[2] = new_stream(2); // stderr
+        for (u32 i = 0; i < N_STREAMS; i ++) _sys_streams[i] = nullptr; // ensure zero init
     }
-    return acc;
-}
 
-i64 read_int(stream& io) {
-    i64 i = 1;
-    if (io.buf[io.start] == '-') i = -1;
-    return i * read_uint(io);
-}
+    stream& io_for_fd(i64 i) {
+        return *_sys_streams[i];
+    }
 
-void read(stream& io, char* str, u32 n) {
-    while (n >= 4096) {
+    static void flush_input(stream& io) {
+        memcpy(io.buf, io.buf + io.start, io.end - io.start);
+        io.end -= io.start, io.start = 0;
+        i64 amt = _sys_read(io.fd, io.buf + io.end, 4096 - (io.end - io.start));
+        io.end += amt;
+    }
+
+    static void flush_output(stream& io) {
+        _sys_write(io.fd, io.buf + io.start, io.end - io.start);
+        io.end = io.start;
+    }
+
+    static void push_if_necessary(stream& io, u32 n = 64) {
+        if (4096 - io.end < n) flush_output(io);
+    }
+
+    static void pull_if_necessary(stream& io, u32 n = 64) {
+        if (io.end - io.start < n) flush_input(io);
+    }
+
+    static inline void put(stream& io, u8 c) {
+        io.buf[io.end ++] = c;
+        if (&io == &io_for_fd(BASIL_STDOUT_FD) && c == '\n') flush_output(io);
+    }
+
+    static inline void write_uint(stream& io, u64 u) {
+        if (!u) return put(io, '0');
+        int c = 0, d = 0;
+        u64 p = 1;
+        while (p < u) p *= 10, ++ c;
+        d = c;
+        while (u) {
+            io.buf[io.end + c] = '0' + u % 10; 
+            u /= 10;
+            -- c;
+        }
+        io.end += d + 1;
+    }
+
+    static inline void write_int(stream& io, i64 i) {
+        if (i < 0) put(io, '-'), i = -i;
+        write_uint(io, i); 
+    }
+
+    void write(stream& io, const char* str, u32 n) {
+        push_if_necessary(io, (n + 63) / 64 * 64);
+        if (&io == &io_for_fd(BASIL_STDOUT_FD)) for (u32 i = 0; i < n; i ++) {
+            io.buf[io.end ++] = str[i];
+            if (str[i] == '\n') flush_output(io);
+        }
+        else memcpy(io.buf + io.end, str, n);
+    }
+
+    void write(stream& io, const char& c) {
+        push_if_necessary(io);
+        put(io, c);
+    }
+
+    void write(stream& io, const u8& c) {
+        push_if_necessary(io);
+        put(io, c);
+    }
+
+    void write(stream& io, const u16& u) {
+        push_if_necessary(io);
+        write_uint(io, u);
+    }
+
+    void write(stream& io, const u32& u) {
+        push_if_necessary(io);
+        write_uint(io, u);
+    }
+
+    void write(stream& io, const u64& u) {
+        push_if_necessary(io);
+        write_uint(io, u);
+    }
+
+    void write(stream& io, const i8& c) {
+        push_if_necessary(io);
+        put(io, c);
+    }
+
+    void write(stream& io, const i16& i) {
+        push_if_necessary(io);
+        write_int(io, i);
+    }
+
+    void write(stream& io, const i32& i) {
+        push_if_necessary(io);
+        write_int(io, i);
+    }
+
+    void write(stream& io, const i64& i) {
+        push_if_necessary(io);
+        write_int(io, i);
+    }
+
+    bool isdigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    u64 read_uint(stream& io) {
+        u64 acc = 0;
+        u8 i = 0;
+        while (isdigit(io.buf[io.start]) && i < 18) {
+            acc *= 10;
+            acc += io.buf[io.start] - '0';
+            i ++;
+            io.start ++;
+        }
+        return acc;
+    }
+
+    i64 read_int(stream& io) {
+        i64 i = 1;
+        if (io.buf[io.start] == '-') i = -1;
+        return i * read_uint(io);
+    }
+
+    void read(stream& io, char* str, u32 n) {
+        while (n >= 4096) {
+            pull_if_necessary(io, (n + 63) / 64 * 64);
+            memcpy(str, io.buf + io.start, n);
+            n -= 4096;
+        }
         pull_if_necessary(io, (n + 63) / 64 * 64);
         memcpy(str, io.buf + io.start, n);
-        n -= 4096;
     }
-    pull_if_necessary(io, (n + 63) / 64 * 64);
-    memcpy(str, io.buf + io.start, n);
-}
 
-void read(stream& io, u8& c) {
-    pull_if_necessary(io);
-    c = io.buf[io.start ++];
-}
+    void read(stream& io, u8& c) {
+        pull_if_necessary(io);
+        c = io.buf[io.start ++];
+    }
 
-void read(stream& io, u16& u) {
-    pull_if_necessary(io);
-    u = read_uint(io);
-}
+    void read(stream& io, u16& u) {
+        pull_if_necessary(io);
+        u = read_uint(io);
+    }
 
-void read(stream& io, u32& u) {
-    pull_if_necessary(io);
-    u = read_uint(io);
-}
+    void read(stream& io, u32& u) {
+        pull_if_necessary(io);
+        u = read_uint(io);
+    }
 
-void read(stream& io, u64& u) {
-    pull_if_necessary(io);
-    u = read_uint(io);
-}
+    void read(stream& io, u64& u) {
+        pull_if_necessary(io);
+        u = read_uint(io);
+    }
 
-void read(stream& io, i8& c) {
-    pull_if_necessary(io);
-    c = io.buf[io.start ++];
-}
+    void read(stream& io, i8& c) {
+        pull_if_necessary(io);
+        c = io.buf[io.start ++];
+    }
 
-void read(stream& io, i16& i) {
-    pull_if_necessary(io);
-    i = read_int(io);
-}
+    void read(stream& io, i16& i) {
+        pull_if_necessary(io);
+        i = read_int(io);
+    }
 
-void read(stream& io, i32& i) {
-    pull_if_necessary(io);
-    i = read_int(io);
-}
+    void read(stream& io, i32& i) {
+        pull_if_necessary(io);
+        i = read_int(io);
+    }
 
-void read(stream& io, i64& i) {
-    pull_if_necessary(io);
-    i = read_int(io);
-}
+    void read(stream& io, i64& i) {
+        pull_if_necessary(io);
+        i = read_int(io);
+    }
 
-void flush(stream& io) {
-    flush_output(io);
-}
+    void flush(stream& io) {
+        flush_output(io);
+    }
 
-void write(stream& io) {}
-void read(stream& io) {}
+    void write(stream& io) {}
+    void read(stream& io) {}
+}

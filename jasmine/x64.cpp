@@ -1286,6 +1286,13 @@ namespace jasmine::x64 {
         target->code().write<u8>(0x99);
     }
 
+    void cqo() {
+        verify_buffer();
+
+        target->code().write<u8>(0x48);
+        target->code().write<u8>(0x99);
+    }
+
     void ret() {
         verify_buffer();
 

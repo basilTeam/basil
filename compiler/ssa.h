@@ -78,7 +78,7 @@ namespace basil {
         IRParam& operator=(const IRParam& other);
 
         // Convert this parameter to a low-level Jasmine representation.
-        jasmine::Param emit(Context& ctx) const;
+        jasmine::Param emit(IRFunction& func, Context& ctx) const;
 
         // Writes a textual representation of this parameter to the provided
         // output stream.
@@ -110,6 +110,7 @@ namespace basil {
         // Removes all instructions from this block that pass the given predicate.
         template<typename Func>
         void remove_if(const Func& pred) {
+            if (insns.size() == 0) return;
             auto* write = &insns.front();
             for (const rc<IRInsn>& insn : insns) {
                 *write = insn;
@@ -136,6 +137,12 @@ namespace basil {
 
     bool operator==(const VarInfo& a, const VarInfo& b);
 
+    struct DataCallback {
+        optional<jasmine::Symbol> label;
+        u64 val;
+        void(*callback)(u64 lit);
+    };
+
     // Represents a single Basil procedure. Functions contain graphs of basic blocks,
     // which themselves contain instruction sequences. 
     struct IRFunction {
@@ -152,6 +159,7 @@ namespace basil {
         vector<rc<IRBlock>> blocks;
         vector<rc<IRBlock>> block_layout;
         rc<IRBlock> entry, exit, active_block;
+        vector<DataCallback> callbacks;
 
         // Tracks which passes have been done over this function.
         bitset passes;

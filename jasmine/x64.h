@@ -263,6 +263,7 @@ namespace jasmine::x64 {
     void pop(const Arg& src, Size size = AUTO);
     void lea(const Arg& dest, const Arg& src, Size size = AUTO);
     void cdq();
+    void cqo();
     void ret();
     void syscall();
     void label(jasmine::Symbol symbol, ObjectSection section);

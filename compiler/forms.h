@@ -339,6 +339,9 @@ namespace basil {
     // Constructs a compound form from the provided subform mapping information.
     // Compound forms are not applicable, so no associativity or precedence is necessary.
     rc<Form> f_compound(const map<Value, rc<Form>>& members);
+
+    // Applicative alternative to Form::make_macro().
+    rc<Form> f_as_macro(rc<Form> form);
 }
 
 void write(stream& io, const basil::Param& param);

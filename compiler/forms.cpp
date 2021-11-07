@@ -498,6 +498,11 @@ namespace basil {
         return form;
     }
 
+    rc<Form> f_as_macro(rc<Form> form) {
+        form->make_macro();
+        return form;
+    }
+
     const char* FK_NAMES[NUM_FORM_KINDS] = {
         "term",
         "callable",

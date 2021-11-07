@@ -18,11 +18,13 @@
 #include "stdlib.h"
 #include "time.h"
 #include "jasmine/jobj.h"
+#include "runtime/sys.h"
 #include "runtime/core.h"
 
 namespace basil {
     void init() {
         init_types_and_symbols();
+        sys::init_io();
     }
 
     void deinit() {
@@ -31,7 +33,17 @@ namespace basil {
     }
     
     void init_rt(jasmine::Object& obj) {
-        // obj.define_native(jasmine::global("print_i"), (void*)print_i);
+        obj.define_native(jasmine::global("write_N6Streamii"), (void*)write_N6Streamii);
+        obj.define_native(jasmine::global("write_N6Streamif"), (void*)write_N6Streamif);
+        obj.define_native(jasmine::global("write_N6Streamid"), (void*)write_N6Streamid);
+        obj.define_native(jasmine::global("write_N6Streamic"), (void*)write_N6Streamic);
+        obj.define_native(jasmine::global("write_N6Streamib"), (void*)write_N6Streamib);
+        obj.define_native(jasmine::global("write_N6Streamis"), (void*)write_N6Streamis);
+        obj.define_native(jasmine::global("write_N6Streamiv"), (void*)write_N6Streamiv);
+        obj.define_native(jasmine::global("init_v"), (void*)init_v);
+        obj.define_native(jasmine::global("exit_i"), (void*)exit_i);
+        obj.define_native(jasmine::global("open_si"), (void*)open_si);
+        obj.define_native(jasmine::global("close_N6Streami"), (void*)close_N6Streami);
     }
 
     static bool repl_mode = false;
@@ -165,11 +177,22 @@ namespace basil {
         rc<IRFunction> main_ir = ref<IRFunction>(symbol_from(".basil_main"), t_func(T_VOID, T_INT));
         main_ir->finish(T_INT, main->gen_ssa(env, main_ir));
 
+        rc<IRFunction> entry = ref<IRFunction>(symbol_from("_start"), t_func(T_VOID, T_VOID));
+        entry->add_insn(ir_call(entry, t_func(T_VOID, T_VOID), 
+            ir_label(symbol_from("init_v")), vector_of<IRParam>()));
+        IRParam ret = entry->add_insn(ir_call(entry, t_func(T_VOID, T_INT), 
+            ir_label(symbol_from(".basil_main")), vector_of<IRParam>()));
+        entry->add_insn(ir_call(entry, t_func(T_INT, T_VOID),
+            ir_label(symbol_from("exit_i")), vector_of<IRParam>(ret)));
+        entry->finish(T_VOID, ir_int(0));
+
         map<Symbol, rc<IRFunction>> ir_functions;
         for (auto& [k, v] : functions) {
             v->gen_ssa(root_env(), main_ir);
             if (v->kind() == AST_FUNCTION) ir_functions[k] = get_ssa_function(v);
         }
+
+        ir_functions[symbol_from("_start")] = entry;
 
         if (error_count()) {
             print_errors(_stdout, nullptr);
@@ -379,7 +402,8 @@ namespace basil {
         else return false;
     }
 
-    void write_asm(bytebuf buf, stream& io) {
+    void write_asm(void* base, bytebuf buf, stream& io) {
+        writeln(io, BOLDCYAN, "#", u64(base), RESET, ":");
         while (buf.size()) {
             u8 byte = buf.read();
             u8 upper = byte >> 4, lower = byte & 15;
@@ -474,7 +498,8 @@ namespace basil {
             // native.writeELF("out.o");
             init_rt(native);
             native.load();
-            // write_asm(native.code(), _stdout);
+            // write_asm(native.get_loaded(jasmine::OS_CODE), native.code(), _stdout);
+            // write_asm(native.get_loaded(jasmine::OS_DATA), native.data(), _stdout);
             auto main = (i64(*)())native.find(jasmine::global(".basil_main"));
             i64 main_result = main();
             if (ast->type(global) != T_VOID) {
@@ -504,9 +529,11 @@ namespace basil {
         rc<jasmine::Object> native = native_from_section(obj->sections[*obj->main_section]);
         init_rt(*native);
         native->load();
-        // write_asm(native->code(), _stdout);
+        // write_asm(native->get_loaded(jasmine::OS_CODE), native->code(), _stdout);
+        // write_asm(native->get_loaded(jasmine::OS_DATA), native->data(), _stdout);
         auto main = (i64(*)())native->find(jasmine::global(".basil_main"));
         main();
+        exit(0);
         // println("= ", BOLD, ITALICBLUE, main(), RESET);
     }
 
@@ -560,7 +587,7 @@ namespace basil {
             case NT_EXECUTABLE: {
                 ustring obj = compute_object_name(filename, OBJ_FILE_EXT);
                 native->writeObj(obj.raw());
-                ustring cmd = format<ustring>("gcc -nostdlib ", obj, " -Wl,-e.basil_main -o ", compute_object_name(obj.raw(), ""));
+                ustring cmd = format<ustring>("gcc -nostdlib ", obj, " -o ", compute_object_name(obj.raw(), ""));
                 for (const char* arg : args) cmd += " ", cmd += arg; // add linker args
                 // println(cmd);
                 system(cmd.raw());

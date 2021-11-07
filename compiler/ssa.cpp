@@ -34,7 +34,7 @@ namespace basil {
             case IK_FLOAT: data.f32 = other.data.f32; break;
             case IK_DOUBLE: data.f64 = other.data.f64; break;
             case IK_BOOL: data.b = other.data.b; break;
-            case IK_STRING: data.string = other.data.string; break;
+            case IK_STRING: new (&data.string) ustring(other.data.string); break;
             case IK_SYMBOL: data.sym = other.data.sym; break;
             case IK_TYPE: data.type = other.data.type; break;
             case IK_CHAR: data.ch = other.data.ch; break;
@@ -79,16 +79,48 @@ namespace basil {
             case IK_FLOAT: return write(io, data.f32);
             case IK_DOUBLE: return write(io, data.f64);
             case IK_BOOL: return write(io, data.b);
-            case IK_STRING: return write(io, '"', data.string, '"');
+            case IK_STRING: return write(io, '"', escape(data.string), '"');
             case IK_SYMBOL: return write(io, ':', data.sym);
             case IK_TYPE: return write(io, data.type);
-            case IK_CHAR: return write(io, "'", data.ch, "'");
+            case IK_CHAR: return write(io, "'", escape(ustring() + data.ch), "'");
             case IK_LABEL: return write(io, BOLDYELLOW, data.label, RESET);
             case IK_BLOCK: return write(io, BOLDYELLOW, "BB", data.block, RESET);
         }
     }
 
-    jasmine::Param IRParam::emit(Context& ctx) const {
+    static u32 const_idx = 0;
+
+    void emit_data(IRFunction& func, u64 val, void (*callback)(u64)) {
+        func.callbacks.push({
+            none<jasmine::Symbol>(),
+            val,
+            callback
+        });
+    }
+
+    void emit_data(IRFunction& func, jasmine::Symbol sym, u64 val, void (*callback)(u64)) {
+        func.callbacks.push({
+            some<jasmine::Symbol>(sym),
+            val,
+            callback
+        });
+    }
+
+    jasmine::Symbol emit_data(IRFunction& func, const ustring& s) {
+        ustring label_name = format<ustring>(".CC", const_idx ++);
+        u32 string_length = s.bytes() + 1; // +1 to include the null terminator
+
+        emit_data(func, string_length, [](u64 val) { jasmine::bc::lit32(val); });
+
+        jasmine::Symbol label = jasmine::local((const char*)label_name.raw());
+        for (u32 i = 0; i < string_length; i ++) {
+            if (i == 0) emit_data(func, label, s.raw()[i], [](u64 val) { jasmine::bc::lit8(val); });
+            else emit_data(func, s.raw()[i], [](u64 val) { jasmine::bc::lit8(val); });
+        }
+        return label;
+    }
+
+    jasmine::Param IRParam::emit(IRFunction& func, Context& ctx) const {
         switch (kind) {
             case IK_NONE: return jasmine::bc::imm(0);
             case IK_VAR: return jasmine::bc::r(data.var);
@@ -97,9 +129,9 @@ namespace basil {
             case IK_SYMBOL: return jasmine::bc::imm(data.sym.id);
             case IK_TYPE: return jasmine::bc::imm(data.type.id);
             case IK_CHAR: return jasmine::bc::imm(data.ch.u);
-            case IK_FLOAT: // return write(io, data.f32);
-            case IK_DOUBLE: // return write(io, data.f64);
-            case IK_STRING: // return write(io, '"', data.string, '"');
+            case IK_FLOAT: return jasmine::bc::immfp(data.f32);
+            case IK_DOUBLE: return jasmine::bc::immfp(data.f64);
+            case IK_STRING: return jasmine::bc::l(emit_data(func, data.string));
             case IK_LABEL: return jasmine::bc::l(jasmine::global(string_from(data.label).raw()));
             case IK_BLOCK: // return jasmine::bc::label();
                 panic("Unimplemented IR parameter conversion!");
@@ -210,6 +242,11 @@ namespace basil {
         jasmine::bc::label(jasmine::global(string_from(label).raw()), jasmine::OS_CODE);
         jasmine::bc::frame();
         for (rc<IRBlock> block : block_layout) block->emit(*this, ctx);
+
+        for (const auto& cb : callbacks) {
+            if (cb.label) jasmine::bc::label(*cb.label, jasmine::OS_CODE);
+            cb.callback(cb.val);
+        }
     }
 
     IRParam find_var(rc<IRFunction> func, VarInfo info) {
@@ -381,7 +418,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::add(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::add(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
 
@@ -398,7 +435,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::sub(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::sub(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
 
@@ -415,7 +452,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::mul(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::mul(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
 
@@ -432,7 +469,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::div(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::div(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
 
@@ -449,7 +486,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::rem(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::rem(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
     
@@ -466,7 +503,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::and_(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::and_(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
     
@@ -483,7 +520,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::or_(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::or_(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
 
@@ -500,7 +537,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::xor_(type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            jasmine::bc::xor_(type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
 
@@ -517,7 +554,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::not_(type.repr(ctx), dest->emit(ctx), operand().emit(ctx));
+            jasmine::bc::not_(type.repr(ctx), dest->emit(func, ctx), operand().emit(func, ctx));
         }
     };
 
@@ -555,7 +592,7 @@ namespace basil {
                 jasmine::bc::cg, jasmine::bc::cge,
                 jasmine::bc::ceq, jasmine::bc::cne
             };
-            ops[kind](type.repr(ctx), dest->emit(ctx), left().emit(ctx), right().emit(ctx));
+            ops[kind](type.repr(ctx), dest->emit(func, ctx), left().emit(func, ctx), right().emit(func, ctx));
         }
     };
 
@@ -624,7 +661,7 @@ namespace basil {
             (invert ? jasmine::bc::jeq : jasmine::bc::jne)(
                 jasmine::I8,
                 func.get_block(src[1].data.block)->label(), 
-                src[0].emit(ctx), jasmine::bc::imm(0)
+                src[0].emit(func, ctx), jasmine::bc::imm(0)
             );
         }
     };
@@ -647,7 +684,7 @@ namespace basil {
 
         void emit(IRFunction& func, Context& ctx) const override {
             jasmine::bc::jne(jasmine::I8, func.get_block(src[1].data.block)->label(), 
-                src[0].emit(ctx), jasmine::bc::imm(0));
+                src[0].emit(func, ctx), jasmine::bc::imm(0));
             jasmine::bc::jump(func.get_block(src[2].data.block)->label());
         }
     };
@@ -673,16 +710,17 @@ namespace basil {
 
         void format(stream& io) const override {
             write(io, *dest, " = ", src[0]);
-            write_seq(io, src[{1, src.size()}], "(", ", ", ")");
+            if (src.size() == 1) write(io, "()");
+            else write_seq(io, src[{1, src.size()}], "(", ", ", ")");
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::begincall(t_ret(type).repr(ctx), dest->emit(ctx), src[0].emit(ctx));
+            jasmine::bc::begincall(t_ret(type).repr(ctx), dest->emit(func, ctx), src[0].emit(func, ctx));
             Type arg = t_arg(type);
             if (arg.of(K_TUPLE)) for (u32 i = 1; i < src.size(); i ++) {
-                jasmine::bc::arg(t_tuple_at(arg, i - 1).repr(ctx), src[i].emit(ctx));
+                jasmine::bc::arg(t_tuple_at(arg, i - 1).repr(ctx), src[i].emit(func, ctx));
             }
-            else jasmine::bc::arg(arg.repr(ctx), src[1].emit(ctx));
+            else if (arg != T_VOID) jasmine::bc::arg(arg.repr(ctx), src[1].emit(func, ctx));
             jasmine::bc::endcall();
         }
     };
@@ -702,7 +740,7 @@ namespace basil {
 
         void emit(IRFunction& func, Context& ctx) const override {
             // we assume the args are in order
-            jasmine::bc::param(type.repr(ctx), dest->emit(ctx));
+            jasmine::bc::param(type.repr(ctx), dest->emit(func, ctx));
         }
     };
 
@@ -721,7 +759,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::mov(type.repr(ctx), dest->emit(ctx), src[0].emit(ctx));
+            jasmine::bc::mov(type.repr(ctx), dest->emit(func, ctx), src[0].emit(func, ctx));
         }
     }; 
 
@@ -765,7 +803,7 @@ namespace basil {
         }
 
         void emit(IRFunction& func, Context& ctx) const override {
-            jasmine::bc::ret(type.repr(ctx), src[0].emit(ctx));
+            jasmine::bc::ret(type.repr(ctx), src[0].emit(func, ctx));
         }
     };
 
@@ -1027,9 +1065,9 @@ namespace basil {
     }
 
     void linearize_postorder(vector<rc<IRBlock>>& ordering, bitset& visited, const rc<IRBlock>& block) {
+        visited.insert(block->id);
         for (i64 i = i64(block->out.size()) - 1; i >= 0; i --) if (!visited.contains(block->out[i]->id))
             linearize_postorder(ordering, visited, block->out[i]);
-        visited.insert(block->id);
         ordering.push(block);
     }
 
@@ -1061,7 +1099,10 @@ namespace basil {
 
     void cleanup_nops(rc<IRFunction> func) {
         require(func, LINEARIZE_CFG);
+
         for (rc<IRBlock> block : func->blocks) {
+            if (block->insns.size() == 0) continue;
+
             // the only spot a goto could be is at the end of a block
             rc<IRInsn>& insn = block->insns.back();
             if (insn->op == IR_GOTO && func->get_block(insn->src[0].data.block)->ord == block->ord + 1)

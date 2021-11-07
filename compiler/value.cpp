@@ -1300,15 +1300,23 @@ namespace basil {
     Value lower(rc<Env> env, const Value& src) {
         Type t_lowered = t_lower(src.type);
         switch (src.type.kind()) {
-            case K_INT: return v_runtime(src.pos, t_runtime(T_INT), ast_int(src.pos, t_lowered, src.data.i));
-            case K_FLOAT: return v_runtime(src.pos, t_runtime(T_FLOAT), ast_float(src.pos, t_lowered, src.data.f32));
-            case K_DOUBLE: return v_runtime(src.pos, t_runtime(T_DOUBLE), ast_double(src.pos, t_lowered, src.data.f64));
-            case K_SYMBOL: return v_runtime(src.pos, t_runtime(T_SYMBOL), ast_symbol(src.pos, t_lowered, src.data.sym));
-            case K_CHAR: return v_runtime(src.pos, t_runtime(T_CHAR), ast_char(src.pos, t_lowered, src.data.ch));
-            case K_STRING: return v_runtime(src.pos, t_runtime(T_STRING), ast_string(src.pos, t_lowered, src.data.string->data));
-            case K_TYPE: return v_runtime(src.pos, t_runtime(T_TYPE), ast_type(src.pos, t_lowered, src.data.type));
-            case K_VOID: return v_runtime(src.pos, t_runtime(T_VOID), ast_void(src.pos));
-            case K_BOOL: return v_runtime(src.pos, t_runtime(T_BOOL), ast_bool(src.pos, t_lowered, src.data.b));
+            case K_INT: return v_runtime(src.pos, t_runtime(t_lowered), ast_int(src.pos, t_lowered, src.data.i));
+            case K_FLOAT: return v_runtime(src.pos, t_runtime(t_lowered), ast_float(src.pos, t_lowered, src.data.f32));
+            case K_DOUBLE: return v_runtime(src.pos, t_runtime(t_lowered), ast_double(src.pos, t_lowered, src.data.f64));
+            case K_SYMBOL: return v_runtime(src.pos, t_runtime(t_lowered), ast_symbol(src.pos, t_lowered, src.data.sym));
+            case K_CHAR: return v_runtime(src.pos, t_runtime(t_lowered), ast_char(src.pos, t_lowered, src.data.ch));
+            case K_STRING: return v_runtime(src.pos, t_runtime(t_lowered), ast_string(src.pos, t_lowered, src.data.string->data));
+            case K_TYPE: return v_runtime(src.pos, t_runtime(t_lowered), ast_type(src.pos, t_lowered, src.data.type));
+            case K_VOID: return v_runtime(src.pos, t_runtime(t_lowered), ast_void(src.pos));
+            case K_BOOL: return v_runtime(src.pos, t_runtime(t_lowered), ast_bool(src.pos, t_lowered, src.data.b));
+            case K_NAMED: {
+                Value inner = lower(env, src.data.named->value);
+                if (inner.type == T_ERROR) return inner;
+                if (!inner.type.of(K_RUNTIME)) panic("Expected runtime type after lowering, got '", inner.type, "'!");
+                rc<AST> inner_ast = inner.data.rt->ast;
+                inner_ast->t = t_lowered;
+                return v_runtime(src.pos, t_runtime(t_lowered), inner_ast);
+            }
             case K_ERROR:
             case K_RUNTIME: return src;
             default:   

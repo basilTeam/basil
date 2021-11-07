@@ -233,9 +233,9 @@ namespace jasmine {
 
     void Object::load() {
         // TODO: make sure these are contiguous or at least near each other
-        loaded_code = alloc_vmem(codebuf.size());
         loaded_data = alloc_vmem(databuf.size());
         loaded_static = alloc_vmem(staticbuf.size());
+        loaded_code = alloc_vmem(codebuf.size());
 
         u8* writer = (u8*)loaded_code;
         bytebuf copy = codebuf;
@@ -257,8 +257,8 @@ namespace jasmine {
         staticbuf = copy, copy.clear();
 
         protect_exec(loaded_code, codebuf.size());
-        protect_data(loaded_code, databuf.size());
-        protect_static(loaded_code, staticbuf.size());
+        protect_data(loaded_data, databuf.size());
+        protect_static(loaded_static, staticbuf.size());
     }
 
     void Object::write(const char* path) {
@@ -499,7 +499,6 @@ namespace jasmine {
     }
 
     void* Object::find(Symbol symbol) const {
-        if (!loaded_code) return nullptr;
         auto it = defs.find(symbol);
         if (it == defs.end()) return nullptr;
         return (u8*)get_loaded(it->second.section) + it->second.offset;
@@ -883,6 +882,12 @@ namespace jasmine {
     }
 
     void Object::writeELF(FILE* file) {
+        u16 section_indices[4] = { 0, 0, 0, 0 }; // default to zero for all sections
+        u16 section_idx = 4;
+        if (codebuf.size()) section_indices[OS_CODE] = section_idx, section_idx += 2;
+        if (databuf.size()) section_indices[OS_DATA] = section_idx, section_idx += 2;
+        if (staticbuf.size()) section_indices[OS_STATIC] = section_idx, section_idx += 2;
+
         bytebuf elf;
         elf.write((char)0x7f, 'E', 'L', 'F');
         elf.write<u8>(0x02); // ELFCLASS64
@@ -902,14 +907,8 @@ namespace jasmine {
         elf.write<u16>(0); // phentsize (unused)
         elf.write<u16>(0); // phnum (unused)
         elf.write<u16>(0x40); // section header entry size
-        elf.write<u16>(6); // num sections
+        elf.write<u16>(section_idx); // num sections
         elf.write<u16>(1); // section header strings are section 0
-
-        u16 section_indices[4] = { 0, 0, 0, 0 }; // default to zero for all sections
-        u16 section_idx = 4;
-        if (codebuf.size()) section_indices[OS_CODE] = section_idx, section_idx += 2;
-        if (databuf.size()) section_indices[OS_DATA] = section_idx, section_idx += 2;
-        if (staticbuf.size()) section_indices[OS_STATIC] = section_idx, section_idx += 2;
 
         bytebuf strtab, symtab;
         strtab.write('\0');

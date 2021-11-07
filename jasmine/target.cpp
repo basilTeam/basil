@@ -192,6 +192,15 @@ namespace jasmine {
                 case OP_EXT:
                     clobbers.insert(RAX);
                     break;
+                case OP_JEQ:
+                case OP_JNE:
+                case OP_JL:
+                case OP_JLE:
+                case OP_JG:
+                case OP_JGE:
+                    if (insn.params[1].kind == PK_IMM && insn.params[2].kind == PK_IMM)
+                        clobbers.insert(RAX);
+                    break;
                 case OP_CALL: {
                     // clobber return value
                     if (auto reg = target.locate_return_value(insn.type.kind).reg) {

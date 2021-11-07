@@ -25,7 +25,7 @@ void bitset::grow(u32 n) {
     size = new_capacity;
 }
 
-bitset::bitset(): data(&local), size(64), local(0) {}
+bitset::bitset(): data(&local), local(0), size(64) {}
 
 bitset::~bitset() {
     if (data != &local) delete[] data;

@@ -36,7 +36,8 @@ namespace jasmine {
         OP_MOV, OP_XCHG,                            // move and exchange
         OP_TYPE, OP_GLOBAL,                         // top-level definitions
         OP_ROL, OP_ROR,                             // bitwise rotation
-        OP_SYSCALL, OP_LABEL,                       // user intrinsics
+        OP_SYSCALL,                                 // user intrinsics
+        OP_LIT, OP_STAT,                            // constants
         NUM_OPS
     };
 
@@ -156,6 +157,7 @@ namespace jasmine {
         Param gr(Symbol symbol);
         Param gr(const char* name);
         Param imm(i64 i);
+        Param immfp(double d);
         Param m(u64 reg);
         Param m(u64 reg, i64 off);
         Param m(Symbol label);
@@ -254,6 +256,13 @@ namespace jasmine {
         void label(Symbol symbol, ObjectSection section);
         void label(const char* symbol, ObjectSection section);
         void global(Type type, Symbol symbol);
+
+        void lit8(u8 val);
+        void lit16(u16 val);
+        void lit32(u32 val);
+        void lit64(u64 val);
+        void litf32(float f);
+        void litf64(double d);
     }
     
     Insn parse_insn(Context& context, stream& io);

@@ -887,7 +887,7 @@ namespace basil {
 
     Value call(rc<Env> env, Value call_term, Value func, const Value& args_in) {
         if ((perfinfo.current_count() >= perfinfo.max_count || perfinfo.counts.size() >= perfinfo.max_depth)
-            && !perfinfo.is_instantiating() && !perfinfo.is_comptime()) {
+            && !perfinfo.is_instantiating() && !perfinfo.is_comptime() && !v_head(call_term).form->is_macro) {
             return v_error({}); // return error value if current function is too expensive
         }
 
@@ -1099,6 +1099,8 @@ namespace basil {
             Value result;
             rc<InstTable> fn_body = v_resolve_body(*func.data.fn, orig_args); // resolve function body
             perfinfo.begin_call(call_term, fn_body, 1); // user-defined functions are considered more expensive
+            if (t_is_macro(func.type)) is_runtime = false;
+            perfinfo.make_comptime();
             if (!is_runtime) {
                 if (func.type.of(K_RUNTIME)) // check just in case
                     panic("Somehow got runtime function in compile-time function call!");

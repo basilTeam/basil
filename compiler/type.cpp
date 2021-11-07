@@ -56,7 +56,7 @@ namespace basil {
         S_LPAREN, S_RPAREN, S_LSQUARE, S_RSQUARE, S_LBRACE, S_RBRACE, S_NEWLINE, S_BACKSLASH,
         S_PLUS, S_MINUS, S_COLON, S_TIMES, S_QUOTE, S_ARRAY, S_DICT, S_SPLICE, S_AT, S_LIST,
         S_QUESTION, S_ELLIPSIS, S_COMMA, S_ASSIGN, S_PIPE, S_DO, S_CONS, S_WITH, S_CASE_ARROW, S_OF,
-        S_QUASIQUOTE, S_EVAL;
+        S_EVAL, S_STREAM, S_WRITE;
 
     void init_symbols() {
         S_NONE = symbol_from("");
@@ -88,8 +88,9 @@ namespace basil {
         S_WITH = symbol_from("with");
         S_CASE_ARROW = symbol_from("=>");
         S_OF = symbol_from("of");
-        S_QUASIQUOTE = symbol_from("quasiquote");
         S_EVAL = symbol_from("eval");
+        S_STREAM = symbol_from("Stream");
+        S_WRITE = symbol_from("write");
     }
 
     const char* KIND_NAMES[NUM_KINDS] = {

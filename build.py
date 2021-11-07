@@ -136,12 +136,12 @@ if CXXTYPE in {"clang", "gcc", "intel"}:
         "-Wall", "-Wno-unused", "-Wno-comment"
     ]
     if OS == "Linux":
-        CXXFLAGS.append("-DINCLUDE_UTF8_LOOKUP_TABLE")
+        if "librt" not in TARGET: CXXFLAGS.append("-DINCLUDE_UTF8_LOOKUP_TABLE")
         LDFLAGS += ["-Wl,--gc-sections"]
         LDLIBS += ["-lc"]
         if CXXTYPE == "intel": LDLIBS += ["-limf", "-lirc"]
     elif OS == "Darwin":
-        CXXFLAGS.append("-DINCLUDE_UTF8_LOOKUP_TABLE")
+        if "librt" not in TARGET: CXXFLAGS.append("-DINCLUDE_UTF8_LOOKUP_TABLE")
         LDFLAGS += ["-nodefaultlibs", "-Wl,--gc-sections"]
         LDLIBS += ["-lc"]
         if CXXTYPE == "intel": LDLIBS += ["-limf", "-lirc"]
@@ -149,6 +149,8 @@ if CXXTYPE in {"clang", "gcc", "intel"}:
         CXXFLAGS += ["-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-Os", "-DBASIL_RELEASE"]
     elif "debug" in TARGET:
         CXXFLAGS += ["-g3", "-O0"]
+    elif "librt" in TARGET:
+        CXXFLAGS += ["-nostdlib", "-fno-builtin", "-fno-unwind-tables", "-fno-asynchronous-unwind-tables", "-Os", "-DBASIL_RELEASE"]
     if TARGET == "librt-dynamic":
         LDFLAGS.append("-shared")
 elif CXXTYPE == "msvc":
@@ -375,6 +377,7 @@ if TARGET in {"basil-release", "jasmine-release"}:
     TASKS.append(strip_cmd(PRODUCT))
 
 if TARGET == "librt-static":
+    if os.path.exists(PRODUCT): os.remove(PRODUCT)
     TASKS.append(ar_lib_cmd(OBJS.values(), PRODUCT))
 
 if TARGET in {"test"}:

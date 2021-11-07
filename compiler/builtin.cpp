@@ -12,6 +12,8 @@
 #include "eval.h"
 #include "forms.h"
 #include "driver.h"
+#include "runtime/sys.h"
+#include "runtime/core.h"
 
 namespace basil {
     Builtin
@@ -30,7 +32,13 @@ namespace basil {
         UNION_TYPE, NAMED_TYPE, FN_TYPE, REF_TYPE, JUST, TYPE_VAR, // type operators
         TYPEOF, IS, ANNOTATE, IS_SUBTYPE,
         ASSIGN, // mutation
-        PRINT, PRINTLN, WRITE, WRITELN, // IO
+        
+        PRINT, PRINTLN, WRITELN, WRITE_INT, WRITE_FLOAT, WRITE_DOUBLE, WRITE_STRING, WRITE_CHAR, // IO
+        WRITE_BOOL, WRITE_VOID, // WRITE_SYMBOL, WRITE_TYPE, 
+        OPEN, CLOSE,
+
+        EXIT, // other syscalls
+
         DEBUG; // debug
 
     bool builtins_inited = false;
@@ -830,7 +838,7 @@ namespace basil {
 
         vector<Value> values;
         for (Value t : iter_list(v)) {
-            if (t.type.of(K_LIST) && v_head(t).form->is_macro) { // macro calls
+            if (t.type.of(K_LIST) && v_head(t).form && v_head(t).form->is_macro) { // macro calls
                 Value result = eval(env, t); // eval this call
                 if (!result.type.of(K_LIST)) {
                     err(v.pos, "Expected call to macro '", v_head(t), "' to return a list value, but ",
@@ -1266,6 +1274,8 @@ namespace basil {
                         if (lowered_init.type == T_ERROR) return v_error({}); // propagate errors
                         defs.push(ast_def(v.pos, k, lowered_init.data.rt->ast));
                     }
+
+                    cond_eval = lower(env, eval(env, cond)); // Re-evaluate cond now that we have lowered variables.
 
                     Source::Pos pos = span(cond_eval.pos, body_eval.pos);
                     defs.push(ast_while(pos, cond_eval.data.rt->ast, body_eval.data.rt->ast));
@@ -1840,43 +1850,193 @@ namespace basil {
                 return ast_assign(args.pos, ASSIGN.type, *lhs_ast, v_at(args, 1).data.rt->ast);
             }
         };
-        PRINT = {
-            t_func(T_ANY, T_VOID),
-            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("value")),
-            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL | BF_PRESERVING,
+        WRITE_INT = {
+            t_func(t_tuple(t_named(S_STREAM, T_INT), T_INT), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("stream"), p_var("value")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
-                for (const Value& v : iter_list(args))
-                    if (v.type == T_STRING) print(v.data.string->data);
-                    else print(v);
+                write_N6Streamii(v_at(args, 0).data.named->value.data.i, v_at(args, 1).data.i);
                 return v_void({});
             },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
-                auto nodes = vector_of<rc<AST>>(
-                    ast_call(call_term.pos, 
-                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), symbol_from("print"), true),
-                        vector_of<rc<AST>>(args.data.rt->ast))
-                );
-                return ast_do(call_term.pos, nodes);
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), 
+                            symbol_from("write"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
             }
         };
-        PRINTLN = {
-            t_func(T_ANY, T_VOID),
-            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("value")),
-            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL | BF_PRESERVING,
+        WRITE_FLOAT = {
+            t_func(t_tuple(t_named(S_STREAM, T_INT), T_FLOAT), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("stream"), p_var("value")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
             [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
-                for (const Value& v : iter_list(args))
-                    if (v.type == T_STRING) print(v.data.string->data);
-                    else print(v);
-                println("");
+                write_N6Streamif(v_at(args, 0).data.named->value.data.i, v_at(args, 1).data.f32);
                 return v_void({});
             },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
-                auto nodes = vector_of<rc<AST>>(
-                    ast_call(call_term.pos, 
-                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), symbol_from("println"), true),
-                        vector_of<rc<AST>>(args.data.rt->ast))
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), 
+                            symbol_from("write"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
+            }
+        };
+        WRITE_DOUBLE = {
+            t_func(t_tuple(t_named(S_STREAM, T_INT), T_DOUBLE), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("stream"), p_var("value")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                write_N6Streamid(v_at(args, 0).data.named->value.data.i, v_at(args, 1).data.f64);
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), 
+                            symbol_from("write"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
+            }
+        };
+        WRITE_CHAR = {
+            t_func(t_tuple(t_named(S_STREAM, T_INT), T_CHAR), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("stream"), p_var("value")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                write_N6Streamic(v_at(args, 0).data.named->value.data.i, v_at(args, 1).data.ch);
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), 
+                            symbol_from("write"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
+            }
+        };
+        WRITE_BOOL = {
+            t_func(t_tuple(t_named(S_STREAM, T_INT), T_BOOL), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("stream"), p_var("value")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                write_N6Streamib(v_at(args, 0).data.named->value.data.i, v_at(args, 1).data.b);
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), 
+                            symbol_from("write"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
+            }
+        };
+        WRITE_STRING = {
+            t_func(t_tuple(t_named(S_STREAM, T_INT), T_STRING), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("stream"), p_var("value")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                write_N6Streamis(v_at(args, 0).data.named->value.data.i, (const char*)v_at(args, 1).data.string.raw());
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), 
+                            symbol_from("write"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
+            }
+        };
+        WRITE_VOID = {
+            t_func(t_tuple(t_named(S_STREAM, T_INT), T_VOID), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("stream"), p_var("value")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                write_N6Streamiv(v_at(args, 0).data.named->value.data.i, 0);
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), T_VOID), 
+                            symbol_from("write"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
+            }
+        };
+        WRITELN = {
+            t_macro(t_tuple(T_ANY, T_ANY), T_VOID),
+            f_as_macro(f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_quoted("stream"), p_quoted("value"))),
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_list(call_term.pos, t_list(T_ANY),
+                    v_list(call_term.pos, t_list(T_ANY), v_symbol(call_term.pos, S_WRITE), v_at(args, 0), v_at(args, 1)),
+                    v_list(call_term.pos, t_list(T_ANY), v_symbol(call_term.pos, S_WRITE), v_at(args, 0), v_char(call_term.pos, '\n'))
                 );
-                return ast_do(call_term.pos, nodes);
+            },
+            nullptr
+        };
+        PRINT = {
+            t_macro(T_ANY, T_VOID),
+            f_as_macro(f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_quoted("value"))),
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
+                return v_list(call_term.pos, t_list(T_ANY),
+                    v_list(call_term.pos, t_list(T_ANY), v_symbol(call_term.pos, S_WRITE), 
+                        v_symbol(call_term.pos, symbol_from("stdout")), arg)
+                );
+            },
+            nullptr
+        };
+        PRINTLN = {
+            t_macro(T_ANY, T_VOID),
+            f_as_macro(f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_quoted("value"))),
+            BF_COMPTIME,
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
+                return v_list(call_term.pos, t_list(T_ANY),
+                    v_list(call_term.pos, t_list(T_ANY), v_symbol(call_term.pos, S_WRITE), 
+                        v_symbol(call_term.pos, symbol_from("stdout")), arg),
+                    v_list(call_term.pos, t_list(T_ANY), v_symbol(call_term.pos, S_WRITE), 
+                        v_symbol(call_term.pos, symbol_from("stdout")), v_char(call_term.pos, '\n'))
+                );
+            },
+            nullptr
+        };
+        OPEN = {
+            t_func(t_tuple(T_STRING, T_INT), t_named(S_STREAM, T_INT)),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("path"), p_var("mode")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_named(call_term.pos, t_named(S_STREAM, T_INT), 
+                    v_int(call_term.pos, 
+                    open_si((const char*)v_at(args, 0).data.string->data.raw(), v_at(args, 1).data.i)));
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(args.type), t_named(S_STREAM, T_INT)), 
+                            symbol_from("open"), true), 
+                            vector_of<rc<AST>>(v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast));
+            }
+        };
+        CLOSE = {
+            t_func(t_named(S_STREAM, T_INT), T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("file")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
+                close_N6Streami(arg.data.named->value.data.i);
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(arg.type), T_VOID), 
+                            symbol_from("close"), true), 
+                            vector_of<rc<AST>>(arg.data.rt->ast));
+            }
+        };
+        EXIT = {
+            t_func(T_INT, T_VOID),
+            f_callable(PREC_DEFAULT, ASSOC_RIGHT, P_SELF, p_var("code")),
+            BF_COMPTIME | BF_RUNTIME | BF_STATEFUL,
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> Value {
+                exit_i(arg.data.i);
+                return v_void({});
+            },
+            [](rc<Env> env, const Value& call_term, const Value& arg) -> rc<AST> {
+                return ast_call(call_term.pos, 
+                        ast_func_stub(call_term.pos, t_func(t_runtime_base(arg.type), T_VOID), 
+                            symbol_from("exit"), true), 
+                            vector_of<rc<AST>>(arg.data.rt->ast));
             }
         };
         DEBUG = {
@@ -1969,8 +2129,16 @@ namespace basil {
         env->def(symbol_from("."), v_func(DOT));
         env->def(symbol_from(":>"), v_func(IS_SUBTYPE));
         env->def(symbol_from("="), v_func(ASSIGN));
+        env->def(symbol_from("write"), v_intersect(
+            &WRITE_INT, &WRITE_FLOAT, &WRITE_DOUBLE, &WRITE_CHAR, 
+            &WRITE_BOOL, &WRITE_STRING, &WRITE_VOID
+        ));
+        env->def(symbol_from("writeln"), v_func(WRITELN));
         env->def(symbol_from("print"), v_func(PRINT));
         env->def(symbol_from("println"), v_func(PRINTLN));
+        env->def(symbol_from("open"), v_func(OPEN));
+        env->def(symbol_from("close"), v_func(CLOSE));
+        env->def(symbol_from("exit"), v_func(EXIT));
 
         // type primitives
         env->def(symbol_from("Int"), v_type({}, T_INT));
@@ -1989,6 +2157,11 @@ namespace basil {
         env->def(symbol_from("true"), v_bool({}, true));
         env->def(symbol_from("false"), v_bool({}, false));
         env->def(symbol_from("π"), v_double({}, 3.141592653589793238462643383279502884197169399375105820974944592307));
+        env->def(symbol_from("stdin"), v_named({}, t_named(S_STREAM, T_INT), v_int({}, BASIL_STDIN_FD)));
+        env->def(symbol_from("stdout"), v_named({}, t_named(S_STREAM, T_INT), v_int({}, BASIL_STDOUT_FD)));
+        env->def(symbol_from("stderr"), v_named({}, t_named(S_STREAM, T_INT), v_int({}, BASIL_STDERR_FD)));
+        env->def(symbol_from("writeonly"), v_int({}, BASIL_WRITE | BASIL_READ));
+        env->def(symbol_from("readonly"), v_int({}, BASIL_READ));
 
         for (const auto& [k, v] : env->values) name_builtin(k, v);
     }

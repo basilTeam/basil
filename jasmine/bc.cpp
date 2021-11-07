@@ -954,7 +954,9 @@ namespace jasmine {
         unary_op(OP_GLOBAL), 
         ternary_op(OP_ROL),      
         ternary_op(OP_ROR), 
-        call_op(OP_SYSCALL)
+        call_op(OP_SYSCALL), 
+        unary_op(OP_LIT),
+        unary_op(OP_STAT)
     };
 
     map<string, Opcode> OPCODE_TABLE = map_of<string, Opcode>(
@@ -1002,7 +1004,9 @@ namespace jasmine {
         string("global"), OP_GLOBAL,
         string("rol"), OP_ROL,
         string("ror"), OP_ROR,
-        string("syscall"), OP_SYSCALL
+        string("syscall"), OP_SYSCALL,
+        string("lit"), OP_LIT,
+        string("stat"), OP_STAT
     );
 
     string OPCODE_NAMES[] = {
@@ -1019,7 +1023,8 @@ namespace jasmine {
         "mov", "xchg",
         "type", "global",
         "rol", "ror",
-        "syscall"
+        "syscall", 
+        "lit", "stat"
     };
 
     Insn parse_insn(Context& context, stream& io) {
@@ -1172,6 +1177,13 @@ namespace jasmine {
             Param p;
             p.kind = PK_IMM;
             p.data.imm = Imm{i};
+            return p;
+        }
+
+        Param immfp(double d) {
+            Param p;
+            p.kind = PK_IMM;
+            p.data.imm = Imm{*(i64*)&d};
             return p;
         }
 
@@ -1561,6 +1573,38 @@ namespace jasmine {
             verify_buffer();
             // TODO: implement global registers
         }
+
+        void lit(Param imm, Type type) {
+            Insn insn;
+            insn.opcode = OP_LIT;
+            insn.type = type;
+            insn.params.push(imm);
+            assemble_insn(*ctx, *obj, insn);
+        }
+        
+        void lit8(u8 val) {
+            lit(imm(val), U8);
+        }
+
+        void lit16(u16 val) {
+            lit(imm(val), U16);
+        }
+
+        void lit32(u32 val) {
+            lit(imm(val), U32);
+        }
+
+        void lit64(u64 val) {
+            lit(imm(val), U64);
+        }
+
+        void litf32(float f) {
+            lit(immfp(f), F32);
+        }
+
+        void litf64(double d) {
+            lit(immfp(d), F64);
+        }
     }
 
     LiveRange::LiveRange() {}
@@ -1608,7 +1652,7 @@ namespace jasmine {
                     fn->first = i, fn->last = i;
                 }
             }
-            else if (insns[i].opcode == OP_RET && fn) { // ret
+            else if ((insns[i].opcode == OP_RET || insns[i].opcode == OP_LIT) && fn) { // ret or data
                 fn->last = i;
             }
         }
@@ -1763,7 +1807,7 @@ namespace jasmine {
             for (u64 i = function.first; i <= function.last; i ++) {
                 for (auto& [r, i] : dom_assign[i - function.first]) {
                     auto it = canonical.find(i);
-                    if (it != canonical.end()) i = it->second, changed = true;
+                    if (it != canonical.end() && it->second < i) i = it->second, changed = true;
                 }
             }
         }
@@ -1827,7 +1871,7 @@ namespace jasmine {
         }
         for (const auto& [_, range] : ranges) function.ranges.push(range);
         for (LiveRange& r : function.ranges) for (const auto& in : r.intervals) {
-            for (i64 i = in.first + 1; i < in.second; i ++) if (insns[i].opcode == OP_CALL) {
+            for (i64 i = in.first + 1; i < in.second; i ++) if (insns[function.first + i].opcode == OP_CALL) {
                 function.preserved_regs[i].push(&r);
             }
         }
@@ -1846,6 +1890,12 @@ namespace jasmine {
         //         print(a, " to ", b);
         //     }
         //     println("");
+        // }
+        // for (u32 i = 0; i < function.preserved_regs.size(); i ++) {
+        //     print("instruction ", i, " has preserved regs: ");
+        //     for (LiveRange* r : function.preserved_regs[i]) print("%", r->reg.id, " ");
+        //     print(" | ");
+        //     print_insn(function.ctx, _stdout, insns[function.first + i]);
         // }
         // println("");
     }
@@ -2086,7 +2136,7 @@ namespace jasmine {
                 }
             }
             case PK_LABEL:
-                return some<x64::Arg>(x64::label32(p.data.label));
+                return some<x64::Arg>(x64::label64(p.data.label));
             default:
                 return none<x64::Arg>();
         }
@@ -2096,6 +2146,15 @@ namespace jasmine {
         using namespace x64;
         if (is_register(dest.type) && dest == src)
             return; // no no-op moves
+        if (is_label(src.type) && is_register(dest.type))
+            return lea(dest, src);
+        if (is_label(src.type)) {
+            push(r64(RAX));
+            lea(r64(RAX), src);
+            mov(dest, r64(RAX));
+            pop(r64(RAX));
+            return;
+        }
         if (is_register(dest.type) && is_immediate(src.type) && immediate_value(src) == 0)
             return xor_(dest, dest); // faster clear register
         if (is_register(dest.type) || is_register(src.type) || is_immediate(src.type))
@@ -2126,12 +2185,15 @@ namespace jasmine {
     }
     
     void generate_x64_insn(Function& f, const Insn& insn, u32 insn_idx, vector<x64::Arg>& args, Object& obj) {
+        ObjectSection section = OS_CODE;
+        if (insn.opcode == OP_LIT) section = OS_DATA;
+        if (insn.opcode == OP_STAT) section = OS_STATIC;
         if (insn.label) {
-            if (obj.code().size() % 8 != 0) {
+            if (section == OS_CODE && obj.get(section).size() % 8 != 0) {
                 u32 ideal = ((obj.code().size() + 7) / 8) * 8;
                 x64::nop(ideal - obj.code().size()); // align branch targets to 8 bytes
             }
-            obj.define(*insn.label, OS_CODE);
+            obj.define(*insn.label, section);
         }
         using namespace x64;
 
@@ -2248,7 +2310,7 @@ namespace jasmine {
                     src = r64(RCX);
                 }
                 move_x64(r64(RAX), args[1]);
-                cdq();
+                cqo();
                 idiv(src);
                 move_x64(args[0], r64(RAX));
                 return;
@@ -2345,8 +2407,15 @@ namespace jasmine {
             case OP_JLE:
             case OP_JG:
             case OP_JGE:
-                cmp(args[1], args[2]);
-                jcc(args[0], conds_x64[insn.opcode - OP_JEQ]);
+                if (is_immediate(args[1].type) && is_immediate(args[2].type)) {
+                    move_x64(r64(RAX), args[1]);
+                    cmp(r64(RAX), args[2]);
+                    jcc(args[0], conds_x64[insn.opcode - OP_JEQ]);
+                }
+                else {
+                    cmp(args[1], args[2]);
+                    jcc(args[0], conds_x64[insn.opcode - OP_JEQ]);
+                }
                 return;
             case OP_NOP:
                 return;
@@ -2356,7 +2425,11 @@ namespace jasmine {
             case OP_CLE:
             case OP_CG:
             case OP_CGE:
-                cmp(args[1], args[2]);
+                if (is_immediate(args[1].type) && is_immediate(args[2].type)) {
+                    move_x64(args[0], args[1]);
+                    cmp(args[0], args[2]);
+                }
+                else cmp(args[1], args[2]);
                 setcc(args[0], conds_x64[insn.opcode - OP_CEQ]);
                 return;
             case OP_JUMP:
@@ -2366,6 +2439,28 @@ namespace jasmine {
                 return move_x64(args[0], args[1]);
             // case OP_XCHG: 
             //     return move_x64(args[0], args[1]);
+            case OP_LIT: {
+                const auto& literal = insn.params[0];
+                switch (insn.type.kind) {
+                    case K_I8: lit8((u8)literal.data.imm.val); break;
+                    case K_I16: lit16((u16)literal.data.imm.val); break;
+                    case K_I32: lit32((u32)literal.data.imm.val); break;
+                    case K_I64: lit64((u64)literal.data.imm.val); break;
+                    case K_PTR: lit64((u64)literal.data.imm.val); break;
+                    case K_U8: lit8(literal.data.imm.val); break;
+                    case K_U16: lit16(literal.data.imm.val); break;
+                    case K_U32: lit32(literal.data.imm.val); break;
+                    case K_U64: lit64(literal.data.imm.val); break;
+                    case K_F32: litf32(*(double*)&literal.data.imm); break;
+                    case K_F64: litf64(*(double*)&literal.data.imm); break;
+                    case K_STRUCT:
+                        fprintf(stderr, "[ERROR] Cannot emit struct literals.\n");
+                        exit(1);
+                        break;
+                    default:
+                        break;
+                }
+            }
             default:
                 return;
         }
@@ -2397,6 +2492,12 @@ namespace jasmine {
         map<u64, LiveRange*> reg_bindings;
         for (u32 i = f.first; i <= f.last; i ++) {
             const Insn& insn = insns[i];
+
+            if (insn.opcode == OP_LIT || insn.opcode == OP_STAT) {
+                generate_x64_insn(f, insn, i, args, obj);
+                continue;
+            }
+
             for (LiveRange* r : f.starts_by_insn[i - f.first]) {
                 reg_bindings[r->reg.id] = r;
             }

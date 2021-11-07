@@ -16,8 +16,8 @@
 // Dynamically-sized bitset data structure.
 struct bitset {
     u64* data;
-    u32 size;
     u64 local;
+    u32 size;
 
 private:
     void grow(u32 n);

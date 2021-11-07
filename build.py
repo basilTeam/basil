@@ -13,9 +13,16 @@
 # Populate a list of supported tools and figure out which one to use. #
 #######################################################################
 
+import sys
+py_version = sys.version_info
+
 def cmd_exists(cmd): # see if a given command is available on the system PATH
-    from distutils.spawn import find_executable
-    return find_executable(cmd) is not None
+    if py_version.major > 3 or py_version.major == 3 and py_version.minor >= 3:
+        import shutil
+        return shutil.which(cmd) is not None
+    else:
+        from distutils.spawn import find_executable
+        return find_executable(cmd) is not None
 
 # First, we'll find out what OS we're on.
 
@@ -67,7 +74,6 @@ for ar in SUPPORTED_ARCHIVERS:
 
 PRODUCTS = ["basil-release", "basil-debug", "librt-static", "librt-dynamic", "jasmine-release", "jasmine-debug", "test"]
 
-import sys
 import argparse
 parser = argparse.ArgumentParser(description="Build an artifact from the Basil or Jasmine projects.")
 parser.add_argument("-v", "--verbose", action='store_true', help="Enable additional output from the build script.")

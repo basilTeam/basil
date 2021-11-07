@@ -354,7 +354,7 @@ namespace sys {
     void write_string(stream& io, const char* str, u32 n) {
         u32 i = 0;
         if (&io == &io_for_fd(BASIL_STDOUT_FD)) for (i = 0; i < n; i ++) {
-            push_if_necessary(io, 4);
+            push_if_necessary(io, 1);
             io.buf[io.end ++] = str[i];
             if (str[i] == '\n') flush_output(io);
         }
@@ -371,11 +371,13 @@ namespace sys {
     void write_char(stream& io, rune c) {
         push_if_necessary(io, 4);
         io.end += utf8_encode(&c, 1, io.buf + io.end, 4);
+        if (&io == &io_for_fd(BASIL_STDOUT_FD) && c == '\n') flush_output(io);
     }
 
     void write_byte(stream& io, u8 c) {
         push_if_necessary(io, 1);
         put(io, c);
+        if (&io == &io_for_fd(BASIL_STDOUT_FD) && c == '\n') flush_output(io);
     }
 
     bool isdigit(char c) {

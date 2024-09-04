@@ -22,7 +22,11 @@ namespace basil {
         IMPORT, MODULE, USE_STRING, USE_MODULE, // modules
         AT_MODULE, AT_TUPLE, AT_ARRAY, DOT, // accessors
         IF, IF_ELSE, WHILE, ARROW, MATCHES, MATCH, // conditionals
-        ADD_INT, ADD_FLOAT, ADD_DOUBLE, SUB, MUL, DIV, REM, // arithmetic
+        ADD_INT, ADD_FLOAT, ADD_DOUBLE, // arithmetic
+        SUB_INT, SUB_FLOAT, SUB_DOUBLE,
+        MUL_INT, MUL_FLOAT, MUL_DOUBLE, 
+        DIV_INT, DIV_FLOAT, DIV_DOUBLE,
+        REM,
         INCR, DECR, // increment/decrement
         LESS, LESS_EQUAL, GREATER, GREATER_EQUAL, EQUAL, NOT_EQUAL, // comparisons
         AND, OR, XOR, NOT, // logic
@@ -1392,7 +1396,7 @@ namespace basil {
                 return ast_add(args.pos, ADD_DOUBLE.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
             }
         };
-        SUB = {
+        SUB_INT = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_ADD, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
             BF_COMPTIME | BF_RUNTIME,
@@ -1400,10 +1404,32 @@ namespace basil {
                 return v_int({}, v_tuple_at(args, 0).data.i - v_tuple_at(args, 1).data.i);
             },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
-                return ast_sub(args.pos, SUB.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+                return ast_sub(args.pos, SUB_INT.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
             }
         };
-        MUL = {
+        SUB_FLOAT = {
+            t_func(t_tuple(T_FLOAT, T_FLOAT), T_FLOAT), // type
+            f_callable(PREC_ADD, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_float({}, v_tuple_at(args, 0).data.f32 - v_tuple_at(args, 1).data.f32);
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_sub(args.pos, SUB_FLOAT.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+            }
+        };
+        SUB_DOUBLE = {
+            t_func(t_tuple(T_DOUBLE, T_DOUBLE), T_DOUBLE), // type
+            f_callable(PREC_ADD, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_double({}, v_tuple_at(args, 0).data.f64 - v_tuple_at(args, 1).data.f64);
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_sub(args.pos, SUB_DOUBLE.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+            }
+        };
+        MUL_INT = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
             BF_COMPTIME | BF_RUNTIME,
@@ -1411,10 +1437,32 @@ namespace basil {
                 return v_int({}, v_tuple_at(args, 0).data.i * v_tuple_at(args, 1).data.i);
             },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
-                return ast_mul(args.pos, MUL.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+                return ast_mul(args.pos, MUL_INT.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
             }
         };
-        DIV = {
+        MUL_FLOAT = {
+            t_func(t_tuple(T_FLOAT, T_FLOAT), T_FLOAT), // type
+            f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_float({}, v_tuple_at(args, 0).data.f32 * v_tuple_at(args, 1).data.f32);
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_mul(args.pos, MUL_FLOAT.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+            }
+        };
+        MUL_DOUBLE = {
+            t_func(t_tuple(T_DOUBLE, T_DOUBLE), T_DOUBLE), // type
+            f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_double({}, v_tuple_at(args, 0).data.f64 * v_tuple_at(args, 1).data.f64);
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_mul(args.pos, MUL_DOUBLE.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+            }
+        };
+        DIV_INT = {
             t_func(t_tuple(T_INT, T_INT), T_INT), // type
             f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
             BF_COMPTIME | BF_RUNTIME,
@@ -1422,7 +1470,29 @@ namespace basil {
                 return v_int({}, v_tuple_at(args, 0).data.i / v_tuple_at(args, 1).data.i);
             },
             [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
-                return ast_div(args.pos, DIV.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+                return ast_div(args.pos, DIV_INT.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+            }
+        };
+        DIV_FLOAT = {
+            t_func(t_tuple(T_FLOAT, T_FLOAT), T_FLOAT), // type
+            f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_float({}, v_tuple_at(args, 0).data.f32 / v_tuple_at(args, 1).data.f32);
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_div(args.pos, DIV_FLOAT.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
+            }
+        };
+        DIV_DOUBLE = {
+            t_func(t_tuple(T_DOUBLE, T_DOUBLE), T_DOUBLE), // type
+            f_callable(PREC_MUL, ASSOC_LEFT, p_var("lhs"), P_SELF, p_var("rhs")), // form
+            BF_COMPTIME | BF_RUNTIME,
+            [](rc<Env> env, const Value& call_term, const Value& args) -> Value {
+                return v_double({}, v_tuple_at(args, 0).data.f64 / v_tuple_at(args, 1).data.f64);
+            },
+            [](rc<Env> env, const Value& call_term, const Value& args) -> rc<AST> {
+                return ast_div(args.pos, DIV_DOUBLE.type, v_at(args, 0).data.rt->ast, v_at(args, 1).data.rt->ast);
             }
         };
         REM = {
@@ -2092,9 +2162,9 @@ namespace basil {
         env->def(symbol_from("use"), v_intersect(&USE_STRING, &USE_MODULE));
 
         env->def(symbol_from("+"), v_intersect(&ADD_INT, &ADD_FLOAT, &ADD_DOUBLE));
-        env->def(symbol_from("-"), v_func(SUB));
-        env->def(symbol_from("*"), v_func(MUL));
-        env->def(symbol_from("/"), v_func(DIV));
+        env->def(symbol_from("-"), v_intersect(&SUB_INT, &SUB_FLOAT, &SUB_DOUBLE));
+        env->def(symbol_from("*"), v_intersect(&MUL_INT, &MUL_FLOAT, &MUL_DOUBLE));
+        env->def(symbol_from("/"), v_intersect(&DIV_INT, &DIV_FLOAT, &DIV_DOUBLE));
         env->def(symbol_from("%"), v_func(REM));
         // env->def(symbol_from("++"), v_func(INCR));
         // env->def(symbol_from("--"), v_func(DECR));

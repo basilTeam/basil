@@ -1,9 +1,9 @@
-def (unpack x?) do:
+def unpack x? =
     match x with:
         i? : Int => "int!"
         s? : String => "string!"
 
-MyType := (Int | String)
-x := 1 : MyType
+def MyType = (Int | String)
+def x = 1 : MyType
 
-unpack x
+println unpack x
